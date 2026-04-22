@@ -2,6 +2,37 @@
 
 Playlist Surfer is a React/TS research tool for analyzing CSV-based video and channel datasets. Built for the "Amsterdam school" of digital methods, it bridges the gap between distant and close reading through a workflow of repurposed platform traces and human interpretation.
 
+## What you can do
+
+- Import video and channel CSV files
+- Filter, sort, and compare rows quickly
+- Switch between video view and channel view
+- Open dashboards for overview, content, attention, linking, and thumbnails
+- Add notes, tags, and quotes while reviewing data
+- Review links, domains, and channel metadata
+- Save your work and export the project as a zip archive
+
+## Quick start
+
+1. Start the app and import your main video CSV.
+2. Add channel metadata if you have it.
+3. Use the table filters to narrow the dataset.
+4. Switch between **Videos** and **Channels** to inspect the data from different angles.
+5. Open the dashboards to get a quick visual overview.
+6. Add notes, tags, and exclusions as you review.
+7. Export the project when you want to save or share your analysis.
+
+## Typical workflow
+
+A common workflow looks like this:
+
+- import a dataset
+- scan the overview dashboards
+- filter to a subset of interest
+- inspect videos or channels in detail
+- add notes and tags
+- export the project for later reuse
+
 ## An antidote to trust me bro metrics
 
 Misleading impressions from statistical summaries persist longer when they are frictionful to check. Have you ever looked up a faraway country's social structure or climate table (GDP per capita, median age, days with precipitation, and so on) only to be surprised that the feel of the particular place you went to, that little beach town, did not match how you imagined a country with those demographics and climate metrics would look or feel? It is like the contrast between Humboldt and Gauß in Daniel Kehlmann’s (2006) Measuring the World: one ventures out to see it up close, while the other calculates away in his office. Both have a valid perspective, but they see different things, and neither acquires an intuition for the "translations" (Latour 2005) that happen when moving from generating summary statistics to taking a close-up look and back again.
