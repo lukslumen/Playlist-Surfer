@@ -1,0 +1,6 @@
+{
+  "name": "Youtube Data Explorer",
+  "description": "A high-performance, laptop-first CSV explorer for YouTube metadata with DuckDB-Wasm and AG Grid.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
