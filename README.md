@@ -14,7 +14,7 @@ Enter Playlist Surfer, a lightweight browser application for inspecting CSV-base
 
 ### Upcoming
 
-And the best part, for you the reader, is that you can watch our playlists. You can download a ZIP of our full project, get a feel for the data, audit our analysis, build on it further, or repurpose the research tool for your own purposes—and perhaps even find the side hustle that suits you best ;)
+And the best part, for you the reader, is that you can watch our playlists. You can download a ZIP of our full project, get a feel for the data, audit our analysis, build on it further, or repurpose the research tool for your own purposes; and perhaps even find the side hustle that suits you best ;)
 
 ### References
 
