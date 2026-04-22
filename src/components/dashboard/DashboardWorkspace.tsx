@@ -60,6 +60,24 @@ type ThumbnailLayout = {
 const THUMBNAIL_TILE_ASPECT = 16 / 9;
 const DASHBOARD_CANVAS_WIDTH = 1320;
 const DASHBOARD_CANVAS_HEIGHT = Math.round((DASHBOARD_CANVAS_WIDTH * 2) / 3);
+const MIN_DASHBOARD_SCALE = 0.2;
+
+function measureDashboardHeight(contentNode: HTMLDivElement | null, activeTab: DashboardTemplateTab, isFullscreen: boolean): number {
+  // Thumbnails contain a large internal scroll area; using scrollHeight there causes
+  // fit-to-contain to treat the entire scrollable content as visible height and shrink
+  // the dashboard to a narrow strip after fullscreen exit.
+  if (activeTab === 'thumbnails' && !isFullscreen) return DASHBOARD_CANVAS_HEIGHT;
+  if (!contentNode) return DASHBOARD_CANVAS_HEIGHT;
+  const shell = contentNode.querySelector<HTMLElement>('.exactdash-shell');
+
+  const measuredHeight = Math.ceil(Math.max(
+    0,
+    shell?.offsetHeight || 0,
+    contentNode.offsetHeight || 0,
+    shell?.scrollHeight || 0,
+  ));
+  return Math.max(DASHBOARD_CANVAS_HEIGHT, measuredHeight);
+}
 
 function computeThumbnailLayout(availableWidth: number, availableHeight: number, itemCount: number, targetTileWidth: number): ThumbnailLayout {
   const safeWidth = Math.max(240, Math.floor(availableWidth));
@@ -180,22 +198,27 @@ export default function DashboardWorkspace({
   const shouldFillThumbnailViewport = activeTab === 'thumbnails' && isFullscreen;
 
   const recomputeFit = useCallback(() => {
-    if (!workspaceRef.current) return;
-    const rect = workspaceRef.current.getBoundingClientRect();
+    const workspaceNode = workspaceRef.current;
+    if (!workspaceNode) return;
+    const rect = workspaceNode.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
 
+    const unscaledContentHeight = measureDashboardHeight(fitContentRef.current, activeTab, isFullscreen);
     const horizontalPadding = isFullscreen ? 24 : 0;
     const verticalPadding = isFullscreen ? 0 : 0;
     const maxContentWidth = Math.max(320, rect.width - (horizontalPadding * 2));
     const maxContentHeight = Math.max(240, rect.height - (verticalPadding * 2));
-    const nextScale = Math.max(0.2, Math.min(maxContentWidth / DASHBOARD_CANVAS_WIDTH, maxContentHeight / DASHBOARD_CANVAS_HEIGHT));
-    const nextWidth = Math.round(DASHBOARD_CANVAS_WIDTH * nextScale);
-    const nextHeight = Math.round(DASHBOARD_CANVAS_HEIGHT * nextScale);
+    const nextScale = Math.max(
+      MIN_DASHBOARD_SCALE,
+      Math.min(maxContentWidth / DASHBOARD_CANVAS_WIDTH, maxContentHeight / unscaledContentHeight),
+    );
+    const nextWidth = Math.max(1, Math.floor(DASHBOARD_CANVAS_WIDTH * nextScale));
+    const nextHeight = Math.max(1, Math.floor(unscaledContentHeight * nextScale));
 
     setFitScale(nextScale);
     setFitSize({ width: nextWidth, height: nextHeight });
     onDocumentSizeChange?.({ width: nextWidth, height: nextHeight });
-  }, [isFullscreen, onDocumentSizeChange]);
+  }, [activeTab, isFullscreen, onDocumentSizeChange]);
 
   useEffect(() => {
     if (shouldFillThumbnailViewport) return;
@@ -213,7 +236,7 @@ export default function DashboardWorkspace({
       observer.disconnect();
       window.removeEventListener('resize', schedule);
     };
-  }, [recomputeFit, shouldFillThumbnailViewport, snapshot?.calculatedAt, scope]);
+  }, [activeTab, isFullscreen, recomputeFit, scope, shouldFillThumbnailViewport, snapshot?.calculatedAt]);
 
   useEffect(() => {
     if (!shouldFillThumbnailViewport) return;

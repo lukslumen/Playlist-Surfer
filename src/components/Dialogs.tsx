@@ -2360,17 +2360,16 @@ export function DatasetDashboardDialog({
   allChannelIds = [],
   linkingProps,
 }: DatasetDashboardDialogProps) {
-  const [documentSize, setDocumentSize] = useState({ width: 1320, height: 880 });
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-0 backdrop-blur-sm" onMouseDown={onClose}>
       <div
-        className="dialog-shell flex max-h-[calc(100vh-2rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden bg-transparent p-0 shadow-2xl"
+        className="dialog-shell flex h-screen w-screen max-h-screen max-w-screen flex-col overflow-hidden bg-transparent p-0 shadow-2xl"
         onMouseDown={(event) => event.stopPropagation()}
         style={{
-          width: `min(calc(100vw - 2rem), ${Math.ceil(documentSize.width)}px)`,
-          height: `min(calc(100vh - 2rem), ${Math.ceil(documentSize.height)}px)`,
+          width: '100vw',
+          height: '100vh',
         }}
       >
         <DashboardWorkspace
@@ -2392,7 +2391,6 @@ export function DatasetDashboardDialog({
           onZoomIn={onZoomIn}
           onLoadFullThumbnails={onLoadFullThumbnails}
           onLoadFilteredThumbnails={onLoadFilteredThumbnails}
-          onDocumentSizeChange={setDocumentSize}
           onNavigateToVideo={onNavigateToVideo}
           onNavigateToChannel={onNavigateToChannel}
           onApplyContentFilter={onApplyContentFilter}

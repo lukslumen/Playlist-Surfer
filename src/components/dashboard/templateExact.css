@@ -2549,7 +2549,7 @@
 .dashboard-reference-workspace.is-workspace-fullscreen {
   justify-content: center;
   align-items: stretch;
-  background: var(--canvas);
+  background: transparent;
 }
 
 .dashboard-fit-root {
@@ -2590,19 +2590,21 @@
 .dashboard-fit-content .exactdash-shell {
   width: 100%;
   max-width: none;
+  height: auto;
+  min-height: 0;
 }
 
 :root[data-theme='warm-light'] .dashboard-reference-workspace.is-workspace-fullscreen {
-  background: linear-gradient(180deg, #ece2d1, #dfd2bb);
+  background: transparent;
 }
 
 :root[data-theme='pink-pop'] .dashboard-reference-workspace.is-workspace-fullscreen {
-  background: linear-gradient(180deg, #f8dfec, #efcfe0);
+  background: transparent;
 }
 
 .dashboard-reference-workspace:fullscreen {
   padding: 0;
-  background: var(--canvas);
+  background: transparent;
 }
 
 .dashboard-reference-workspace:fullscreen .exactdash-shell {
