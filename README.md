@@ -2,7 +2,7 @@
 
 Playlist Surfer is a React/TS research tool for analyzing CSV-based video and channel datasets. Built for the "Amsterdam school" of digital methods, it bridges the gap between distant and close reading through a workflow of repurposed platform traces and human interpretation.
 
-An antidote to trust me bro metrics
+## An antidote to trust me bro metrics
 
 Misleading impressions from statistical summaries persist longer when they are frictionful to check. Have you ever looked up a faraway country's social structure or climate table (GDP per capita, median age, days with precipitation, and so on) only to be surprised that the feel of the particular place you went to, that little beach town, did not match how you imagined a country with those demographics and climate metrics would look or feel? It is like the contrast between Humboldt and Gauß in Daniel Kehlmann’s (2006) Measuring the World: one ventures out to see it up close, while the other calculates away in his office. Both have a valid perspective, but they see different things, and neither acquires an intuition for the translations (Latour 2005) that happen when moving from generating summary statistics to taking a close-up look and back again.
 
@@ -12,11 +12,11 @@ How about surfing? Platforms like YouTube entice us to surf and get lost in the 
 
 Enter Playlist Surfer, a lightweight browser application for inspecting CSV-based video and channel datasets from YouTube Data Tools (Rieder 2015), filtering them, and assembling collections for digital methods research. It is intended to nudge researchers to move between quantitative distant reading and qualitative close reading: you can filter, sort, annotate, inspect thumbnails and transcripts, jump from aggregate views into subsets, and export the full project state as a reproducible archive containing both machine-generated structure and human interpretation. Conceptually, it is closer to the Amsterdam school of digital methods and to quali-quantitative approaches than to a generic dashboard app: platform-native traces are repurposed for analysis (Rogers 2013), while notes, saved views, and project exports keep the interpretive and procedural chain inspectable (Venturini and Latour 2010).
 
-Upcoming
+### Upcoming
 
 And the best part, for you the reader, is that you can watch our playlists. You can download a ZIP of our full project, get a feel for the data, audit our analysis, build on it further, or repurpose the research tool for your own purposes—and perhaps even find the side hustle that suits you best ;)
 
-References
+### References
 
 *Kehlmann, Daniel. 2006. Measuring the World: A Novel. Translated by Carol Brown Janeway. New York: Pantheon Books.*
 
