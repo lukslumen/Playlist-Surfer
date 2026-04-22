@@ -2553,6 +2553,8 @@
 }
 
 .dashboard-fit-root {
+  position: relative;
+  isolation: isolate;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -2560,6 +2562,20 @@
   justify-content: center;
   align-items: center;
   overflow: hidden;
+}
+
+.dashboard-fit-root::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 85% at 50% 50%, rgba(130, 137, 141, 0.08) 0%, rgba(68, 74, 79, 0.22) 62%, rgba(44, 49, 54, 0.38) 100%),
+    linear-gradient(180deg, rgba(54, 60, 66, 0.46), rgba(37, 42, 47, 0.52));
+  -webkit-backdrop-filter: blur(9px) saturate(92%);
+  backdrop-filter: blur(9px) saturate(92%);
+  transition: opacity 140ms ease;
 }
 
 .dashboard-reference-workspace.is-workspace-popover .dashboard-fit-root {
@@ -2574,6 +2590,7 @@
 
 .dashboard-fit-stage {
   position: relative;
+  z-index: 1;
   width: fit-content;
   max-width: 100%;
   max-height: 100%;
