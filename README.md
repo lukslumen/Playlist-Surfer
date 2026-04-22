@@ -14,19 +14,19 @@ Enter Playlist Surfer, a lightweight browser application for inspecting CSV-base
 
 References
 
-*Kehlmann, Daniel. 2006. Measuring the World: A Novel. Translated by Carol Brown Janeway. New York: Pantheon Books.
+*Kehlmann, Daniel. 2006. Measuring the World: A Novel. Translated by Carol Brown Janeway. New York: Pantheon Books.*
 
-Latour, Bruno. 2005. Reassembling the Social: An Introduction to Actor-Network-Theory. Oxford: Oxford University Press.
+*Latour, Bruno. 2005. Reassembling the Social: An Introduction to Actor-Network-Theory. Oxford: Oxford University Press.*
 
-Matamoros-Fernández, Ariadna, Joanne E. Gray, Louisa Bartolo, Jean Burgess, and Nicolas Suzor. 2021. “What’s ‘Up Next’? Investigating Algorithmic Recommendations on YouTube Across Issues and Over Time.” Media and Communication 9 (4): 234–249. https://doi.org/10.17645/mac.v9i4.4184
+*Matamoros-Fernández, Ariadna, Joanne E. Gray, Louisa Bartolo, Jean Burgess, and Nicolas Suzor. 2021. “What’s ‘Up Next’? Investigating Algorithmic Recommendations on YouTube Across Issues and Over Time.” Media and Communication 9 (4): 234–249. https://doi.org/10.17645/mac.v9i4.4184*
 
-Rieder, Bernhard. 2015. YouTube Data Tools [Software]. Available from ytdt.digitalmethods.net.
+*Rieder, Bernhard. 2015. YouTube Data Tools [Software]. Available from ytdt.digitalmethods.net.*
 
-Rieder, Bernhard, Ariadna Matamoros-Fernández, and Òscar Coromina. 2018. “From Ranking Algorithms to ‘Ranking Cultures’: Investigating the Modulation of Visibility in YouTube Search Results.” Convergence 24 (1): 50–68. https://doi.org/10.1177/1354856517736982
+*Rieder, Bernhard, Ariadna Matamoros-Fernández, and Òscar Coromina. 2018. “From Ranking Algorithms to ‘Ranking Cultures’: Investigating the Modulation of Visibility in YouTube Search Results.” Convergence 24 (1): 50–68. https://doi.org/10.1177/1354856517736982*
 
-Rogers, Richard. 2013. Digital Methods. Cambridge, MA: MIT Press.
+*Rogers, Richard. 2013. Digital Methods. Cambridge, MA: MIT Press.*
 
-Venturini, Tommaso, and Bruno Latour. 2010. “The Social Fabric: Digital Traces and Quali-quantitative Methods.” In Proceedings of Future En Seine 2009, 87–101. Paris: Editions Future en Seine.*
+*Venturini, Tommaso, and Bruno Latour. 2010. “The Social Fabric: Digital Traces and Quali-quantitative Methods.” In Proceedings of Future En Seine 2009, 87–101. Paris: Editions Future en Seine.*
 
 ## Features
 
