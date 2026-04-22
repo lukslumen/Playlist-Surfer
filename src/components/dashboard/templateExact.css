@@ -2571,16 +2571,26 @@
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(120% 85% at 50% 50%, rgba(130, 137, 141, 0.08) 0%, rgba(68, 74, 79, 0.22) 62%, rgba(44, 49, 54, 0.38) 100%),
-    linear-gradient(180deg, rgba(54, 60, 66, 0.46), rgba(37, 42, 47, 0.52));
-  -webkit-backdrop-filter: blur(9px) saturate(92%);
-  backdrop-filter: blur(9px) saturate(92%);
+    radial-gradient(132% 96% at 50% 50%, rgba(150, 160, 168, 0.10) 0%, rgba(66, 73, 80, 0.16) 64%, rgba(28, 34, 40, 0.26) 100%),
+    linear-gradient(180deg, rgba(28, 34, 40, 0.18), rgba(18, 23, 28, 0.24));
+  -webkit-backdrop-filter: blur(8px) saturate(92%);
+  backdrop-filter: blur(8px) saturate(92%);
+  opacity: 1;
   transition: opacity 140ms ease;
 }
 
 .dashboard-reference-workspace.is-workspace-popover .dashboard-fit-root {
   justify-content: center;
   align-items: center;
+}
+
+.dashboard-reference-workspace.is-workspace-popover .dashboard-fit-root::before {
+  /* In dialog mode, let the existing modal backdrop remain dominant. */
+  background:
+    radial-gradient(140% 100% at 50% 50%, rgba(140, 148, 156, 0.04) 0%, rgba(56, 63, 70, 0.08) 72%, rgba(22, 27, 33, 0.12) 100%),
+    linear-gradient(180deg, rgba(18, 23, 28, 0.06), rgba(15, 20, 25, 0.10));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .dashboard-reference-workspace.is-workspace-fullscreen .dashboard-fit-root {
@@ -2632,6 +2642,25 @@
 
 .dashboard-reference-workspace:fullscreen .dashboard-fit-root {
   align-items: flex-start;
+}
+
+.dashboard-reference-workspace:fullscreen .dashboard-fit-root::before,
+.dashboard-reference-workspace.is-workspace-fullscreen .dashboard-fit-root::before {
+  opacity: 1;
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .dashboard-fit-root::before {
+    background:
+      radial-gradient(132% 96% at 50% 50%, rgba(150, 160, 168, 0.12) 0%, rgba(66, 73, 80, 0.24) 64%, rgba(28, 34, 40, 0.36) 100%),
+      linear-gradient(180deg, rgba(28, 34, 40, 0.24), rgba(18, 23, 28, 0.34));
+  }
+
+  .dashboard-reference-workspace.is-workspace-popover .dashboard-fit-root::before {
+    background:
+      radial-gradient(140% 100% at 50% 50%, rgba(140, 148, 156, 0.06) 0%, rgba(56, 63, 70, 0.12) 72%, rgba(22, 27, 33, 0.18) 100%),
+      linear-gradient(180deg, rgba(18, 23, 28, 0.10), rgba(15, 20, 25, 0.16));
+  }
 }
 
 .dashboard-reference-workspace:fullscreen .exactdash-thumbnails-tab {
