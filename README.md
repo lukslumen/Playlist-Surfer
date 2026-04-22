@@ -4,7 +4,8 @@ Playlist Surfer is a React/TS research tool for analyzing CSV-based video and ch
 
 ## What you can do
 
-- Import video and channel CSV files
+- Import video and channel list CSV files, ideally from [Youtube Data Tools](https://ytdt.digitalmethods.net/)
+- Merge with metadata from your own analysis' CSV files, for example generated with [4CAT](https://4cat.digitalmethods.net/create-dataset/)
 - Filter, sort, and compare rows quickly
 - Switch between video view and channel view
 - Open dashboards for overview, content, attention, linking, and thumbnails
