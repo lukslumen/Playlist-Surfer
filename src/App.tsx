@@ -1220,6 +1220,7 @@ export default function App() {
     return persisted.channelVisibleColumns ?? [];
   });
   const [selectedChannelKeys, setSelectedChannelKeys] = useState<string[]>([]);
+  const [gridReadyVersion, setGridReadyVersion] = useState(0);
   const [filterModel, setFilterModel] = useState<ExplorerFilterModel>({});
   const gridApiRef = useRef<GridApi | null>(null);
   const thumbnailLoadTokenRef = useRef(0);
@@ -4708,6 +4709,7 @@ export default function App() {
     requestSelectionScroll('middle');
     clearChannelDrilldownState();
     clearChannelScopedVideoUniverse();
+    setChannelFilterModel({});
     setPendingViewerTarget({ kind: 'channel', channelId, channelName: normalizedChannelName });
     setViewScope('channels');
   }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, requestSelectionScroll]);
@@ -5085,6 +5087,7 @@ ${heading}
   ]);
   const handleGridReady = useCallback((api: GridApi) => {
     gridApiRef.current = api;
+    setGridReadyVersion((current) => current + 1);
   }, []);
 
   useEffect(() => {
@@ -5104,18 +5107,22 @@ ${heading}
 
   useEffect(() => {
     if (viewScope !== 'channels') return;
-    if (!gridApiRef.current || !state.selectedRow) return;
-    const channelKey = String(state.selectedRow?.channel_key || state.selectedRow?.channel_id || state.selectedRow?.channel_name || '');
+    if (!gridApiRef.current) return;
+    const selectedRowKey = resolveChannelRowKey(state.selectedRow);
+    const channelKey = selectedRowKey || selectedChannelKeys[0] || '';
     if (!channelKey) return;
     const node = gridApiRef.current.getRowNode(channelKey);
     if (typeof node?.rowIndex === 'number') {
+      if (!node.isSelected?.()) {
+        gridApiRef.current.deselectAll?.();
+        node.setSelected?.(true, true);
+      }
       if (selectionScrollModeRef.current === 'middle') {
         gridApiRef.current.ensureIndexVisible(node.rowIndex, 'middle');
         selectionScrollModeRef.current = 'none';
       }
-      node.setSelected?.(true, true);
     }
-  }, [state.selectedRow, viewScope]);
+  }, [gridReadyVersion, selectedChannelKeys, state.selectedRow, viewScope]);
 
   const handleDashboardNavigateToVideo = useCallback((videoId: string) => {
     setIsDashboardOpen(false);
