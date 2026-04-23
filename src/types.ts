@@ -275,6 +275,7 @@ export interface DashboardThumbnailCandidate {
   dedupeKey: string;
   title: string;
   sourceUrl: string;
+  candidateUrls: string[];
   rank: number;
 }
 
@@ -284,6 +285,9 @@ export interface DashboardThumbnailCacheEntry {
   title: string;
   rank: number;
   sourceUrl: string;
+  candidateUrls?: string[];
+  activeUrl?: string;
+  fallbackIndex?: number;
   status: 'pending' | 'loaded' | 'failed';
   mimeType?: string;
   byteLength?: number;

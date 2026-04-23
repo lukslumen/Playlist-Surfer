@@ -539,6 +539,7 @@ function buildThumbnailEntriesFromCacheSeed(args: {
     title: string;
     rank: number;
     sourceUrl: string;
+    candidateUrls?: string[];
   }>;
   seedSnapshot?: DashboardThumbnailCacheSnapshot;
 }): DashboardThumbnailCacheSnapshot['entries'] {
@@ -548,13 +549,24 @@ function buildThumbnailEntriesFromCacheSeed(args: {
     if (!seedByDedupe.has(entry.dedupeKey)) seedByDedupe.set(entry.dedupeKey, entry);
   });
   return args.candidates.map((candidate) => {
+    const candidateUrls = Array.from(new Set(
+      (candidate.candidateUrls || [])
+        .map((url) => String(url || '').trim())
+        .filter(Boolean),
+    ));
+    const initialUrl = candidateUrls[0] || candidate.sourceUrl || '';
+    const initialStatus: DashboardThumbnailCacheSnapshot['entries'][number]['status'] = initialUrl ? 'pending' : 'failed';
     const baseEntry = {
       videoId: candidate.videoId,
       dedupeKey: candidate.dedupeKey,
       title: candidate.title,
       rank: candidate.rank,
-      sourceUrl: candidate.sourceUrl,
-      status: 'pending' as const,
+      sourceUrl: initialUrl,
+      candidateUrls,
+      activeUrl: initialUrl,
+      fallbackIndex: 0,
+      status: initialStatus,
+      error: initialUrl ? undefined : 'No valid thumbnail URL',
     };
     const seededEntry = seedByDedupe.get(candidate.dedupeKey);
     if (!seededEntry) return baseEntry;
@@ -570,15 +582,31 @@ function buildThumbnailEntriesFromCacheSeed(args: {
         objectUrl: createObjectUrl(bytes, mimeType),
       };
     }
-    if (seededEntry.status === 'failed') {
+    const seededActiveUrl = String(seededEntry.activeUrl || seededEntry.sourceUrl || '').trim();
+    if (seededEntry.status === 'loaded' && seededActiveUrl) {
+      const activeIndex = candidateUrls.findIndex((url) => url === seededActiveUrl);
       return {
         ...baseEntry,
-        status: 'failed' as const,
-        error: seededEntry.error || 'Failed to load thumbnail',
+        status: 'loaded' as const,
+        sourceUrl: seededActiveUrl,
+        activeUrl: seededActiveUrl,
+        fallbackIndex: activeIndex >= 0 ? activeIndex : 0,
       };
     }
     return baseEntry;
   });
+}
+
+function summarizeThumbnailProgress(entries: DashboardThumbnailCacheSnapshot['entries']) {
+  const total = entries.length;
+  const failed = entries.filter((entry) => entry.status === 'failed').length;
+  const completed = entries.filter((entry) => entry.status !== 'pending').length;
+  return {
+    total,
+    completed,
+    failed,
+    loading: completed < total,
+  };
 }
 
 function revokeThumbnailUrls(snapshot?: DashboardThumbnailCacheSnapshot) {
@@ -1122,6 +1150,7 @@ export default function App() {
   const [isColumnsOpen, setIsColumnsOpen] = useState(false);
   const [isResearchLogOpen, setIsResearchLogOpen] = useState(false);
   const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+  const [isAppFullscreen, setIsAppFullscreen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [dashboardScope, setDashboardScope] = useState<DashboardScope>('full');
   const [dashboardActiveTab, setDashboardActiveTab] = useState<DashboardTemplateTab>('overview');
@@ -1204,6 +1233,28 @@ export default function App() {
   const [isChannelDrilldownFilterActive, setIsChannelDrilldownFilterActive] = useState(false);
   const navigationRestoreInFlightRef = useRef(false);
   const lastNavigationKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const syncFullscreenState = () => setIsAppFullscreen(Boolean(document.fullscreenElement));
+    syncFullscreenState();
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreenState);
+  }, []);
+
+  const handleToggleAppFullscreen = useCallback(() => {
+    const root = document.documentElement;
+    if (!document.fullscreenElement) {
+      if (!root?.requestFullscreen) return;
+      void root.requestFullscreen().catch((error) => {
+        console.warn('[fullscreen] Failed to enter app fullscreen.', error);
+      });
+      return;
+    }
+    if (!document.exitFullscreen) return;
+    void document.exitFullscreen().catch((error) => {
+      console.warn('[fullscreen] Failed to exit app fullscreen.', error);
+    });
+  }, []);
 
   const updateLongTaskProgress = useCallback((progress: LongTaskProgress | null) => {
     flushSync(() => {
@@ -1870,6 +1921,24 @@ export default function App() {
   }, [state.activeViewId, state.savedViews]);
 
   const selectedVideoId = videoSelection.focusVideoId || videoSelection.anchorVideoId || (state.selectedRow ? resolveVideoId(state.selectedRow) : null);
+  const detailVideoId = selectedVideoId;
+  const detailRow = useMemo(() => {
+    if (viewScope !== 'videos' || !detailVideoId) return null;
+    const matchedRow = rows.find((row) => resolveVideoId(row) === detailVideoId);
+    if (matchedRow) return matchedRow;
+    if (state.selectedRow && resolveVideoId(state.selectedRow) === detailVideoId) return state.selectedRow;
+    return null;
+  }, [detailVideoId, rows, state.selectedRow, viewScope]);
+  const selectedChannelDetailRow = useMemo(() => {
+    if (viewScope !== 'channels') return null;
+    const selectedKey = resolveChannelRowKey(state.selectedRow);
+    if (selectedKey) {
+      const matchedByState = filteredChannelRows.find((row) => resolveChannelRowKey(row) === selectedKey);
+      if (matchedByState) return matchedByState;
+    }
+    if (selectedChannelRows.length > 0) return selectedChannelRows[0];
+    return filteredChannelRows[0] || null;
+  }, [filteredChannelRows, selectedChannelRows, state.selectedRow, viewScope]);
   const hasLoadedData = workingSchema.length > 0 && baseRows.length > 0;
   const currentProjectName = useMemo(() => (state.fileName || 'ytde_project').replace(/\.(csv|zip)$/i, ''), [state.fileName]);
 
@@ -4571,7 +4640,31 @@ export default function App() {
   const handleRowSelected = useCallback((row: any | null) => {
     selectionScrollModeRef.current = 'none';
     setState((previous) => ({ ...previous, selectedRow: row }));
-  }, []);
+
+    if (viewScope !== 'videos') return;
+    const rowVideoId = resolveVideoId(row);
+    if (!rowVideoId) return;
+
+    if (videoSelection.mode === 'none') {
+      setVideoSelection({
+        mode: 'explicit',
+        ids: [rowVideoId],
+        anchorVideoId: rowVideoId,
+        focusVideoId: rowVideoId,
+      });
+      return;
+    }
+
+    if (videoSelection.mode === 'explicit' && videoSelection.ids.length <= 1) {
+      if (videoSelection.focusVideoId === rowVideoId && videoSelection.anchorVideoId === rowVideoId && videoSelection.ids[0] === rowVideoId) return;
+      setVideoSelection({
+        mode: 'explicit',
+        ids: [rowVideoId],
+        anchorVideoId: rowVideoId,
+        focusVideoId: rowVideoId,
+      });
+    }
+  }, [videoSelection, viewScope]);
 
   const handleChannelSelectionChange = useCallback((selectedRows: any[]) => {
     const nextKeys = selectedRows.map((row) => resolveChannelRowKey(row)).filter(Boolean);
@@ -5396,7 +5489,7 @@ ${heading}
     setThumbnailZoomIndex((current) => Math.min(THUMBNAIL_ZOOM_STEPS.length - 1, current + 1));
   }, []);
 
-  const loadDashboardThumbnails = useCallback(async (mode: 'full' | 'filtered') => {
+  const loadDashboardThumbnails = useCallback((mode: 'full' | 'filtered') => {
     const primaryScopeKey: string = mode === 'full' ? 'full' : FILTERED_TEMP_THUMBNAIL_SCOPE;
     const sourceRowsForLoad = mode === 'full' ? includedBaseRows : rows;
     const sourceRowCount = sourceRowsForLoad.length;
@@ -5428,20 +5521,15 @@ ${heading}
       candidates,
       seedSnapshot,
     });
-    const initialCompleted = primaryEntries.filter((entry) => entry.status !== 'pending').length;
-    const initialFailed = primaryEntries.filter((entry) => entry.status === 'failed').length;
-    const pendingIndexes = primaryEntries
-      .map((entry, index) => (entry.status === 'pending' ? index : -1))
-      .filter((index) => index >= 0);
-    const token = thumbnailLoadTokenRef.current + 1;
-    thumbnailLoadTokenRef.current = token;
+    const primaryProgress = summarizeThumbnailProgress(primaryEntries);
+    thumbnailLoadTokenRef.current += 1;
     setThumbnailLoadProgress({
       scopeKey: primaryScopeKey as DashboardThumbnailLoadProgress['scopeKey'],
       label: targetScopes[0].label,
-      total: primaryEntries.length,
-      completed: initialCompleted,
-      failed: initialFailed,
-      loading: pendingIndexes.length > 0,
+      total: primaryProgress.total,
+      completed: primaryProgress.completed,
+      failed: primaryProgress.failed,
+      loading: primaryProgress.loading,
     });
 
     setThumbnailCaches((current) => {
@@ -5467,117 +5555,6 @@ ${heading}
       });
       return next;
     });
-
-    if (!primaryEntries.length) {
-      setThumbnailLoadProgress({
-        scopeKey: primaryScopeKey as DashboardThumbnailLoadProgress['scopeKey'],
-        label: targetScopes[0].label,
-        total: 0,
-        completed: 0,
-        failed: 0,
-        loading: false,
-      });
-      return;
-    }
-
-    if (!pendingIndexes.length) {
-      setThumbnailLoadProgress({
-        scopeKey: primaryScopeKey as DashboardThumbnailLoadProgress['scopeKey'],
-        label: targetScopes[0].label,
-        total: primaryEntries.length,
-        completed: primaryEntries.length,
-        failed: initialFailed,
-        loading: false,
-      });
-      return;
-    }
-
-    const concurrency = Math.min(8, pendingIndexes.length);
-    let cursor = 0;
-    let completed = initialCompleted;
-    let failed = initialFailed;
-
-    const updateEntry = (index: number, patch: Partial<DashboardThumbnailCacheSnapshot['entries'][number]>) => {
-      setThumbnailCaches((current) => {
-        const next = { ...current };
-        targetScopes.forEach((target) => {
-          const scopeSnapshot = next[target.scopeKey];
-          if (!scopeSnapshot) return;
-          const entries = [...scopeSnapshot.entries];
-          const previousEntry = entries[index];
-          if (!previousEntry) return;
-          const scopePatch: Partial<DashboardThumbnailCacheSnapshot['entries'][number]> = { ...patch };
-          if (patch.status === 'loaded' && patch.bytes?.length) {
-            const mimeType = patch.mimeType || previousEntry.mimeType || 'image/jpeg';
-            const bytes = new Uint8Array(patch.bytes);
-            scopePatch.bytes = bytes;
-            scopePatch.byteLength = patch.byteLength ?? bytes.length;
-            scopePatch.mimeType = mimeType;
-            scopePatch.objectUrl = createObjectUrl(bytes, mimeType);
-          }
-          if (previousEntry.objectUrl && scopePatch.objectUrl && previousEntry.objectUrl !== scopePatch.objectUrl) {
-            URL.revokeObjectURL(previousEntry.objectUrl);
-          }
-          entries[index] = { ...previousEntry, ...scopePatch };
-          next[target.scopeKey] = {
-            ...scopeSnapshot,
-            calculatedAt: new Date().toISOString(),
-            entries,
-          };
-        });
-        return next;
-      });
-    };
-
-    const worker = async () => {
-      while (true) {
-        const pendingCursor = cursor;
-        cursor += 1;
-        if (pendingCursor >= pendingIndexes.length) return;
-        if (thumbnailLoadTokenRef.current !== token) return;
-        const index = pendingIndexes[pendingCursor];
-        const candidate = candidates[index];
-        try {
-          const response = await fetch(candidate.sourceUrl, { cache: 'force-cache' });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const blob = await response.blob();
-          const mimeType = blob.type || response.headers.get('content-type') || 'image/jpeg';
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          if (thumbnailLoadTokenRef.current !== token) return;
-          updateEntry(index, {
-            status: 'loaded',
-            bytes,
-            byteLength: bytes.length,
-            mimeType,
-          });
-        } catch (error) {
-          if (thumbnailLoadTokenRef.current !== token) return;
-          updateEntry(index, {
-            status: 'failed',
-            error: error instanceof Error ? error.message : 'Failed to load thumbnail',
-          });
-          failed += 1;
-        } finally {
-          if (thumbnailLoadTokenRef.current !== token) return;
-          completed += 1;
-          setThumbnailLoadProgress({
-            scopeKey: primaryScopeKey as DashboardThumbnailLoadProgress['scopeKey'],
-            label: targetScopes[0].label,
-            total: primaryEntries.length,
-            completed,
-            failed,
-            loading: completed < primaryEntries.length,
-          });
-        }
-      }
-    };
-
-    await Promise.all(Array.from({ length: concurrency }, () => worker()));
-    if (thumbnailLoadTokenRef.current !== token) return;
-    setThumbnailLoadProgress((current) => {
-      if (!current || current.scopeKey !== primaryScopeKey) return current;
-      return { ...current, loading: false, completed: primaryEntries.length, failed };
-    });
   }, [
     activeSavedView,
     datasetVersion,
@@ -5589,12 +5566,188 @@ ${heading}
   ]);
 
   const handleLoadFullDashboardThumbnails = useCallback(() => {
-    void loadDashboardThumbnails('full');
+    loadDashboardThumbnails('full');
   }, [loadDashboardThumbnails]);
 
   const handleLoadFilteredDashboardThumbnails = useCallback(() => {
-    void loadDashboardThumbnails('filtered');
+    loadDashboardThumbnails('filtered');
   }, [loadDashboardThumbnails]);
+
+  const updateThumbnailEntryForScope = useCallback((
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    dedupeKey: string,
+    updater: (entry: DashboardThumbnailCacheSnapshot['entries'][number]) => DashboardThumbnailCacheSnapshot['entries'][number],
+  ) => {
+    let nextEntriesForProgress: DashboardThumbnailCacheSnapshot['entries'] | null = null;
+    let nextLabelForProgress = '';
+    setThumbnailCaches((current) => {
+      const scopeSnapshot = current[scopeKey];
+      if (!scopeSnapshot?.entries?.length) return current;
+      const entryIndex = scopeSnapshot.entries.findIndex((entry) => entry.dedupeKey === dedupeKey);
+      if (entryIndex < 0) return current;
+      const previousEntry = scopeSnapshot.entries[entryIndex];
+      const nextEntry = updater(previousEntry);
+      if (nextEntry === previousEntry) return current;
+      const entries = [...scopeSnapshot.entries];
+      if (previousEntry.objectUrl && nextEntry.objectUrl && previousEntry.objectUrl !== nextEntry.objectUrl) {
+        URL.revokeObjectURL(previousEntry.objectUrl);
+      }
+      entries[entryIndex] = nextEntry;
+      const nextSnapshot: DashboardThumbnailCacheSnapshot = {
+        ...scopeSnapshot,
+        calculatedAt: new Date().toISOString(),
+        entries,
+      };
+      nextEntriesForProgress = entries;
+      nextLabelForProgress = nextSnapshot.label;
+      return {
+        ...current,
+        [scopeKey]: nextSnapshot,
+      };
+    });
+    if (!nextEntriesForProgress) return;
+    setThumbnailLoadProgress((current) => {
+      if (!current || current.scopeKey !== scopeKey) return current;
+      const summary = summarizeThumbnailProgress(nextEntriesForProgress || []);
+      return {
+        ...current,
+        label: nextLabelForProgress || current.label,
+        total: summary.total,
+        completed: summary.completed,
+        failed: summary.failed,
+        loading: summary.loading,
+      };
+    });
+  }, []);
+
+  const handleThumbnailEntryLoad = useCallback((
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    dedupeKey: string,
+    loadedUrl?: string,
+  ) => {
+    updateThumbnailEntryForScope(scopeKey, dedupeKey, (entry) => {
+      const resolvedUrl = String(loadedUrl || entry.objectUrl || entry.activeUrl || entry.sourceUrl || '').trim();
+      if (!resolvedUrl) return entry;
+      const urls = Array.from(new Set((entry.candidateUrls || [resolvedUrl]).map((url) => String(url || '').trim()).filter(Boolean)));
+      const activeIndex = urls.findIndex((url) => url === resolvedUrl);
+      if (entry.status === 'loaded' && entry.activeUrl === resolvedUrl && (entry.fallbackIndex ?? 0) === (activeIndex >= 0 ? activeIndex : 0)) {
+        return entry;
+      }
+      return {
+        ...entry,
+        status: 'loaded',
+        activeUrl: resolvedUrl,
+        candidateUrls: urls,
+        fallbackIndex: activeIndex >= 0 ? activeIndex : 0,
+        error: undefined,
+      };
+    });
+  }, [updateThumbnailEntryForScope]);
+
+  const handleThumbnailEntryError = useCallback((
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    dedupeKey: string,
+    failedUrl?: string,
+  ) => {
+    updateThumbnailEntryForScope(scopeKey, dedupeKey, (entry) => {
+      const urls = Array.from(new Set(
+        (entry.candidateUrls || [entry.activeUrl, entry.sourceUrl])
+          .map((url) => String(url || '').trim())
+          .filter(Boolean),
+      ));
+      if (!urls.length) {
+        if (entry.status === 'failed' && !entry.activeUrl) return entry;
+        return {
+          ...entry,
+          status: 'failed',
+          activeUrl: '',
+          fallbackIndex: 0,
+          candidateUrls: [],
+          error: entry.error || 'No thumbnail URL available',
+        };
+      }
+      const currentUrl = String(failedUrl || entry.activeUrl || '').trim();
+      const currentIndex = currentUrl ? urls.findIndex((url) => url === currentUrl) : -1;
+      const fallbackIndex = Math.max(0, Math.min(entry.fallbackIndex ?? 0, urls.length - 1));
+      const baseIndex = currentIndex >= 0 ? currentIndex : fallbackIndex;
+      const nextIndex = baseIndex + 1;
+      if (nextIndex < urls.length) {
+        const nextUrl = urls[nextIndex];
+        if (entry.status === 'pending' && entry.activeUrl === nextUrl && fallbackIndex === nextIndex) return entry;
+        return {
+          ...entry,
+          status: 'pending',
+          activeUrl: nextUrl,
+          candidateUrls: urls,
+          fallbackIndex: nextIndex,
+          error: undefined,
+        };
+      }
+      if (entry.status === 'failed' && !entry.activeUrl && fallbackIndex === urls.length - 1) return entry;
+      return {
+        ...entry,
+        status: 'failed',
+        activeUrl: '',
+        candidateUrls: urls,
+        fallbackIndex: urls.length - 1,
+        error: entry.error || 'Failed to load thumbnail',
+      };
+    });
+  }, [updateThumbnailEntryForScope]);
+
+  const handleRetryFailedDashboardThumbnails = useCallback(() => {
+    let nextEntriesForProgress: DashboardThumbnailCacheSnapshot['entries'] | null = null;
+    let nextLabelForProgress = '';
+    setThumbnailCaches((current) => {
+      const scopeSnapshot = current[effectiveThumbnailScopeKey];
+      if (!scopeSnapshot?.entries?.length) return current;
+      let changed = false;
+      const entries = scopeSnapshot.entries.map((entry) => {
+        if (entry.status !== 'failed') return entry;
+        const urls = Array.from(new Set(
+          (entry.candidateUrls || [entry.sourceUrl])
+            .map((url) => String(url || '').trim())
+            .filter(Boolean),
+        ));
+        if (!urls.length) return entry;
+        changed = true;
+        return {
+          ...entry,
+          status: 'pending' as const,
+          sourceUrl: urls[0],
+          activeUrl: urls[0],
+          candidateUrls: urls,
+          fallbackIndex: 0,
+          error: undefined,
+        };
+      });
+      if (!changed) return current;
+      const nextSnapshot: DashboardThumbnailCacheSnapshot = {
+        ...scopeSnapshot,
+        calculatedAt: new Date().toISOString(),
+        entries,
+      };
+      nextEntriesForProgress = entries;
+      nextLabelForProgress = nextSnapshot.label;
+      return {
+        ...current,
+        [effectiveThumbnailScopeKey]: nextSnapshot,
+      };
+    });
+    if (!nextEntriesForProgress) return;
+    setThumbnailLoadProgress((current) => {
+      if (!current || current.scopeKey !== effectiveThumbnailScopeKey) return current;
+      const summary = summarizeThumbnailProgress(nextEntriesForProgress || []);
+      return {
+        ...current,
+        label: nextLabelForProgress || current.label,
+        total: summary.total,
+        completed: summary.completed,
+        failed: summary.failed,
+        loading: summary.loading,
+      };
+    });
+  }, [effectiveThumbnailScopeKey]);
 
   const createScopeDashboardSnapshot = useCallback((scope: DashboardScope, scopedRows: any[]): DatasetDashboardSnapshot => ({
     scope,
@@ -6637,6 +6790,8 @@ ${heading}
         hasLoadedData={hasLoadedData}
         onOpenResearchLog={handleOpenResearchLog}
         onOpenDashboard={() => setIsDashboardOpen(true)}
+        isAppFullscreen={isAppFullscreen}
+        onToggleAppFullscreen={handleToggleAppFullscreen}
         inclusionView={inclusionView}
         onInclusionViewChange={handleInclusionViewChange}
         includedCount={includedBaseRows.length}
@@ -6741,8 +6896,8 @@ ${heading}
                 if (viewScope !== 'videos') {
                   return (
                     <ChannelSummaryPanel
-                      row={state.selectedRow}
-                      defaultRow={selectedChannelRows[0] || activeGridRows[0] || null}
+                      row={selectedChannelDetailRow}
+                      defaultRow={filteredChannelRows[0] || null}
                       selectedRows={selectedChannelRows}
                       hasChannelRows={channelRows.length > 0}
                       isGenerating={isGeneratingChannelMetadata}
@@ -6763,9 +6918,9 @@ ${heading}
                 }
                 return (
                   <DetailPanel
-                    row={isBatchMode ? null : state.selectedRow}
-                    annotation={isBatchMode ? undefined : (selectedVideoId ? ({ ...(state.annotations[selectedVideoId] || {}), tags: userTagsByVideoId[selectedVideoId] || [] } as Annotation) : undefined)}
-                    savedNotes={isBatchMode ? '' : (selectedVideoId ? (notesByVideoId[selectedVideoId] || '') : '')}
+                    row={isBatchMode ? null : detailRow}
+                    annotation={isBatchMode ? undefined : (detailVideoId ? ({ ...(state.annotations[detailVideoId] || {}), tags: userTagsByVideoId[detailVideoId] || [] } as Annotation) : undefined)}
+                    savedNotes={isBatchMode ? '' : (detailVideoId ? (notesByVideoId[detailVideoId] || '') : '')}
                     selectedCount={selectedVideoCount}
                     batchSelectionKey={batchSelectionKey}
                     onUpdateAnnotation={handleUpdateAnnotation}
@@ -6921,6 +7076,9 @@ ${heading}
         onZoomIn={handleThumbnailZoomIn}
         onLoadFullThumbnails={handleLoadFullDashboardThumbnails}
         onLoadFilteredThumbnails={handleLoadFilteredDashboardThumbnails}
+        onThumbnailEntryLoad={handleThumbnailEntryLoad}
+        onThumbnailEntryError={handleThumbnailEntryError}
+        onRetryFailedThumbnails={handleRetryFailedDashboardThumbnails}
         onNavigateToVideo={handleDashboardNavigateToVideo}
         onNavigateToChannel={handleDashboardNavigateToChannel}
         onApplyContentFilter={handleApplyDashboardContentFilter}

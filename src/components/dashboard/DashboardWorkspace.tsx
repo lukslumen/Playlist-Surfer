@@ -30,6 +30,9 @@ type Props = {
   onZoomIn: () => void;
   onLoadFullThumbnails: () => void;
   onLoadFilteredThumbnails: () => void;
+  onThumbnailEntryLoad: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, loadedUrl?: string) => void;
+  onThumbnailEntryError: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, failedUrl?: string) => void;
+  onRetryFailedThumbnails: () => void;
   onDocumentSizeChange?: (size: { width: number; height: number }) => void;
   onNavigateToVideo?: (videoId: string) => void;
   onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
@@ -161,6 +164,9 @@ export default function DashboardWorkspace({
   onZoomIn,
   onLoadFullThumbnails,
   onLoadFilteredThumbnails,
+  onThumbnailEntryLoad,
+  onThumbnailEntryError,
+  onRetryFailedThumbnails,
   onDocumentSizeChange,
   onNavigateToVideo,
   onNavigateToChannel,
@@ -448,6 +454,7 @@ export default function DashboardWorkspace({
 
   const hasThumbnailEntries = Boolean(thumbnailCache?.entries?.length);
   const thumbnailScopeLabel = thumbnailCache?.label || (scope === 'full' ? 'Full dataset thumbnails' : 'Filtered selection thumbnails');
+  const thumbnailFailedCount = thumbnailCache?.entries?.filter((entry) => entry.status === 'failed').length || 0;
   const thumbnailProgressLabel = thumbnailLoadProgress
     ? `${thumbnailLoadProgress.completed.toLocaleString()}/${thumbnailLoadProgress.total.toLocaleString()}`
     : null;
@@ -457,8 +464,8 @@ export default function DashboardWorkspace({
     <div className="exactdash-thumbnails-root">
       <div className="exactdash-thumbnails-status">
         <span>{thumbnailScopeLabel}</span>
-        <span>
-          {thumbnailProgressLabel ? (
+        <span className="inline-flex items-center gap-2">
+          {thumbnailProgressLabel && thumbnailLoadProgress?.loading ? (
             <b>
               loading {thumbnailProgressLabel}
               {thumbnailLoadProgress.failed > 0 ? ` (${thumbnailLoadProgress.failed.toLocaleString()} failed)` : ''}
@@ -466,6 +473,17 @@ export default function DashboardWorkspace({
           ) : (
             <b>{hasThumbnailEntries ? `${thumbnailCache?.entries.filter((entry) => entry.status === 'loaded').length.toLocaleString()} loaded` : 'No cache yet'}</b>
           )}
+          {thumbnailFailedCount > 0 ? (
+            <button
+              type="button"
+              className="exactdash-control"
+              onClick={onRetryFailedThumbnails}
+              title="Retry failed thumbnails"
+              aria-label="Retry failed thumbnails"
+            >
+              Retry failed
+            </button>
+          ) : null}
         </span>
       </div>
 
@@ -486,9 +504,19 @@ export default function DashboardWorkspace({
             }}
           >
             {thumbnailCache?.entries.map((entry) => {
+              const tileImageUrl = entry.objectUrl || entry.activeUrl || entry.sourceUrl;
               const content = (
                 <>
-                  {entry.status === 'loaded' && entry.objectUrl ? <img src={entry.objectUrl} alt={entry.title || entry.videoId} loading="lazy" /> : null}
+                  {tileImageUrl ? (
+                    <img
+                      src={tileImageUrl}
+                      alt={entry.title || entry.videoId}
+                      loading="lazy"
+                      decoding="async"
+                      onLoad={() => onThumbnailEntryLoad(thumbnailCache.scopeKey, entry.dedupeKey, tileImageUrl)}
+                      onError={() => onThumbnailEntryError(thumbnailCache.scopeKey, entry.dedupeKey, tileImageUrl)}
+                    />
+                  ) : null}
                   {entry.status === 'pending' ? <div className="exactdash-thumb-pending">Loading</div> : null}
                   {entry.status === 'failed' ? <div className="exactdash-thumb-failed">Failed</div> : null}
                 </>

@@ -11,6 +11,8 @@ import {
   Eye,
   Notebook,
   LayoutDashboard,
+  Maximize2,
+  Minimize2,
   X,
   Check,
   Moon,
@@ -38,6 +40,8 @@ interface TopBarProps {
   onToggleColumns: () => void;
   onOpenResearchLog: () => void;
   onOpenDashboard: () => void;
+  isAppFullscreen: boolean;
+  onToggleAppFullscreen: () => void;
   inclusionView: InclusionView;
   onInclusionViewChange: (view: InclusionView) => void;
   includedCount: number;
@@ -72,6 +76,8 @@ export default function TopBar({
   onToggleColumns,
   onOpenResearchLog,
   onOpenDashboard,
+  isAppFullscreen,
+  onToggleAppFullscreen,
   inclusionView,
   onInclusionViewChange,
   includedCount,
@@ -329,41 +335,14 @@ export default function TopBar({
   return (
     <header className="topbar-shell relative z-30 flex h-[52px] flex-shrink-0 items-center justify-between border-b border-[var(--border-color)] bg-[var(--bg-secondary)] px-4">
       <div className="z-10 flex items-center gap-2 md:gap-3">
-        <div className="inline-flex h-8 items-center overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-primary)]" role="group" aria-label="Navigation history">
-          <button
-            type="button"
-            onClick={onNavigateBack}
-            disabled={!canNavigateBack}
-            className="topbar-view-segment h-full border-r border-[var(--border-color)] px-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)] disabled:cursor-not-allowed disabled:opacity-40"
-            title="Back (Ctrl + Left Arrow)"
-            aria-label="Back"
-          >
-            <ChevronLeft size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={onNavigateForward}
-            disabled={!canNavigateForward}
-            className="topbar-view-segment h-full px-2 text-[var(--text-muted)] transition-colors hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)] disabled:cursor-not-allowed disabled:opacity-40"
-            title="Forward (Ctrl + Right Arrow)"
-            aria-label="Forward"
-          >
-            <ChevronRight size={14} />
-          </button>
-        </div>
-
         <button
           onClick={() => fileInputRef.current?.click()}
           disabled={isIngesting}
-          className={cn(
-            'topbar-action-button flex items-center gap-2 border px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-50',
-            !fileName
-              ? 'border-[var(--accent)] bg-[var(--accent)] text-white hover:opacity-90'
-              : 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-main)] hover:bg-[var(--grid-hover)]',
-          )}
+          className="topbar-icon-button p-1.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-main)] disabled:opacity-50"
+          title={isIngesting ? 'Ingesting...' : 'Import'}
+          aria-label={isIngesting ? 'Ingesting files' : 'Import file'}
         >
-          {renderIcon(<Upload size={16} />, '🌸', 'Import')}
-          <span>{isIngesting ? 'Ingesting...' : 'Import'}</span>
+          {renderIcon(<Upload size={18} />, '🌸', 'Import')}
         </button>
         <input ref={fileInputRef} type="file" accept=".csv,.zip" onChange={handleFileChange} className="hidden" />
 
@@ -382,11 +361,73 @@ export default function TopBar({
         >
           {renderIcon(<LayoutDashboard size={18} />, '📊', 'Dataset Dashboard')}
         </button>
+        <button
+          type="button"
+          onClick={onNavigateBack}
+          disabled={!canNavigateBack}
+          className="topbar-icon-button p-1.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-main)] disabled:cursor-not-allowed disabled:opacity-40"
+          title="Back (Ctrl + Left Arrow)"
+          aria-label="Back"
+        >
+          <ChevronLeft size={18} />
+        </button>
+        <button
+          type="button"
+          onClick={onNavigateForward}
+          disabled={!canNavigateForward}
+          className="topbar-icon-button p-1.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-main)] disabled:cursor-not-allowed disabled:opacity-40"
+          title="Forward (Ctrl + Right Arrow)"
+          aria-label="Forward"
+        >
+          <ChevronRight size={18} />
+        </button>
+
       </div>
 
-      <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center px-36">
-        <div className="pointer-events-auto relative w-full max-w-[430px]" ref={anchorRef}>
-          <div className="topbar-view-box relative flex h-8 items-center overflow-visible border border-[var(--border-color)] bg-[var(--bg-primary)]">
+      <div className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center px-20 lg:px-32">
+        <div className="pointer-events-auto flex w-full max-w-[760px] items-center justify-center gap-2">
+          {hasLoadedData && (
+            <div
+              className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-primary)]"
+              title={hasChannelMetadata
+                ? 'Switch between video and channel exploration scopes.'
+                : 'Switch between video and channel exploration scopes. Generate channel metadata in Channels view first.'}
+            >
+              <button
+                type="button"
+                onClick={() => onViewScopeChange('videos')}
+                className={cn(
+                  'inline-flex h-full w-9 items-center justify-center border-r border-[var(--border-color)] text-[var(--text-muted)] transition-colors',
+                  viewScope === 'videos'
+                    ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
+                    : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
+                )}
+                title="Show videos table and video detail workflow"
+                aria-label="Show videos scope"
+              >
+                {renderIcon(<Video size={14} />, '🎬', 'Videos')}
+                <span className="sr-only">Videos</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onViewScopeChange('channels')}
+                className={cn(
+                  'inline-flex h-full w-9 items-center justify-center text-[var(--text-muted)] transition-colors',
+                  viewScope === 'channels'
+                    ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
+                    : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
+                )}
+                title="Show generated channel metadata table"
+                aria-label={hasChannelMetadata ? 'Show channels scope' : 'Show channels scope (metadata not generated yet)'}
+              >
+                {renderIcon(<UserRound size={14} />, '👤', 'Channels')}
+                <span className="sr-only">Channels</span>
+              </button>
+            </div>
+          )}
+
+          <div className="relative min-w-0 w-full max-w-[430px]" ref={anchorRef}>
+            <div className="topbar-view-box relative flex h-8 items-center overflow-visible border border-[var(--border-color)] bg-[var(--bg-primary)]">
             <button
               onClick={onToggleColumns}
               className="topbar-view-segment h-full border-r border-[var(--border-color)] px-2.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]"
@@ -447,87 +488,47 @@ export default function TopBar({
             >
               {renderIcon(<Save size={14} />, '💖', 'Save Current View')}
             </button>
+            </div>
           </div>
+          {hasLoadedData && (
+            <div
+              className="inline-flex h-8 shrink-0 items-center overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-primary)]"
+              title="Tip: select rows in the grid, then press Delete to move them between Included and Excluded."
+            >
+              <button
+                type="button"
+                onClick={() => onInclusionViewChange('included')}
+                className={cn(
+                  'inline-flex h-full w-9 items-center justify-center border-r border-[var(--border-color)] text-[var(--text-muted)] transition-colors',
+                  inclusionView === 'included'
+                    ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
+                    : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
+                )}
+                title={`Show included videos (${includedCount.toLocaleString()}). Tip: select rows and press Delete to move them to the other list.`}
+                aria-label={`Show included videos. ${includedCount.toLocaleString()} videos. Tip: select rows and press Delete to move them to the other list.`}
+              >
+                <Check size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => onInclusionViewChange('excluded')}
+                className={cn(
+                  'inline-flex h-full w-9 items-center justify-center text-[var(--text-muted)] transition-colors',
+                  inclusionView === 'excluded'
+                    ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
+                    : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
+                )}
+                title={`Show excluded videos (${excludedCount.toLocaleString()}). Tip: select rows and press Delete to move them to the other list.`}
+                aria-label={`Show excluded videos. ${excludedCount.toLocaleString()} videos. Tip: select rows and press Delete to move them to the other list.`}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
       <div className="z-10 ml-auto flex items-center gap-2 md:gap-3">
-        {hasLoadedData && (
-          <div
-            className="inline-flex h-8 items-center overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-primary)]"
-            title={hasChannelMetadata
-              ? 'Switch between video and channel exploration scopes.'
-              : 'Switch between video and channel exploration scopes. Generate channel metadata in Channels view first.'}
-          >
-            <button
-              type="button"
-              onClick={() => onViewScopeChange('videos')}
-              className={cn(
-                'inline-flex h-full w-9 items-center justify-center border-r border-[var(--border-color)] text-[var(--text-muted)] transition-colors',
-                viewScope === 'videos'
-                  ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
-                  : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
-              )}
-              title="Show videos table and video detail workflow"
-              aria-label="Show videos scope"
-            >
-              {renderIcon(<Video size={14} />, '🎬', 'Videos')}
-              <span className="sr-only">Videos</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onViewScopeChange('channels')}
-              className={cn(
-                'inline-flex h-full w-9 items-center justify-center text-[var(--text-muted)] transition-colors',
-                viewScope === 'channels'
-                  ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
-                  : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
-              )}
-              title="Show generated channel metadata table"
-              aria-label={hasChannelMetadata ? 'Show channels scope' : 'Show channels scope (metadata not generated yet)'}
-            >
-              {renderIcon(<UserRound size={14} />, '👤', 'Channels')}
-              <span className="sr-only">Channels</span>
-            </button>
-          </div>
-        )}
-
-        {hasLoadedData && (
-          <div
-            className="inline-flex h-8 items-center overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-primary)]"
-            title="Tip: select rows in the grid, then press Delete to move them between Included and Excluded."
-          >
-            <button
-              type="button"
-              onClick={() => onInclusionViewChange('included')}
-              className={cn(
-                'inline-flex h-full w-9 items-center justify-center border-r border-[var(--border-color)] text-[var(--text-muted)] transition-colors',
-                inclusionView === 'included'
-                  ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
-                  : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
-              )}
-              title={`Show included videos (${includedCount.toLocaleString()}). Tip: select rows and press Delete to move them to the other list.`}
-              aria-label={`Show included videos. ${includedCount.toLocaleString()} videos. Tip: select rows and press Delete to move them to the other list.`}
-            >
-              <Check size={14} />
-            </button>
-            <button
-              type="button"
-              onClick={() => onInclusionViewChange('excluded')}
-              className={cn(
-                'inline-flex h-full w-9 items-center justify-center text-[var(--text-muted)] transition-colors',
-                inclusionView === 'excluded'
-                  ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
-                  : 'bg-[var(--bg-primary)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
-              )}
-              title={`Show excluded videos (${excludedCount.toLocaleString()}). Tip: select rows and press Delete to move them to the other list.`}
-              aria-label={`Show excluded videos. ${excludedCount.toLocaleString()} videos. Tip: select rows and press Delete to move them to the other list.`}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
         {hasLoadedData && (
           <button
             onClick={onToggleRightPanel}
@@ -537,6 +538,15 @@ export default function TopBar({
             {renderPanelToggleIcon()}
           </button>
         )}
+
+        <button
+          onClick={onToggleAppFullscreen}
+          className="topbar-icon-button p-1.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-main)]"
+          title={isAppFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+          aria-label={isAppFullscreen ? 'Exit app fullscreen' : 'Enter app fullscreen'}
+        >
+          {isAppFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+        </button>
 
         <button
           onClick={onToggleTheme}
@@ -550,16 +560,11 @@ export default function TopBar({
 
         <button
           onClick={onExport}
-          className={cn(
-            'topbar-action-button flex items-center gap-2 border px-3 py-1.5 text-[13px] font-medium transition-colors',
-            fileName
-              ? 'border-[var(--accent)] bg-[var(--accent)] text-white hover:opacity-90'
-              : 'border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-muted)] hover:bg-[var(--grid-hover)]',
-          )}
+          className="topbar-icon-button p-1.5 text-[var(--text-muted)] transition-colors hover:text-[var(--text-main)]"
           title="Export"
+          aria-label="Export"
         >
-          {renderIcon(<Download size={16} />, '🎁', 'Export')}
-          <span>Export</span>
+          {renderIcon(<Download size={18} />, '🎁', 'Export')}
         </button>
       </div>
       {dropdown}

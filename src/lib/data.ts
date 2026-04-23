@@ -608,6 +608,126 @@ export function detectIncomingChannelCreatedAtColumn(schema: { column_name: stri
   return fallback?.column_name || null;
 }
 
+const CHANNEL_THUMBNAIL_VALUE_PRIORITY_KEYS = [
+  'channel_thumbnail_url',
+  'channelThumbnailUrl',
+  'channel_thumbnail',
+  'channelThumbnail',
+  'channel_icon',
+  'channelIcon',
+  'channel_avatar',
+  'channelAvatar',
+  'avatar_url',
+  'avatarUrl',
+  'avatar',
+  'profile_image',
+  'profileImage',
+  'profile_picture',
+  'profilePicture',
+  'photo_url',
+  'photoUrl',
+  'photo',
+  'image_url',
+  'imageUrl',
+  'image',
+  'thumbnailUrl',
+  'thumbnail',
+  'thumbnail_default',
+  'thumbnail_medium',
+  'thumbnail_high',
+  'thumbnail_maxres',
+  'thumbnails',
+  'snippet',
+  'brandingSettings',
+  'url',
+  'src',
+  'href',
+  'default',
+  'medium',
+  'high',
+  'maxres',
+];
+
+function detectIncomingChannelThumbnailColumns(schema: { column_name: string }[]): string[] {
+  const scored = schema.map((column) => {
+    const normalized = normalizeColumnName(column.column_name);
+    let score = -1;
+    if (!normalized) return { name: column.column_name, score };
+    if (normalized === 'channelthumbnailurl' || normalized === 'channelthumbnail') score = 200;
+    else if (normalized === 'thumbnailurl' || normalized === 'thumbnail') score = 180;
+    else if (normalized.includes('channel') && (normalized.includes('thumbnail') || normalized.includes('avatar') || normalized.includes('icon') || normalized.includes('profile'))) score = 160;
+    else if (normalized.includes('avatar') || normalized.includes('profileimage') || normalized.includes('profilepicture') || normalized.includes('channelicon') || normalized.includes('channelavatar')) score = 140;
+    else if (normalized.includes('thumbnails')) score = 120;
+    else if (normalized.includes('thumbnail') && !normalized.includes('video')) score = 100;
+    else if ((normalized === 'photo' || normalized === 'photourl') && !normalized.includes('video')) score = 80;
+    return { name: column.column_name, score };
+  }).filter((entry) => entry.score > 0);
+
+  return scored
+    .sort((left, right) => right.score - left.score || left.name.localeCompare(right.name))
+    .map((entry) => entry.name);
+}
+
+function parseJsonLikeThumbnailValue(value: string): unknown | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  if (!looksLikeJson) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function extractEmbeddedHttpThumbnailUrl(value: string): string | null {
+  const match = value.match(/https?:\/\/[^\s"'<>]+/i);
+  return match ? match[0] : null;
+}
+
+function normalizeHttpThumbnailUrl(value: string): string | null {
+  let candidate = value.trim().replace(/^['"`]+|['"`]+$/g, '');
+  if (!candidate) return null;
+  if (candidate.startsWith('//')) candidate = `https:${candidate}`;
+  if (!/^https?:\/\//i.test(candidate)) {
+    const embedded = extractEmbeddedHttpThumbnailUrl(candidate);
+    if (!embedded) return null;
+    candidate = embedded;
+  }
+  candidate = candidate.replace(/[),.;]+$/g, '');
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function collectChannelThumbnailCandidates(value: unknown, seen = new Set<unknown>()): string[] {
+  if (value === null || value === undefined) return [];
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    const parsedJson = parseJsonLikeThumbnailValue(trimmed);
+    if (parsedJson !== null) return collectChannelThumbnailCandidates(parsedJson, seen);
+    const embedded = extractEmbeddedHttpThumbnailUrl(trimmed);
+    return embedded ? [embedded] : [trimmed];
+  }
+  if (typeof value !== 'object') return [];
+  if (seen.has(value)) return [];
+  seen.add(value);
+  if (Array.isArray(value)) return value.flatMap((entry) => collectChannelThumbnailCandidates(entry, seen));
+
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj);
+  const orderedKeys = [
+    ...CHANNEL_THUMBNAIL_VALUE_PRIORITY_KEYS.filter((key) => key in obj),
+    ...keys.filter((key) => !CHANNEL_THUMBNAIL_VALUE_PRIORITY_KEYS.includes(key)),
+  ];
+  return orderedKeys.flatMap((key) => collectChannelThumbnailCandidates(obj[key], seen));
+}
+
 function normalizeImportedChannelMetadataRow(args: {
   row: Record<string, any>;
   schema: ColumnSchema[];
@@ -618,12 +738,18 @@ function normalizeImportedChannelMetadataRow(args: {
   const subscriberColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'subscribercount')?.column_name;
   const videoCountColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'videocount')?.column_name;
   const viewCountColumn = args.schema.find((column) => ['viewcount', 'channelviews', 'totalviews'].includes(normalizeColumnName(column.column_name)))?.column_name;
-  const thumbnailColumn = args.schema.find((column) => ['thumbnail', 'thumbnailurl'].includes(normalizeColumnName(column.column_name)))?.column_name;
+  const thumbnailColumns = detectIncomingChannelThumbnailColumns(args.schema);
   const countryColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'country')?.column_name;
   const keywordsColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'keywords')?.column_name;
   const topicDetailsColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'topicdetails')?.column_name;
   const descriptionColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'description')?.column_name;
   const languageColumn = args.schema.find((column) => normalizeColumnName(column.column_name) === 'defaultlanguage')?.column_name;
+  const thumbnailUrl = Array.from(new Set(
+    thumbnailColumns
+      .flatMap((column) => collectChannelThumbnailCandidates(args.row?.[column]))
+      .map((candidate) => normalizeHttpThumbnailUrl(candidate))
+      .filter((candidate): candidate is string => Boolean(candidate)),
+  ))[0] || null;
 
   const normalizedRow: Record<string, any> = {
     ...args.row,
@@ -643,7 +769,7 @@ function normalizeImportedChannelMetadataRow(args: {
   if (subscriberColumn) normalizedRow.channel_subscriber_count = args.row?.[subscriberColumn] ?? null;
   if (videoCountColumn) normalizedRow.channel_video_count = args.row?.[videoCountColumn] ?? null;
   if (viewCountColumn) normalizedRow.channel_total_views = args.row?.[viewCountColumn] ?? null;
-  if (thumbnailColumn) normalizedRow.channel_thumbnail_url = args.row?.[thumbnailColumn] ?? null;
+  normalizedRow.channel_thumbnail_url = thumbnailUrl;
   if (countryColumn) normalizedRow.channel_country = args.row?.[countryColumn] ?? null;
   if (keywordsColumn) normalizedRow.channel_keywords = args.row?.[keywordsColumn] ?? null;
   if (topicDetailsColumn) normalizedRow.channel_topics = args.row?.[topicDetailsColumn] ?? null;

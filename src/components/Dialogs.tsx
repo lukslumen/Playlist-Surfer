@@ -1827,7 +1827,7 @@ const KEYBOARD_SHORTCUTS: Array<{ keys: string; action: string; }> = [
   { keys: 'Ctrl/Cmd + S', action: 'Save view' },
   { keys: 'Ctrl/Cmd + Z', action: 'undo' },
   { keys: 'Ctrl/Cmd + Shift + Z', action: 'redo' },
-  { keys: 'T or Alt + T (player)', action: 'add timestamp + open notes' },
+  { keys: 'Shift + T (player)', action: 'add timestamp + open notes' },
 ];
 
 export interface CommandPaletteItem {
@@ -2319,6 +2319,9 @@ interface DatasetDashboardDialogProps {
   onZoomIn: () => void;
   onLoadFullThumbnails: () => void;
   onLoadFilteredThumbnails: () => void;
+  onThumbnailEntryLoad: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, loadedUrl?: string) => void;
+  onThumbnailEntryError: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, failedUrl?: string) => void;
+  onRetryFailedThumbnails: () => void;
   onNavigateToVideo?: (videoId: string) => void;
   onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
   onApplyContentFilter?: (kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => void;
@@ -2354,6 +2357,9 @@ export function DatasetDashboardDialog({
   onZoomIn,
   onLoadFullThumbnails,
   onLoadFilteredThumbnails,
+  onThumbnailEntryLoad,
+  onThumbnailEntryError,
+  onRetryFailedThumbnails,
   onNavigateToVideo,
   onNavigateToChannel,
   onApplyContentFilter,
@@ -2391,6 +2397,9 @@ export function DatasetDashboardDialog({
           onZoomIn={onZoomIn}
           onLoadFullThumbnails={onLoadFullThumbnails}
           onLoadFilteredThumbnails={onLoadFilteredThumbnails}
+          onThumbnailEntryLoad={onThumbnailEntryLoad}
+          onThumbnailEntryError={onThumbnailEntryError}
+          onRetryFailedThumbnails={onRetryFailedThumbnails}
           onNavigateToVideo={onNavigateToVideo}
           onNavigateToChannel={onNavigateToChannel}
           onApplyContentFilter={onApplyContentFilter}

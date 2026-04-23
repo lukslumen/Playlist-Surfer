@@ -193,6 +193,18 @@ function appendQuotedText(existing: string, heading: string, text: string) {
   const rebuiltSection = `${sectionHeader}\n${existingEntries.join('\n')}`;
   return `${prefix}${rebuiltSection}${suffix ? suffix : ''}`.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
+
+function appendTimestampMarkdown(existing: string, label: string) {
+  const normalizedLabel = String(label || '').trim().replace(/^\[(.+)\]$/, '$1').trim();
+  if (!normalizedLabel) return existing;
+  const entry = `- {${normalizedLabel}]`;
+  const trimmed = existing.replace(/\s+$/, '');
+  if (!trimmed) return `${entry}\n`;
+  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines[lines.length - 1] === entry) return `${trimmed}\n`;
+  return `${trimmed}\n\n${entry}\n`;
+}
+
 function getTextOffset(root: HTMLElement, node: Node, offset: number) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let currentOffset = 0;
@@ -485,13 +497,13 @@ export default function DetailPanel({
   const [playerLoadError, setPlayerLoadError] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [isNotesDirty, setIsNotesDirty] = useState(false);
-  const focusNotesEditor = useCallback(() => {
+  const focusNotesEditor = useCallback((cursorPosition?: number) => {
     window.requestAnimationFrame(() => {
       const textarea = notesTextareaRef.current;
       if (!textarea) return;
-      const cursorPosition = textarea.value.length;
+      const nextCursorPosition = Math.max(0, Math.min(cursorPosition ?? textarea.value.length, textarea.value.length));
       textarea.focus();
-      textarea.setSelectionRange(cursorPosition, cursorPosition);
+      textarea.setSelectionRange(nextCursorPosition, nextCursorPosition);
       textarea.scrollTop = textarea.scrollHeight;
     });
   }, []);
@@ -661,13 +673,12 @@ export default function DetailPanel({
     };
   };
 
-  useEffect(() => {
-    notesDraftRef.current = notesDraft;
-  }, [notesDraft]);
-
-  useEffect(() => {
-    isNotesDirtyRef.current = isNotesDirty;
-  }, [isNotesDirty]);
+  const setNotesDraftState = useCallback((nextNotes: string, dirty: boolean) => {
+    setNotesDraft(nextNotes);
+    notesDraftRef.current = nextNotes;
+    isNotesDirtyRef.current = dirty;
+    setIsNotesDirty(dirty);
+  }, []);
 
   const flushNotesDraft = (targetVideoId: string | null, nextValue?: string) => {
     if (!targetVideoId) return;
@@ -682,22 +693,20 @@ export default function DetailPanel({
     }
 
     activeVideoIdRef.current = videoId;
-    setNotesDraft(currentNotes);
-    notesDraftRef.current = currentNotes;
-    setIsNotesDirty(false);
-  }, [videoId, currentNotes, onUpdateNotes]);
+    setNotesDraftState(currentNotes, false);
+  }, [videoId, currentNotes, onUpdateNotes, setNotesDraftState]);
 
   useEffect(() => {
     if (activeVideoIdRef.current === videoId && !isNotesDirtyRef.current && notesDraftRef.current !== currentNotes) {
-      setNotesDraft(currentNotes);
-      notesDraftRef.current = currentNotes;
+      setNotesDraftState(currentNotes, false);
     }
-  }, [currentNotes, videoId]);
+  }, [currentNotes, videoId, setNotesDraftState]);
 
   useEffect(() => {
     if (!videoId || !isNotesDirty) return;
     const timeout = window.setTimeout(() => {
       flushNotesDraft(videoId);
+      isNotesDirtyRef.current = false;
       setIsNotesDirty(false);
     }, 450);
     return () => window.clearTimeout(timeout);
@@ -872,13 +881,15 @@ export default function DetailPanel({
       }
 
       const code = event.code.toLowerCase();
-      const isTimestampShortcut = (key === 't' || code === 'keyt');
+      const isTimestampShortcut = (key === 't' || code === 'keyt')
+        && event.shiftKey
+        && !event.altKey
+        && !event.ctrlKey
+        && !event.metaKey;
       if (isTimestampShortcut) {
-        if (event.altKey || (!event.ctrlKey && !event.metaKey && !event.shiftKey)) {
-          event.preventDefault();
-          setDetailMode('annotate');
-          handleAddTimestamp();
-        }
+        event.preventDefault();
+        setDetailMode('annotate');
+        handleAddTimestamp();
       }
     };
 
@@ -1130,9 +1141,7 @@ export default function DetailPanel({
   };
 
   const updateNotes = (notes: string) => {
-    setNotesDraft(notes);
-    notesDraftRef.current = notes;
-    setIsNotesDirty(true);
+    setNotesDraftState(notes, true);
   };
 
   const handleQuoteDescriptionSelection = () => {
@@ -1203,9 +1212,12 @@ export default function DetailPanel({
       createdAt: Date.now(),
     };
     const nextTimestampRefs = sortTimestampRefs([...(annotation?.timestampRefs || []), nextTimestamp]);
+    const nextNotes = appendTimestampMarkdown(notesDraftRef.current, nextTimestamp.label);
+    updateNotes(nextNotes);
+    flushNotesDraft(videoId, nextNotes);
     persistManagedNotes(quoteRefs, nextTimestampRefs);
     setDetailMode('annotate');
-    focusNotesEditor();
+    focusNotesEditor(nextNotes.length);
   };
 
   const handleTimestampClick = (timestamp: TimestampRef) => {
@@ -1424,6 +1436,7 @@ export default function DetailPanel({
                     onBlur={() => {
                       if (videoId && isNotesDirtyRef.current) {
                         flushNotesDraft(videoId);
+                        isNotesDirtyRef.current = false;
                         setIsNotesDirty(false);
                       }
                     }}

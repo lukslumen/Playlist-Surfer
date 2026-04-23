@@ -17,6 +17,20 @@ const THUMBNAIL_URL_FIELDS = [
 
 export const THUMBNAIL_LIMIT = 500;
 
+function normalizeThumbnailUrl(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  const normalized = raw.startsWith('//') ? `https:${raw}` : raw;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 function parseNumberLike(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -100,18 +114,26 @@ export function extractSortRulesFromColumnState(columnState: any[]): DashboardTh
     .sort((a, b) => a.order - b.order);
 }
 
-export function resolveThumbnailUrlForRow(row: any): string | null {
+export function resolveThumbnailUrlsForRow(row: any): string[] {
+  const urls: string[] = [];
   for (const field of THUMBNAIL_URL_FIELDS) {
-    const value = row?.[field];
-    if (value === null || value === undefined) continue;
-    const text = String(value).trim();
-    if (!text) continue;
-    if (text.startsWith('//')) return `https:${text}`;
-    return text;
+    const normalized = normalizeThumbnailUrl(row?.[field]);
+    if (normalized) urls.push(normalized);
   }
   const videoId = resolveVideoId(row);
-  if (!videoId) return null;
-  return `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+  if (videoId) {
+    const encoded = encodeURIComponent(videoId);
+    urls.push(
+      `https://i.ytimg.com/vi/${encoded}/hqdefault.jpg`,
+      `https://i.ytimg.com/vi/${encoded}/mqdefault.jpg`,
+      `https://i.ytimg.com/vi/${encoded}/default.jpg`,
+    );
+  }
+  return Array.from(new Set(urls));
+}
+
+export function resolveThumbnailUrlForRow(row: any): string | null {
+  return resolveThumbnailUrlsForRow(row)[0] || null;
 }
 
 function orderBySortRules(rows: any[], sortRules: DashboardThumbnailSortRule[]) {
@@ -141,16 +163,18 @@ export function selectThumbnailCandidates(args: {
 
   for (const row of sortedRows) {
     const videoId = resolveVideoId(row) || '';
-    const sourceUrl = resolveThumbnailUrlForRow(row);
-    if (!sourceUrl && !videoId) continue;
-    const dedupeKey = videoId || `url:${sourceUrl}`;
+    const candidateUrls = resolveThumbnailUrlsForRow(row);
+    const sourceUrl = candidateUrls[0] || '';
+    if (!candidateUrls.length && !videoId) continue;
+    const dedupeKey = videoId || `url:${sourceUrl || resolveVideoTitle(row)}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
     candidates.push({
       videoId: videoId || dedupeKey,
       dedupeKey,
       title: resolveVideoTitle(row),
-      sourceUrl: sourceUrl || '',
+      sourceUrl,
+      candidateUrls,
       rank: candidates.length + 1,
     });
     if (candidates.length >= limit) break;

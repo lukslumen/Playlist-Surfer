@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type SyntheticEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Tag, StickyNote, Quote, Ban, Copy, ChevronDown, X, ExternalLink } from 'lucide-react';
 import { formatDateDisplay } from '../lib/data';
 
@@ -222,12 +222,35 @@ function resolveChannelDescription(row: any) {
 
 const THUMBNAIL_URL_PRIORITY_KEYS = [
   'channel_thumbnail_url',
+  'channelThumbnailUrl',
+  'channel_thumbnail',
+  'channelThumbnail',
+  'channel_icon',
+  'channelIcon',
+  'channel_avatar',
+  'channelAvatar',
+  'avatar_url',
+  'avatarUrl',
+  'avatar',
+  'profile_image',
+  'profileImage',
+  'profile_picture',
+  'profilePicture',
+  'photo_url',
+  'photoUrl',
+  'photo',
+  'image_url',
+  'imageUrl',
+  'image',
   'thumbnailUrl',
   'thumbnail',
   'thumbnail_default',
   'thumbnail_medium',
   'thumbnail_high',
   'thumbnail_maxres',
+  'thumbnails',
+  'snippet',
+  'brandingSettings',
   'url',
   'src',
   'href',
@@ -297,27 +320,57 @@ function normalizeHttpUrl(value: string): string | null {
   }
 }
 
-function resolveChannelThumbnailCandidates(row: any): string[] {
-  const rawCandidates = [
-    row?.channel_thumbnail_url,
-    row?.thumbnailUrl,
-    row?.thumbnail,
-    row?.thumbnail_default,
-    row?.thumbnail_medium,
-    row?.thumbnail_high,
-    row?.thumbnail_maxres,
-  ];
+const THUMBNAIL_ROW_SOURCE_KEYS = [
+  'channel_thumbnail_url',
+  'channelThumbnailUrl',
+  'channel_thumbnail',
+  'channelThumbnail',
+  'channel_icon',
+  'channelIcon',
+  'channel_avatar',
+  'channelAvatar',
+  'avatar_url',
+  'avatarUrl',
+  'avatar',
+  'profile_image',
+  'profileImage',
+  'profile_picture',
+  'profilePicture',
+  'photo_url',
+  'photoUrl',
+  'photo',
+  'image_url',
+  'imageUrl',
+  'image',
+  'thumbnailUrl',
+  'thumbnail',
+  'thumbnail_default',
+  'thumbnail_medium',
+  'thumbnail_high',
+  'thumbnail_maxres',
+  'thumbnails',
+];
+
+function resolveChannelThumbnailCandidates(rows: Array<any | null | undefined> | any | null | undefined): string[] {
+  const rowList = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+  if (!rowList.length) return [];
+  const rawCandidates = rowList.flatMap((row) => {
+    if (!row || typeof row !== 'object') return [];
+    const candidates = THUMBNAIL_ROW_SOURCE_KEYS
+      .filter((key) => key in row)
+      .map((key) => row[key]);
+    candidates.push(
+      row?.snippet?.thumbnails,
+      row?.snippet,
+      row?.brandingSettings?.image,
+    );
+    return candidates;
+  });
   const urls = rawCandidates
     .flatMap((entry) => collectThumbnailUrlCandidates(entry))
     .map((entry) => normalizeHttpUrl(entry))
     .filter((entry): entry is string => Boolean(entry));
   return Array.from(new Set(urls));
-}
-
-function urlsMatch(left: string, right: string): boolean {
-  const normalizedLeft = normalizeHttpUrl(left) || left;
-  const normalizedRight = normalizeHttpUrl(right) || right;
-  return normalizedLeft === normalizedRight;
 }
 
 function buildChannelMonogram(channelName: unknown): string {
@@ -408,22 +461,15 @@ export default function ChannelSummaryPanel({
   const notesRef = useRef<HTMLTextAreaElement | null>(null);
   const batchCopyMenuRef = useRef<HTMLDivElement | null>(null);
   const batchCopyButtonRef = useRef<HTMLButtonElement | null>(null);
+  const thumbIndexRef = useRef(0);
 
   const activeRow = row || defaultRow;
   const selectedCount = selectedRows.length || (activeRow ? 1 : 0);
   const activeKey = resolveChannelKey(activeRow);
   const description = resolveChannelDescription(activeRow);
   const thumbnailCandidates = useMemo(
-    () => resolveChannelThumbnailCandidates(activeRow),
-    [
-      activeRow?.channel_thumbnail_url,
-      activeRow?.thumbnailUrl,
-      activeRow?.thumbnail,
-      activeRow?.thumbnail_default,
-      activeRow?.thumbnail_medium,
-      activeRow?.thumbnail_high,
-      activeRow?.thumbnail_maxres,
-    ],
+    () => resolveChannelThumbnailCandidates([activeRow, row, defaultRow]),
+    [activeRow, defaultRow, row],
   );
   const thumbnailCandidateSignature = useMemo(() => thumbnailCandidates.join('|'), [thumbnailCandidates]);
   const channelThumbnailUrl = thumbStatus === 'fallback' ? '' : (thumbnailCandidates[thumbIndex] || '');
@@ -444,10 +490,12 @@ export default function ChannelSummaryPanel({
 
   useEffect(() => {
     if (!thumbnailCandidates.length) {
+      thumbIndexRef.current = 0;
       setThumbIndex(0);
       setThumbStatus('fallback');
       return;
     }
+    thumbIndexRef.current = 0;
     setThumbIndex(0);
     setThumbStatus('loading');
   }, [activeKey, thumbnailCandidateSignature]);
@@ -542,26 +590,26 @@ export default function ChannelSummaryPanel({
     onChannelNavigateToVideos?.(activeRow);
   };
 
-  const handleThumbnailError = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
-    const failedSrc = event.currentTarget.currentSrc || event.currentTarget.src || '';
+  const handleThumbnailError = useCallback((candidateIndex: number) => {
+    if (candidateIndex !== thumbIndexRef.current) return;
     setThumbIndex((current) => {
-      const currentCandidate = thumbnailCandidates[current] || '';
-      if (currentCandidate && failedSrc && !urlsMatch(failedSrc, currentCandidate)) return current;
+      if (current !== candidateIndex) return current;
       const next = current + 1;
       if (next < thumbnailCandidates.length) {
+        thumbIndexRef.current = next;
         setThumbStatus('loading');
         return next;
       }
+      thumbIndexRef.current = current;
       setThumbStatus('fallback');
       return current;
     });
-  }, [thumbnailCandidates]);
+  }, [thumbnailCandidates.length]);
 
-  const handleThumbnailLoad = useCallback((event: SyntheticEvent<HTMLImageElement>) => {
-    const loadedSrc = event.currentTarget.currentSrc || event.currentTarget.src || '';
-    if (channelThumbnailUrl && loadedSrc && !urlsMatch(loadedSrc, channelThumbnailUrl)) return;
+  const handleThumbnailLoad = useCallback((candidateIndex: number) => {
+    if (candidateIndex !== thumbIndexRef.current) return;
     setThumbStatus('loaded');
-  }, [channelThumbnailUrl]);
+  }, []);
 
   const focusNotesEditor = () => {
     window.requestAnimationFrame(() => {
@@ -846,8 +894,8 @@ export default function ChannelSummaryPanel({
                       loading="lazy"
                       decoding="async"
                       referrerPolicy="no-referrer"
-                      onError={handleThumbnailError}
-                      onLoad={handleThumbnailLoad}
+                      onError={() => handleThumbnailError(thumbIndex)}
+                      onLoad={() => handleThumbnailLoad(thumbIndex)}
                       className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-200 ${thumbStatus === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
                     />
                   ) : null}
