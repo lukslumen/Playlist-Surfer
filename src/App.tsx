@@ -5020,8 +5020,8 @@ ${heading}
       {
         id: 'open-annotations',
         label: 'Open annotations',
-        description: 'Open the annotation panel and focus timestamp-friendly notes mode.',
-        keywords: ['annotations notes timestamps detail panel'],
+        description: 'Open the annotation panel and focus notes mode.',
+        keywords: ['annotations notes detail panel'],
         onSelect: handleOpenAnnotations,
         disabled: !hasLoadedData,
       },

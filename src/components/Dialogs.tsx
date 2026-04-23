@@ -1806,7 +1806,7 @@ const RESEARCH_LOG_SECTIONS: Array<{ id: ResearchLogSectionId; label: string; ge
   { id: 'overview', label: 'Overview', generated: false },
   { id: 'diary', label: 'Diary', generated: false },
   { id: 'corpusProcessing', label: 'Corpus & Processing', generated: true },
-  { id: 'views', label: 'Views', generated: true },
+  { id: 'views', label: 'Saved Views', generated: true },
   { id: 'watchHistory', label: 'Watch History', generated: true },
   { id: 'researchActions', label: 'Research Actions', generated: true },
   { id: 'notesAppendix', label: 'Notes Appendix', generated: true },
@@ -1827,7 +1827,7 @@ const KEYBOARD_SHORTCUTS: Array<{ keys: string; action: string; }> = [
   { keys: 'Ctrl/Cmd + S', action: 'Save view' },
   { keys: 'Ctrl/Cmd + Z', action: 'undo' },
   { keys: 'Ctrl/Cmd + Shift + Z', action: 'redo' },
-  { keys: 'Shift + T (player)', action: 'add timestamp + open notes' },
+  { keys: 'Shift + T (player)', action: 'add timestamp annotation' },
 ];
 
 export interface CommandPaletteItem {

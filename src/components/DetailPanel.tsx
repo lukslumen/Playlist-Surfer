@@ -1,9 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Youtube, Tag, X, Search, Plus, Clock3, Pencil, Save, Ban, Copy, ChevronDown } from 'lucide-react';
+import { Youtube, Tag, X, Search, Plus, Pencil, Save, Ban, Copy, ChevronDown, Clock3, Trash2 } from 'lucide-react';
 import { Annotation, QuoteRef, TimestampRef } from '../types';
 import {
   BatchCopyExportMode,
-  formatTimestampLabel,
   resolvePublishedAt,
   resolveTranscript,
   resolveVideoDescription,
@@ -12,9 +11,14 @@ import {
   resolveVideoTitle,
   resolveViews,
   sortQuoteRefs,
-  sortTimestampRefs,
   TRANSCRIPT_COLUMN,
 } from '../lib/data';
+import {
+  buildMarkerPreview,
+  insertAtPlayhead,
+  parseTimestampDocument,
+  removeById,
+} from '../lib/timestampNotes';
 
 declare global {
   interface Window {
@@ -194,17 +198,6 @@ function appendQuotedText(existing: string, heading: string, text: string) {
   return `${prefix}${rebuiltSection}${suffix ? suffix : ''}`.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
 }
 
-function appendTimestampMarkdown(existing: string, label: string) {
-  const normalizedLabel = String(label || '').trim().replace(/^\[(.+)\]$/, '$1').trim();
-  if (!normalizedLabel) return existing;
-  const entry = `- {${normalizedLabel}]`;
-  const trimmed = existing.replace(/\s+$/, '');
-  if (!trimmed) return `${entry}\n`;
-  const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (lines[lines.length - 1] === entry) return `${trimmed}\n`;
-  return `${trimmed}\n\n${entry}\n`;
-}
-
 function getTextOffset(root: HTMLElement, node: Node, offset: number) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let currentOffset = 0;
@@ -227,6 +220,87 @@ function shouldIgnorePlayerShortcut(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false;
   const tagName = target.tagName.toLowerCase();
   return target.isContentEditable || ['input', 'textarea', 'select', 'button'].includes(tagName);
+}
+
+function normalizeTimestampRefList(refs: TimestampRef[]) {
+  return [...refs]
+    .map((ref) => ({
+      id: String(ref.id || ''),
+      seconds: Number.isFinite(ref.seconds) ? Math.max(0, Math.floor(ref.seconds)) : 0,
+      label: String(ref.label || '').trim(),
+      createdAt: Number.isFinite(ref.createdAt) ? Math.floor(ref.createdAt) : 0,
+    }))
+    .sort((a, b) => (a.seconds - b.seconds) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
+}
+
+function timestampRefsEqual(left: TimestampRef[] = [], right: TimestampRef[] = []) {
+  const normalizedLeft = normalizeTimestampRefList(left);
+  const normalizedRight = normalizeTimestampRefList(right);
+  if (normalizedLeft.length !== normalizedRight.length) return false;
+  return normalizedLeft.every((item, index) => {
+    const other = normalizedRight[index];
+    return item.id === other.id
+      && item.seconds === other.seconds
+      && item.label === other.label
+      && item.createdAt === other.createdAt;
+  });
+}
+
+function TimestampMarkerRail({
+  markers,
+  durationSeconds,
+  onDeleteMarker,
+}: {
+  markers: Array<{ id: string; time_seconds: number; time_label: string; preview: string }>;
+  durationSeconds: number;
+  onDeleteMarker: (markerId: string) => void;
+}) {
+  const safeDuration = Math.max(1, Math.floor(durationSeconds || 0));
+  return (
+    <div className="border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+        <span>Timestamp rail</span>
+        <span>{markers.length} marker{markers.length === 1 ? '' : 's'}</span>
+      </div>
+      <div className="relative overflow-visible rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2">
+        <div className="relative h-4">
+          <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 bg-[var(--border-color)]" />
+          {markers.map((marker) => {
+            const position = Math.min(100, Math.max(0, (marker.time_seconds / safeDuration) * 100));
+            return (
+              <div
+                key={marker.id}
+                className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
+                style={{ left: `${position}%` }}
+              >
+                <button
+                  type="button"
+                  onClick={(event) => event.preventDefault()}
+                  className="h-3 w-3 rounded-full border border-[var(--accent)] bg-[var(--accent)] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  aria-label={`Timestamp ${marker.time_label}`}
+                  title={`Timestamp ${marker.time_label}`}
+                />
+                <div className="absolute bottom-[calc(100%+8px)] left-1/2 z-20 hidden w-56 -translate-x-1/2 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] p-2 shadow-xl group-hover:block group-focus-within:block">
+                  <div className="text-[11px] font-semibold text-[var(--text-main)]">{marker.time_label}</div>
+                  <div className="mt-1 line-clamp-3 text-[11px] text-[var(--text-muted)]">{marker.preview}</div>
+                  <button
+                    type="button"
+                    onClick={() => onDeleteMarker(marker.id)}
+                    className="mt-2 inline-flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] text-[var(--text-main)] hover:border-red-500 hover:text-red-600"
+                    aria-label={`Delete timestamp ${marker.time_label}`}
+                    title={`Delete timestamp ${marker.time_label}`}
+                  >
+                    <Trash2 size={11} />
+                    Delete
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TranscriptViewer({
@@ -313,7 +387,7 @@ function TranscriptViewer({
       <div
         ref={containerRef}
         onMouseUp={handleMouseUp}
-        className="custom-scrollbar min-h-[14rem] max-h-[26rem] overflow-auto border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 whitespace-pre-wrap text-[var(--text-main)]"
+        className="min-h-[14rem] border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 font-mono text-[13px] leading-6 whitespace-pre-wrap text-[var(--text-main)]"
       >
         {content || <span className="text-[var(--text-muted)]">No transcript was imported for this video.</span>}
       </div>
@@ -344,6 +418,7 @@ function InputRow({
   placeholder,
   onSubmit,
   inputRef,
+  variant = 'boxed',
 }: {
   icon: React.ReactNode;
   value: string;
@@ -351,7 +426,12 @@ function InputRow({
   placeholder: string;
   onSubmit?: () => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
+  variant?: 'boxed' | 'flat';
 }) {
+  const formClassName = variant === 'flat'
+    ? 'flex items-center gap-2 px-0 py-2'
+    : 'flex items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2';
+
   return (
     <form
       onSubmit={(event) => {
@@ -361,7 +441,7 @@ function InputRow({
       onMouseDownCapture={(event) => event.stopPropagation()}
       onPointerDownCapture={(event) => event.stopPropagation()}
       onClickCapture={(event) => event.stopPropagation()}
-      className="flex items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2"
+      className={formClassName}
     >
       <span className="text-[var(--text-muted)]">{icon}</span>
       <input
@@ -374,7 +454,7 @@ function InputRow({
         onClickCapture={(event) => event.stopPropagation()}
         placeholder={placeholder}
         autoFocus={Boolean(inputRef)}
-        className="w-full bg-transparent text-[13px] text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+        className="w-full bg-transparent text-[13px] leading-5 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
       />
     </form>
   );
@@ -382,74 +462,32 @@ function InputRow({
 
 function NotesPreview({
   quoteRefs,
-  timestampRefs,
   onQuoteClick,
-  onTimestampClick,
-  onRemoveTimestamp,
 }: {
   quoteRefs: QuoteRef[];
-  timestampRefs: TimestampRef[];
   onQuoteClick: (quote: QuoteRef) => void;
-  onTimestampClick: (timestamp: TimestampRef) => void;
-  onRemoveTimestamp: (timestampId: string) => void;
 }) {
-  if (quoteRefs.length === 0 && timestampRefs.length === 0) return null;
+  if (quoteRefs.length === 0) return null;
 
   return (
-    <div className="space-y-4 border border-[var(--border-color)] bg-[var(--bg-primary)] p-3">
-      <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Interactive note links</div>
+    <div className="space-y-3 pt-2">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Interactive note links</div>
 
-      {quoteRefs.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-[12px] font-semibold text-[var(--text-main)]">Quotes</div>
-          <div className="space-y-1.5">
-            {quoteRefs.map((quote) => (
-              <button
-                key={quote.id}
-                type="button"
-                onClick={() => onQuoteClick(quote)}
-                className="block w-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-left text-[12px] text-[var(--text-main)] hover:border-[var(--accent)]"
-              >
-                “{quote.text}”
-              </button>
-            ))}
-          </div>
+      <div className="space-y-2">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">Quotes</div>
+        <div className="space-y-1.5">
+          {quoteRefs.map((quote) => (
+            <button
+              key={quote.id}
+              type="button"
+              onClick={() => onQuoteClick(quote)}
+              className="block w-full border-b border-[var(--border-color)]/60 px-0 py-1.5 text-left text-[13px] leading-5 text-[var(--text-main)] hover:text-[var(--accent)]"
+            >
+              {`"${quote.text}"`}
+            </button>
+          ))}
         </div>
-      )}
-
-      {timestampRefs.length > 0 && (
-        <div className="space-y-2">
-          <div className="text-[12px] font-semibold text-[var(--text-main)]">Timestamps</div>
-          <div className="flex flex-wrap gap-2">
-            {timestampRefs.map((timestamp) => (
-              <span
-                key={timestamp.id}
-                className="inline-flex items-center overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[12px] text-[var(--text-main)]"
-              >
-                <button
-                  type="button"
-                  onClick={() => onTimestampClick(timestamp)}
-                  className="px-2.5 py-1 transition-colors hover:bg-[var(--grid-hover)]"
-                >
-                  {timestamp.label}
-                </button>
-                <button
-                  type="button"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onRemoveTimestamp(timestamp.id);
-                  }}
-                  className="border-l border-[var(--border-color)] px-1.5 py-1 text-[var(--text-muted)] transition-colors hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]"
-                  title={`Remove ${timestamp.label}`}
-                  aria-label={`Remove ${timestamp.label}`}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -473,6 +511,12 @@ export default function DetailPanel({
   onWatchSession,
   openAnnotateRequestKey = 0,
 }: DetailPanelProps) {
+  type TimestampUndoState = {
+    notes: string;
+    timestampRefs: TimestampRef[];
+    deletedLabel: string;
+  };
+
   const hasMultiSelection = selectedCount > 1;
   const effectiveRow = hasMultiSelection ? null : row;
   const videoId = effectiveRow ? resolveVideoId(effectiveRow) : null;
@@ -491,12 +535,15 @@ export default function DetailPanel({
   const playerFrameRef = useRef<HTMLDivElement | null>(null);
   const playerRef = useRef<any>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLDivElement | null>(null);
   const [playerDuration, setPlayerDuration] = useState(0);
   const [playerState, setPlayerState] = useState<number | null>(null);
   const [playerLoadError, setPlayerLoadError] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [isNotesDirty, setIsNotesDirty] = useState(false);
+  const [timestampUndoState, setTimestampUndoState] = useState<TimestampUndoState | null>(null);
+  const timestampUndoTimeoutRef = useRef<number | null>(null);
   const focusNotesEditor = useCallback((cursorPosition?: number) => {
     window.requestAnimationFrame(() => {
       const textarea = notesTextareaRef.current;
@@ -506,6 +553,11 @@ export default function DetailPanel({
       textarea.setSelectionRange(nextCursorPosition, nextCursorPosition);
       textarea.scrollTop = textarea.scrollHeight;
     });
+  }, []);
+  const autoSizeTextarea = useCallback((textarea: HTMLTextAreaElement | null) => {
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = `${Math.max(textarea.scrollHeight, 224)}px`;
   }, []);
   const notesDraftRef = useRef('');
   const isNotesDirtyRef = useRef(false);
@@ -611,6 +663,10 @@ export default function DetailPanel({
   }, [effectiveRow]);
   const videoTitle = useMemo(() => resolveVideoTitle(effectiveRow), [effectiveRow]);
   const currentNotes = savedNotes || '';
+  const parsedTimestampDocument = useMemo(
+    () => parseTimestampDocument(notesDraft, annotation?.timestampRefs || [], playerDuration),
+    [annotation?.timestampRefs, notesDraft, playerDuration],
+  );
 
   const closeActiveWatchSegment = (player?: any) => {
     const session = watchSessionRef.current;
@@ -686,14 +742,110 @@ export default function DetailPanel({
     onUpdateNotes(targetVideoId, value);
   };
 
+  const clearTimestampUndo = useCallback(() => {
+    if (timestampUndoTimeoutRef.current !== null) {
+      window.clearTimeout(timestampUndoTimeoutRef.current);
+      timestampUndoTimeoutRef.current = null;
+    }
+    setTimestampUndoState(null);
+  }, []);
+
+  const startTimestampUndo = useCallback((payload: TimestampUndoState) => {
+    if (timestampUndoTimeoutRef.current !== null) {
+      window.clearTimeout(timestampUndoTimeoutRef.current);
+    }
+    setTimestampUndoState(payload);
+    timestampUndoTimeoutRef.current = window.setTimeout(() => {
+      timestampUndoTimeoutRef.current = null;
+      setTimestampUndoState(null);
+    }, 5200);
+  }, []);
+
+  const applyTimestampMutation = useCallback((
+    nextNotes: string,
+    nextTimestampRefs: TimestampRef[],
+    options?: { cursorPosition?: number | null; focus?: boolean },
+  ) => {
+    if (!videoId) return;
+    setNotesDraftState(nextNotes, false);
+    onUpdateNotes(videoId, nextNotes);
+    onUpdateAnnotation(videoId, { timestampRefs: nextTimestampRefs });
+    setDetailMode('annotate');
+    const shouldFocus = options?.focus !== false;
+    if (!shouldFocus) return;
+    const cursorPosition = options?.cursorPosition;
+    if (cursorPosition !== undefined && cursorPosition !== null) {
+      focusNotesEditor(cursorPosition);
+      return;
+    }
+    focusNotesEditor();
+  }, [focusNotesEditor, onUpdateAnnotation, onUpdateNotes, setNotesDraftState, videoId]);
+
+  const handleAddTimestamp = useCallback(() => {
+    if (!videoId || !playerRef.current?.getCurrentTime) return;
+    const playheadSeconds = Number(playerRef.current.getCurrentTime() || 0);
+    const result = insertAtPlayhead({
+      notes: notesDraftRef.current,
+      timestampRefs: parsedTimestampDocument.timestampRefs,
+      playheadSeconds,
+      durationSeconds: playerDuration,
+    });
+    clearTimestampUndo();
+    applyTimestampMutation(result.notes, result.timestampRefs, { cursorPosition: result.cursorPosition });
+  }, [
+    applyTimestampMutation,
+    clearTimestampUndo,
+    parsedTimestampDocument.timestampRefs,
+    playerDuration,
+    videoId,
+  ]);
+
+  const handleDeleteTimestamp = useCallback((entryId: string) => {
+    if (!videoId) return;
+    const snapshotNotes = notesDraftRef.current;
+    const snapshotRefs = parsedTimestampDocument.timestampRefs;
+    const result = removeById({
+      notes: snapshotNotes,
+      timestampRefs: snapshotRefs,
+      entryId,
+      durationSeconds: playerDuration,
+    });
+    if (!result.removed || !result.removedEntry) return;
+    applyTimestampMutation(result.notes, result.timestampRefs, { focus: false });
+    startTimestampUndo({
+      notes: snapshotNotes,
+      timestampRefs: snapshotRefs,
+      deletedLabel: result.removedEntry.time_label,
+    });
+  }, [
+    applyTimestampMutation,
+    parsedTimestampDocument.timestampRefs,
+    playerDuration,
+    startTimestampUndo,
+    videoId,
+  ]);
+
+  const handleUndoTimestampDelete = useCallback(() => {
+    if (!videoId || !timestampUndoState) return;
+    applyTimestampMutation(timestampUndoState.notes, timestampUndoState.timestampRefs, { focus: false });
+    clearTimestampUndo();
+  }, [applyTimestampMutation, clearTimestampUndo, timestampUndoState, videoId]);
+
   useEffect(() => {
     const previousVideoId = activeVideoIdRef.current;
-    if (previousVideoId && previousVideoId !== videoId && isNotesDirtyRef.current) {
+    const switchedVideo = previousVideoId !== videoId;
+
+    if (previousVideoId && switchedVideo && isNotesDirtyRef.current) {
       flushNotesDraft(previousVideoId);
     }
 
+    if (switchedVideo) {
+      activeVideoIdRef.current = videoId;
+      setNotesDraftState(currentNotes, false);
+      return;
+    }
+
     activeVideoIdRef.current = videoId;
-    setNotesDraftState(currentNotes, false);
   }, [videoId, currentNotes, onUpdateNotes, setNotesDraftState]);
 
   useEffect(() => {
@@ -701,6 +853,33 @@ export default function DetailPanel({
       setNotesDraftState(currentNotes, false);
     }
   }, [currentNotes, videoId, setNotesDraftState]);
+
+  useEffect(() => {
+    clearTimestampUndo();
+  }, [clearTimestampUndo, videoId, hasMultiSelection]);
+
+  useEffect(() => () => {
+    if (timestampUndoTimeoutRef.current !== null) {
+      window.clearTimeout(timestampUndoTimeoutRef.current);
+      timestampUndoTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!videoId || hasMultiSelection) return;
+    const timeout = window.setTimeout(() => {
+      const nextTimestampRefs = parsedTimestampDocument.timestampRefs;
+      if (timestampRefsEqual(annotation?.timestampRefs || [], nextTimestampRefs)) return;
+      onUpdateAnnotation(videoId, { timestampRefs: nextTimestampRefs });
+    }, 260);
+    return () => window.clearTimeout(timeout);
+  }, [
+    annotation?.timestampRefs,
+    hasMultiSelection,
+    onUpdateAnnotation,
+    parsedTimestampDocument.timestampRefs,
+    videoId,
+  ]);
 
   useEffect(() => {
     if (!videoId || !isNotesDirty) return;
@@ -725,6 +904,15 @@ export default function DetailPanel({
   }, [isEditingTranscript, transcript]);
 
   useEffect(() => {
+    autoSizeTextarea(notesTextareaRef.current);
+  }, [autoSizeTextarea, detailMode, notesDraft, videoId]);
+
+  useEffect(() => {
+    if (!isEditingTranscript) return;
+    autoSizeTextarea(transcriptTextareaRef.current);
+  }, [autoSizeTextarea, isEditingTranscript, transcriptEditValue, videoId]);
+
+  useEffect(() => {
     let cancelled = false;
     flushWatchSession(playerRef.current);
     setPlayerDuration(0);
@@ -734,6 +922,7 @@ export default function DetailPanel({
       playerRef.current?.destroy?.();
       playerRef.current = null;
       setPlayerState(null);
+      setPlayerDuration(0);
       return;
     }
 
@@ -763,7 +952,7 @@ export default function DetailPanel({
           onReady: (event: any) => {
             setPlayerLoadError(null);
             const duration = Number(event.target?.getDuration?.() || 0);
-            setPlayerDuration(duration);
+            setPlayerDuration(Number.isFinite(duration) ? Math.max(0, Math.floor(duration)) : 0);
             setPlayerState(Number(event.target?.getPlayerState?.() ?? null));
             watchSessionRef.current.durationSeconds = Number.isFinite(duration) ? duration : null;
             const iframe = event.target?.getIframe?.();
@@ -778,8 +967,8 @@ export default function DetailPanel({
           },
           onStateChange: (event: any) => {
             const duration = Number(event.target?.getDuration?.() || 0);
+            setPlayerDuration(Number.isFinite(duration) ? Math.max(0, Math.floor(duration)) : 0);
             const nextState = Number(event?.data ?? event.target?.getPlayerState?.() ?? null);
-            setPlayerDuration(duration);
             setPlayerState(nextState);
             watchSessionRef.current.durationSeconds = Number.isFinite(duration) ? duration : null;
 
@@ -870,6 +1059,17 @@ export default function DetailPanel({
         return;
       }
 
+      const isTimestampShortcut = (key === 't' || event.code.toLowerCase() === 'keyt')
+        && event.shiftKey
+        && !event.altKey
+        && !event.ctrlKey
+        && !event.metaKey;
+      if (isTimestampShortcut) {
+        event.preventDefault();
+        handleAddTimestamp();
+        return;
+      }
+
       if (event.key.toLowerCase() === 'f' && playerFrameRef.current) {
         event.preventDefault();
         if (document.fullscreenElement) {
@@ -880,22 +1080,11 @@ export default function DetailPanel({
         return;
       }
 
-      const code = event.code.toLowerCase();
-      const isTimestampShortcut = (key === 't' || code === 'keyt')
-        && event.shiftKey
-        && !event.altKey
-        && !event.ctrlKey
-        && !event.metaKey;
-      if (isTimestampShortcut) {
-        event.preventDefault();
-        setDetailMode('annotate');
-        handleAddTimestamp();
-      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [hasMultiSelection, playerState, videoId]);
+  }, [handleAddTimestamp, hasMultiSelection, playerState, videoId]);
 
 
   if (hasMultiSelection) {
@@ -1094,7 +1283,11 @@ export default function DetailPanel({
   const hasTranscript = transcript.trim().length > 0;
   const currentTags = annotation?.tags || [];
   const quoteRefs = sortQuoteRefs(annotation?.quoteRefs || []);
-  const timestampRefs = sortTimestampRefs(annotation?.timestampRefs || []);
+  const timestampEntries = parsedTimestampDocument.entries;
+  const markerDurationSeconds = Math.max(
+    playerDuration,
+    timestampEntries.reduce((maxValue, entry) => Math.max(maxValue, entry.time_seconds), 0),
+  );
 
   const submitTag = () => {
     const trimmed = tagInput.trim();
@@ -1158,11 +1351,10 @@ export default function DetailPanel({
     selection.removeAllRanges();
   };
 
-  const persistManagedNotes = (nextQuoteRefs: QuoteRef[], nextTimestampRefs: TimestampRef[]) => {
+  const persistManagedNotes = (nextQuoteRefs: QuoteRef[]) => {
     if (!videoId) return;
     onUpdateAnnotation(videoId, {
       quoteRefs: nextQuoteRefs,
-      timestampRefs: nextTimestampRefs,
     });
   };
 
@@ -1178,7 +1370,7 @@ export default function DetailPanel({
     const nextQuoteRefs = sortQuoteRefs([...(annotation?.quoteRefs || []), nextQuote]);
     const nextNotes = appendQuotedText(notesDraftRef.current, 'Transcript Quotes', selection.text);
     updateNotes(nextNotes);
-    persistManagedNotes(nextQuoteRefs, timestampRefs);
+    persistManagedNotes(nextQuoteRefs);
     setActiveRange({ startIndex: nextQuote.startIndex, endIndex: nextQuote.endIndex });
     setDetailMode('annotate');
     focusNotesEditor();
@@ -1200,33 +1392,6 @@ export default function DetailPanel({
   const handleCancelTranscriptEdit = () => {
     setTranscriptEditValue(transcript);
     setIsEditingTranscript(false);
-  };
-
-  const handleAddTimestamp = () => {
-    if (!videoId || !playerRef.current?.getCurrentTime) return;
-    const seconds = Number(playerRef.current.getCurrentTime() || 0);
-    const nextTimestamp: TimestampRef = {
-      id: Math.random().toString(36).slice(2),
-      seconds,
-      label: formatTimestampLabel(seconds, playerDuration),
-      createdAt: Date.now(),
-    };
-    const nextTimestampRefs = sortTimestampRefs([...(annotation?.timestampRefs || []), nextTimestamp]);
-    const nextNotes = appendTimestampMarkdown(notesDraftRef.current, nextTimestamp.label);
-    updateNotes(nextNotes);
-    flushNotesDraft(videoId, nextNotes);
-    persistManagedNotes(quoteRefs, nextTimestampRefs);
-    setDetailMode('annotate');
-    focusNotesEditor(nextNotes.length);
-  };
-
-  const handleTimestampClick = (timestamp: TimestampRef) => {
-    playerRef.current?.seekTo?.(timestamp.seconds, true);
-  };
-
-  const handleRemoveTimestamp = (timestampId: string) => {
-    const nextTimestampRefs = timestampRefs.filter((timestamp) => timestamp.id !== timestampId);
-    persistManagedNotes(quoteRefs, nextTimestampRefs);
   };
 
   const tabs: Array<{ key: DetailMode; label: string; disabled?: boolean }> = [
@@ -1254,27 +1419,25 @@ export default function DetailPanel({
             </div>
           )}
         </div>
+        {videoId && markerDurationSeconds > 0 && timestampEntries.length > 0 && (
+          <TimestampMarkerRail
+            markers={timestampEntries}
+            durationSeconds={markerDurationSeconds}
+            onDeleteMarker={handleDeleteTimestamp}
+          />
+        )}
       </div>
 
       <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-6 p-6">
           <section>
-            <div className="mb-2 flex items-start gap-2">
-              <span className="mt-1 h-2 w-2 shrink-0 bg-[var(--accent)]" />
+            <div className="mb-3 flex items-start gap-2">
               <h2 className="min-w-0 flex-1 text-[16px] font-bold leading-tight text-[var(--text-main)]">{title}</h2>
-              <button
-                type="button"
-                onClick={handleAddTimestamp}
-                className="inline-flex shrink-0 items-center gap-1 px-0 py-0 text-[11px] font-semibold text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                title="Add current playhead timestamp to notes"
-              >
-                <Clock3 size={12} /> Timestamp
-              </button>
             </div>
-            <div className="flex items-center justify-between gap-3 border-b border-[var(--border-color)] pb-4 text-[12px] text-[var(--text-muted)]">
-              <div className="flex flex-wrap gap-4">
-                <span>{views !== undefined ? Number(views).toLocaleString() : '0'} views</span>
-                <span>{publishedAt ? new Date(publishedAt).toLocaleDateString() : 'N/A'}</span>
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--border-color)] pb-5 text-[12px] text-[var(--text-muted)]">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2 leading-snug">
+                <span className="whitespace-nowrap">{views !== undefined ? Number(views).toLocaleString() : '0'} views</span>
+                <span className="whitespace-nowrap">{publishedAt ? new Date(publishedAt).toLocaleDateString() : 'N/A'}</span>
               </div>
               <div className="inline-flex overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)]">
                 {tabs.map((tab) => {
@@ -1287,7 +1450,7 @@ export default function DetailPanel({
                       disabled={tab.disabled}
                       className={`min-w-[5.75rem] border-l border-[var(--border-color)] px-3 py-1.5 text-[11px] font-semibold transition-colors first:border-l-0 ${
                         isActive
-                          ? 'bg-[var(--accent)] text-white'
+                          ? 'bg-[var(--grid-hover)] text-[var(--text-main)]'
                           : 'text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-main)] disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent disabled:hover:text-[var(--text-muted)]'
                       }`}
                     >
@@ -1303,38 +1466,39 @@ export default function DetailPanel({
             {detailMode === 'description' && (
               <>
                 {videoTags.length > 0 && (
-                  <div className="flex min-h-[2.25rem] flex-wrap gap-2 border border-[var(--border-color)] bg-[var(--bg-primary)] p-3">
-                    {videoTags.map((tag) => (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={(event) => onApplyTagFilter(tag, 'imported', event.ctrlKey || event.metaKey)}
-                        className="border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-main)] hover:border-[var(--accent)]"
-                        title="Filter by this imported tag"
-                      >
-                        {tag}
-                      </button>
-                    ))}
+                  <div className="space-y-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Imported tags</div>
+                    <div className="flex min-h-[1.75rem] flex-wrap gap-2">
+                      {videoTags.map((tag) => (
+                        <button
+                          key={tag}
+                          type="button"
+                          onClick={(event) => onApplyTagFilter(tag, 'imported', event.ctrlKey || event.metaKey)}
+                          className="border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1 text-[12px] text-[var(--text-main)] hover:border-[var(--accent)]"
+                          title="Filter by this imported tag"
+                        >
+                          {tag}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                <div className="space-y-2 border-t border-[var(--border-color)] pt-4">
-                  <div className="flex items-center justify-between gap-3 text-[14px] font-mono text-[var(--text-main)]">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[var(--text-muted)]">#</span> Video Description
-                    </div>
+                <div className="space-y-2 pt-1">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Video description</div>
                     {description ? (
                       <button
                         type="button"
                         onClick={handleQuoteDescriptionSelection}
-                        className="inline-flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1 text-[11px] font-semibold text-[var(--text-main)] hover:border-[var(--accent)]"
+                        className="inline-flex items-center gap-1 border-b border-[var(--border-color)]/50 px-1 py-1 text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text-main)]"
                         title="Quote selected description text into notes"
                       >
                         <Plus size={12} /> Quote selection
                       </button>
                     ) : null}
                   </div>
-                  <div ref={descriptionRef} className="min-h-[14rem] whitespace-pre-wrap border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 text-[13px] leading-6 text-[var(--text-main)]">
+                  <div ref={descriptionRef} className="min-h-[14rem] whitespace-pre-wrap border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 text-[14px] leading-6 text-[var(--text-main)]">
                     {description || <span className="text-[var(--text-muted)]">No video description was imported for this video.</span>}
                   </div>
                 </div>
@@ -1343,6 +1507,7 @@ export default function DetailPanel({
 
             {detailMode === 'transcript' && (
               <div className="space-y-3">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Video transcript</div>
                 <div className="flex items-center justify-between gap-3">
                   <InputRow
                     icon={<Search size={14} />}
@@ -1354,7 +1519,7 @@ export default function DetailPanel({
                     <button
                       type="button"
                       onClick={() => setIsEditingTranscript(true)}
-                      className="inline-flex shrink-0 items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[12px] font-semibold text-[var(--text-main)] hover:border-[var(--accent)]"
+                      className="inline-flex shrink-0 items-center gap-1 px-1 py-1 text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text-main)]"
                     >
                       <Pencil size={13} /> Edit Transcript
                     </button>
@@ -1380,9 +1545,13 @@ export default function DetailPanel({
 
                 {isEditingTranscript ? (
                   <textarea
+                    ref={transcriptTextareaRef}
                     value={transcriptEditValue}
-                    onChange={(event) => setTranscriptEditValue(event.target.value)}
-                    className="custom-scrollbar min-h-[18rem] w-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] focus:outline-none"
+                    onChange={(event) => {
+                      setTranscriptEditValue(event.target.value);
+                      autoSizeTextarea(event.currentTarget);
+                    }}
+                    className="min-h-[14rem] w-full overflow-hidden border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 font-mono text-[13px] leading-6 text-[var(--text-main)] focus:outline-none"
                   />
                 ) : (
                   <TranscriptViewer
@@ -1396,19 +1565,12 @@ export default function DetailPanel({
             )}
 
             {detailMode === 'annotate' && (
-              <>
-                <InputRow
-                  icon={<Tag size={14} />}
-                  value={tagInput}
-                  onChange={setTagInput}
-                  onSubmit={submitTag}
-                  placeholder="Type user tag and press Enter..."
-                />
-
-                {currentTags.length > 0 && (
-                  <div className="flex min-h-[1.75rem] flex-wrap gap-2">
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">User tags</div>
+                  <div className="flex min-h-[1.75rem] flex-wrap items-center gap-2">
                     {currentTags.map((tag) => (
-                      <span key={tag} className="flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1 text-[11px] text-[var(--text-main)]">
+                      <span key={tag} className="flex items-center gap-1 border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1 text-[12px] text-[var(--text-main)]">
                         <button
                           type="button"
                           onClick={(event) => onApplyTagFilter(tag, 'user', event.ctrlKey || event.metaKey)}
@@ -1422,17 +1584,79 @@ export default function DetailPanel({
                         </button>
                       </span>
                     ))}
+                    <form
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        submitTag();
+                      }}
+                      onMouseDownCapture={(event) => event.stopPropagation()}
+                      onPointerDownCapture={(event) => event.stopPropagation()}
+                      onClickCapture={(event) => event.stopPropagation()}
+                      className="flex min-w-[14rem] flex-1 items-center gap-2 border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1"
+                    >
+                      <span className="text-[var(--text-muted)]"><Tag size={13} /></span>
+                      <input
+                        type="text"
+                        value={tagInput}
+                        onChange={(event) => setTagInput(event.target.value)}
+                        onMouseDownCapture={(event) => event.stopPropagation()}
+                        onPointerDownCapture={(event) => event.stopPropagation()}
+                        onClickCapture={(event) => event.stopPropagation()}
+                        placeholder="Type user tag and press Enter..."
+                        className="w-full bg-transparent text-[12px] leading-5 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                      />
+                    </form>
                   </div>
-                )}
+                </div>
 
-                <div className="space-y-3 border-t border-[var(--border-color)] pt-4">
-                  <div className="flex items-center gap-2 text-[14px] font-mono text-[var(--text-main)]">
-                    <span className="text-[var(--text-muted)]">#</span> Notes Markdown
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Timestamp annotations</div>
+                    <button
+                      type="button"
+                      onClick={handleAddTimestamp}
+                      disabled={!videoId}
+                      className="inline-flex items-center gap-1 border-b border-[var(--border-color)]/50 px-1 py-1 text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text-main)] disabled:opacity-40"
+                      title="Add timestamp at current playhead"
+                    >
+                      <Clock3 size={11} />
+                      Add
+                    </button>
                   </div>
+                  {timestampEntries.length > 0 ? (
+                    <div className="flex min-h-[1.75rem] flex-wrap gap-2">
+                      {timestampEntries.map((entry) => (
+                        <div key={entry.id} className="flex items-start gap-2 border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5 text-[12px]">
+                          <div className="min-w-0">
+                            <div className="font-mono text-[12px] font-semibold text-[var(--text-main)]">{entry.time_label}</div>
+                            <div className="max-w-[16rem] truncate text-[13px] leading-5 text-[var(--text-muted)]">{buildMarkerPreview(entry.body)}</div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTimestamp(entry.id)}
+                            className="mt-0.5 shrink-0 text-[var(--text-muted)] transition-colors hover:text-red-500"
+                            aria-label={`Delete timestamp ${entry.time_label}`}
+                            title={`Delete timestamp ${entry.time_label}`}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[13px] leading-5 text-[var(--text-muted)]">No timestamp annotations yet. Use Shift + T while watching or click Add.</p>
+                  )}
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Notes markdown</div>
                   <textarea
                     ref={notesTextareaRef}
                     value={notesDraft}
-                    onChange={(event) => updateNotes(event.target.value)}
+                    onChange={(event) => {
+                      updateNotes(event.target.value);
+                      autoSizeTextarea(event.currentTarget);
+                    }}
                     onBlur={() => {
                       if (videoId && isNotesDirtyRef.current) {
                         flushNotesDraft(videoId);
@@ -1441,21 +1665,33 @@ export default function DetailPanel({
                       }
                     }}
                     placeholder="# Notes\n\nAdd observations, ideas, and references here..."
-                    className="custom-scrollbar min-h-[14rem] w-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                    className="min-h-[14rem] w-full overflow-hidden border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 font-mono text-[14px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
                   />
                   <NotesPreview
                     quoteRefs={quoteRefs}
-                    timestampRefs={timestampRefs}
                     onQuoteClick={handleQuoteClick}
-                    onTimestampClick={handleTimestampClick}
-                    onRemoveTimestamp={handleRemoveTimestamp}
                   />
                 </div>
-              </>
+              </div>
             )}
           </section>
         </div>
       </div>
+      {timestampUndoState && (
+        <div className="shrink-0 border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-4 py-2">
+          <div className="flex items-center justify-between gap-3 text-[11px] text-[var(--text-main)]">
+            <span>Timestamp {timestampUndoState.deletedLabel} deleted.</span>
+            <button
+              type="button"
+              onClick={handleUndoTimestampDelete}
+              className="border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 font-semibold text-[var(--text-main)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            >
+              Undo
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
