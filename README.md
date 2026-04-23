@@ -44,10 +44,6 @@ How about surfing? Platforms like YouTube entice us to surf and get lost in the 
 
 Enter Playlist Surfer, a lightweight browser application for inspecting CSV-based video and channel datasets from YouTube Data Tools (Rieder 2015), filtering them, and assembling collections for digital methods research. It is intended to nudge researchers to move between quantitative distant reading and qualitative close reading: you can filter, sort, annotate, inspect thumbnails and transcripts, jump from aggregate views into subsets, and export the full project state as a reproducible archive containing both machine-generated structure and human interpretation. Conceptually, it is closer to the Amsterdam school of digital methods and to quali-quantitative approaches than to a generic dashboard app: platform-native traces are repurposed for analysis (Rogers 2013), while notes, saved views, and project exports keep the interpretive and procedural chain inspectable (Venturini and Latour 2010).
 
-### Upcoming
-
-And the best part, for you the reader, is that you can watch our playlists. You can download a ZIP of our full project, get a feel for the data, audit our analysis, build on it further, or repurpose the research tool for your own purposes; and perhaps even find the side hustle that suits you best ;)
-
 ### References
 
 *Kehlmann, Daniel. 2006. Measuring the World: A Novel. Translated by Carol Brown Janeway. New York: Pantheon Books.*
