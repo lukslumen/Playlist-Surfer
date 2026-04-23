@@ -1,6 +1,6 @@
 # Playlist Surfer
 
-Playlist Surfer is a React/TS research tool for analyzing CSV-based video and channel datasets. Built for the "Amsterdam school" of digital methods, it bridges the gap between distant and close reading through a workflow of repurposed platform traces and human interpretation.
+Playlist Surfer is a React/TS research tool for analyzing CSV-based video and channel datasets. Built for the "Amsterdam school" of digital methods, it narrows the gap between distant and close reading through a frictionless quamti-quali workflow of zooming-out with summary metrics and visualisations and zooming-in by making playlists and annotating videos. 
 
 ## What you can do
 
