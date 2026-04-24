@@ -258,11 +258,7 @@ function TimestampMarkerRail({
   const safeDuration = Math.max(1, Math.floor(durationSeconds || 0));
   return (
     <div className="border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2">
-      <div className="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        <span>Timestamp rail</span>
-        <span>{markers.length} marker{markers.length === 1 ? '' : 's'}</span>
-      </div>
-      <div className="relative overflow-visible rounded border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2">
+      <div className="relative overflow-visible px-1 py-1">
         <div className="relative h-4">
           <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 bg-[var(--border-color)]" />
           {markers.map((marker) => {
@@ -387,7 +383,7 @@ function TranscriptViewer({
       <div
         ref={containerRef}
         onMouseUp={handleMouseUp}
-        className="min-h-[14rem] border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 text-[14px] leading-6 whitespace-pre-wrap text-[var(--text-main)]"
+        className="min-h-[14rem] whitespace-pre-wrap rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)]"
       >
         {content || <span className="text-[var(--text-muted)]">No transcript was imported for this video.</span>}
       </div>
@@ -426,11 +422,13 @@ function InputRow({
   placeholder: string;
   onSubmit?: () => void;
   inputRef?: React.RefObject<HTMLInputElement | null>;
-  variant?: 'boxed' | 'flat';
+  variant?: 'boxed' | 'flat' | 'panel';
 }) {
   const formClassName = variant === 'flat'
     ? 'flex items-center gap-2 px-0 py-2'
-    : 'flex items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2';
+    : variant === 'panel'
+      ? 'flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2'
+      : 'flex items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2';
 
   return (
     <form
@@ -1439,7 +1437,7 @@ export default function DetailPanel({
                 <span className="whitespace-nowrap">{views !== undefined ? Number(views).toLocaleString() : '0'} views</span>
                 <span className="whitespace-nowrap">{publishedAt ? new Date(publishedAt).toLocaleDateString() : 'N/A'}</span>
               </div>
-              <div className="inline-flex overflow-hidden border border-[var(--border-color)] bg-[var(--bg-primary)]">
+              <div className="inline-flex overflow-hidden rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-primary)]">
                 {tabs.map((tab) => {
                   const isActive = detailMode === tab.key;
                   return (
@@ -1498,7 +1496,7 @@ export default function DetailPanel({
                       </button>
                     ) : null}
                   </div>
-                  <div ref={descriptionRef} className="min-h-[14rem] whitespace-pre-wrap border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 text-[14px] leading-6 text-[var(--text-main)]">
+                  <div ref={descriptionRef} className="min-h-[14rem] whitespace-pre-wrap rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)]">
                     {description || <span className="text-[var(--text-muted)]">No video description was imported for this video.</span>}
                   </div>
                 </div>
@@ -1514,6 +1512,7 @@ export default function DetailPanel({
                     value={transcriptSearch}
                     onChange={setTranscriptSearch}
                     placeholder="Search transcript"
+                    variant="panel"
                   />
                   {!isEditingTranscript ? (
                     <button
@@ -1551,7 +1550,7 @@ export default function DetailPanel({
                       setTranscriptEditValue(event.target.value);
                       autoSizeTextarea(event.currentTarget);
                     }}
-                    className="min-h-[14rem] w-full overflow-hidden border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 text-[14px] leading-6 text-[var(--text-main)] focus:outline-none"
+                    className="min-h-[14rem] w-full overflow-hidden rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] focus:outline-none"
                   />
                 ) : (
                   <TranscriptViewer
@@ -1592,7 +1591,7 @@ export default function DetailPanel({
                       onMouseDownCapture={(event) => event.stopPropagation()}
                       onPointerDownCapture={(event) => event.stopPropagation()}
                       onClickCapture={(event) => event.stopPropagation()}
-                      className="flex min-w-[14rem] flex-1 items-center gap-2 border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1"
+                      className="flex min-w-[14rem] flex-1 items-center gap-2 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1"
                     >
                       <span className="text-[var(--text-muted)]"><Tag size={13} /></span>
                       <input
@@ -1644,29 +1643,33 @@ export default function DetailPanel({
                       ))}
                     </div>
                   ) : (
-                    <p className="text-[13px] leading-5 text-[var(--text-muted)]">No timestamp annotations yet. Use Shift + T while watching or click Add.</p>
+                    <div className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5">
+                      <p className="text-[13px] leading-5 text-[var(--text-muted)]">No timestamp annotations yet. Use Shift + T while watching or click Add.</p>
+                    </div>
                   )}
                 </div>
 
                 <div className="space-y-3 pt-2">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Notes markdown</div>
-                  <textarea
-                    ref={notesTextareaRef}
-                    value={notesDraft}
-                    onChange={(event) => {
-                      updateNotes(event.target.value);
-                      autoSizeTextarea(event.currentTarget);
-                    }}
-                    onBlur={() => {
-                      if (videoId && isNotesDirtyRef.current) {
-                        flushNotesDraft(videoId);
-                        isNotesDirtyRef.current = false;
-                        setIsNotesDirty(false);
-                      }
-                    }}
-                    placeholder="# Notes\n\nAdd observations, ideas, and references here..."
-                    className="min-h-[14rem] w-full overflow-hidden border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 font-mono text-[14px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                  />
+                  <div className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5">
+                    <textarea
+                      ref={notesTextareaRef}
+                      value={notesDraft}
+                      onChange={(event) => {
+                        updateNotes(event.target.value);
+                        autoSizeTextarea(event.currentTarget);
+                      }}
+                      onBlur={() => {
+                        if (videoId && isNotesDirtyRef.current) {
+                          flushNotesDraft(videoId);
+                          isNotesDirtyRef.current = false;
+                          setIsNotesDirty(false);
+                        }
+                      }}
+                      placeholder="# Notes\n\nAdd observations, ideas, and references here..."
+                      className="min-h-[14rem] w-full overflow-hidden bg-transparent px-0 py-0 text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                    />
+                  </div>
                   <NotesPreview
                     quoteRefs={quoteRefs}
                     onQuoteClick={handleQuoteClick}
