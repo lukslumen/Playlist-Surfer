@@ -387,7 +387,7 @@ function TranscriptViewer({
       <div
         ref={containerRef}
         onMouseUp={handleMouseUp}
-        className="min-h-[14rem] border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 font-mono text-[13px] leading-6 whitespace-pre-wrap text-[var(--text-main)]"
+        className="min-h-[14rem] border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 text-[14px] leading-6 whitespace-pre-wrap text-[var(--text-main)]"
       >
         {content || <span className="text-[var(--text-muted)]">No transcript was imported for this video.</span>}
       </div>
@@ -1551,7 +1551,7 @@ export default function DetailPanel({
                       setTranscriptEditValue(event.target.value);
                       autoSizeTextarea(event.currentTarget);
                     }}
-                    className="min-h-[14rem] w-full overflow-hidden border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 font-mono text-[13px] leading-6 text-[var(--text-main)] focus:outline-none"
+                    className="min-h-[14rem] w-full overflow-hidden border-b border-[var(--border-color)]/60 bg-transparent px-0 py-2 text-[14px] leading-6 text-[var(--text-main)] focus:outline-none"
                   />
                 ) : (
                   <TranscriptViewer
