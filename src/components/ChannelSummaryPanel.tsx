@@ -111,6 +111,21 @@ const PROFILE_SNAPSHOT_KEYS = [
   'channel_topics',
 ];
 
+const CHANNEL_KPI_KEYS = [
+  'video_count_in_dataset',
+  'channel_video_count',
+  'total_views_in_dataset',
+  'total_likes_in_dataset',
+  'total_comments_in_dataset',
+  'channel_unique_domains',
+];
+
+const CHANNEL_HEADER_META_KEYS = [
+  'channel_id',
+  'earliest_publish_date',
+  'latest_publish_date',
+];
+
 const METADATA_HIDDEN_KEYS = new Set([
   'channel_name',
   'channel_id',
@@ -122,6 +137,17 @@ const METADATA_HIDDEN_KEYS = new Set([
   'channel_about',
   'channelDescription',
   'aboutText',
+  'id',
+  'title',
+  'publishedAt',
+  'defaultLanguage',
+  'country',
+  'viewCount',
+  'subscriberCount',
+  'videoCount',
+  'thumbnail',
+  'keywords',
+  'topicDetails',
 ]);
 
 function isEmptyValue(value: unknown) {
@@ -415,6 +441,20 @@ function orderKeysByPriority(keys: string[], priority: string[]) {
   return [...prioritized, ...rest];
 }
 
+function dedupeMetadataKeys(keys: string[], row: any) {
+  const seen = new Set<string>();
+  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+  return keys.filter((key) => {
+    const label = normalize(fieldLabel(key));
+    const display = formatMetadataDisplay(key, row?.[key]);
+    const value = normalize(Array.isArray(display) ? display.join(' | ') : String(display));
+    const signature = `${label}::${value}`;
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
+}
+
 function bucketForKey(key: string): MetadataBucket {
   if (SECTION_PRIORITY.publishing.includes(key)) return 'publishing';
   if (SECTION_PRIORITY.performance.includes(key)) return 'performance';
@@ -541,6 +581,13 @@ export default function ChannelSummaryPanel({
   );
 
   const metadataSections = useMemo(() => {
+    const reservedKeys = new Set<string>([
+      ...CHANNEL_KPI_KEYS,
+      ...CHANNEL_HEADER_META_KEYS,
+    ]);
+    const pruneReserved = (keys: string[]) => keys.filter((key) => !reservedKeys.has(key));
+    const orderAndDedupe = (keys: string[], priority: string[]) => dedupeMetadataKeys(orderKeysByPriority(keys, priority), activeRow);
+
     const buckets: Record<MetadataBucket, string[]> = {
       publishing: [],
       performance: [],
@@ -553,13 +600,13 @@ export default function ChannelSummaryPanel({
     });
 
     return {
-      publishing: orderKeysByPriority(buckets.publishing, SECTION_PRIORITY.publishing),
-      performance: orderKeysByPriority(buckets.performance, SECTION_PRIORITY.performance),
-      linking: orderKeysByPriority(buckets.linking, SECTION_PRIORITY.linking),
-      profile: orderKeysByPriority(buckets.profile, SECTION_PRIORITY.profile),
-      imported: orderKeysByPriority(buckets.imported, []),
+      publishing: orderAndDedupe(pruneReserved(buckets.publishing), SECTION_PRIORITY.publishing),
+      performance: orderAndDedupe(pruneReserved(buckets.performance), SECTION_PRIORITY.performance),
+      linking: orderAndDedupe(pruneReserved(buckets.linking), SECTION_PRIORITY.linking),
+      profile: orderAndDedupe(pruneReserved(buckets.profile), SECTION_PRIORITY.profile),
+      imported: orderAndDedupe(pruneReserved(buckets.imported), []),
     };
-  }, [metadataSourceKeys]);
+  }, [activeRow, metadataSourceKeys]);
 
   const profileSnapshotKeys = useMemo(
     () => PROFILE_SNAPSHOT_KEYS.filter((key) => metadataSections.profile.includes(key)),
@@ -577,12 +624,12 @@ export default function ChannelSummaryPanel({
   );
 
   const metricCards = useMemo(() => ([
-    { key: 'video_count_in_dataset', label: 'Videos', value: activeRow?.video_count_in_dataset },
-    { key: 'total_views_in_dataset', label: 'Views', value: activeRow?.total_views_in_dataset },
-    { key: 'total_likes_in_dataset', label: 'Likes', value: activeRow?.total_likes_in_dataset },
-    { key: 'total_comments_in_dataset', label: 'Comments', value: activeRow?.total_comments_in_dataset },
-    { key: 'channel_linked_video_count', label: 'Linked videos', value: activeRow?.channel_linked_video_count },
-    { key: 'channel_unique_domains', label: 'Linked domains', value: activeRow?.channel_unique_domains },
+    { key: 'video_count_in_dataset', label: 'Videos', context: 'In dataset', value: activeRow?.video_count_in_dataset },
+    { key: 'channel_video_count', label: 'Uploads', context: 'Imported metadata', value: activeRow?.channel_video_count },
+    { key: 'total_views_in_dataset', label: 'Views', context: 'In dataset', value: activeRow?.total_views_in_dataset },
+    { key: 'total_likes_in_dataset', label: 'Likes', context: 'In dataset', value: activeRow?.total_likes_in_dataset },
+    { key: 'total_comments_in_dataset', label: 'Comments', context: 'In dataset', value: activeRow?.total_comments_in_dataset },
+    { key: 'channel_unique_domains', label: 'Linked domains', context: 'Unique', value: activeRow?.channel_unique_domains },
   ]), [activeRow]);
 
   const handleNavigateToVideos = () => {
@@ -675,7 +722,7 @@ export default function ChannelSummaryPanel({
       return (
         <div className="custom-scrollbar flex max-h-20 min-w-0 flex-wrap gap-1.5 overflow-y-auto pr-1">
           {display.map((entry) => (
-            <span key={`${key}-${entry}`} className="inline-flex max-w-full items-center rounded-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-main)]">
+            <span key={`${key}-${entry}`} className="inline-flex max-w-full items-center rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-main)]">
               <span className="break-words [overflow-wrap:anywhere]">{entry}</span>
             </span>
           ))}
@@ -686,19 +733,19 @@ export default function ChannelSummaryPanel({
     if (display === EMPTY_PLACEHOLDER) return <span className="text-[var(--text-muted)]">{EMPTY_PLACEHOLDER}</span>;
 
     if (options?.metric) {
-      return <span className="text-xl font-semibold tracking-tight text-[var(--text-main)]">{display}</span>;
+      return <span className="font-mono text-[20px] font-semibold leading-tight tracking-tight text-[var(--text-main)]">{display}</span>;
     }
 
     if (isLongTextFieldKey(key)) {
       return (
-        <p className={`min-w-0 whitespace-pre-wrap break-words text-[13px] text-[var(--text-main)] [overflow-wrap:anywhere] ${options?.compactRows ? 'leading-5' : 'leading-6'}`}>
+        <p className={`min-w-0 whitespace-pre-wrap break-words font-mono text-[13px] text-[var(--text-muted)] [overflow-wrap:anywhere] ${options?.compactRows ? 'leading-5' : 'leading-5'}`}>
           {display}
         </p>
       );
     }
 
     return (
-      <span className={`block min-w-0 break-words text-[var(--text-main)] [overflow-wrap:anywhere] ${options?.compactRows ? 'text-[12px] leading-5' : 'text-[13px] leading-6'}`}>
+      <span className={`block min-w-0 break-words font-mono text-[var(--text-muted)] [overflow-wrap:anywhere] ${options?.compactRows ? 'text-[13px] leading-5' : 'text-[13px] leading-5'}`}>
         {display}
       </span>
     );
@@ -707,14 +754,14 @@ export default function ChannelSummaryPanel({
   const renderCompactSection = (title: string, keys: string[]) => {
     if (!keys.length) return null;
     return (
-      <section className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+      <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
         <div className="border-b border-[var(--border-color)] px-3 py-2">
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">{title}</h3>
+          <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{title}</h3>
         </div>
         <div className="space-y-2 px-3 py-3">
           {keys.map((key) => (
             <div key={key} className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:items-start">
-              <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">{fieldLabel(key)}</div>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{fieldLabel(key)}</div>
               <div className="min-w-0">{renderMetadataValue(key, activeRow?.[key], { compactRows: true })}</div>
             </div>
           ))}
@@ -725,10 +772,10 @@ export default function ChannelSummaryPanel({
 
   if (!hasChannelRows) {
     return (
-      <div className="flex h-full items-center justify-center bg-[var(--bg-primary)] px-6 text-center text-[var(--text-muted)]">
+      <div className="flex h-full items-center justify-center bg-[var(--bg-secondary)] px-6 text-center text-[var(--text-muted)]">
         <div className="max-w-sm space-y-4">
-          <div className="text-lg font-semibold text-[var(--text-main)]">Channel metadata has not been generated yet</div>
-          <p className="text-sm leading-relaxed">
+          <div className="text-[16px] font-bold text-[var(--text-main)]">Channel metadata has not been generated yet</div>
+          <p className="text-[13px] leading-5">
             Generate channel metadata to inspect channel summaries, linking metrics, and imported channel fields.
           </p>
           {onGenerate ? (
@@ -736,7 +783,7 @@ export default function ChannelSummaryPanel({
               type="button"
               onClick={onGenerate}
               disabled={isGenerating}
-              className="border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-4 py-2 text-sm font-medium text-[var(--text-main)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent)_14%,transparent)] disabled:opacity-50"
+              className="rounded-[6px] border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-4 py-2 text-[12px] font-semibold text-[var(--text-main)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent)_14%,transparent)] disabled:opacity-50"
             >
               {isGenerating ? 'Generating...' : 'Generate channel metadata'}
             </button>
@@ -748,10 +795,10 @@ export default function ChannelSummaryPanel({
 
   if (!activeRow) {
     return (
-      <div className="flex h-full items-center justify-center bg-[var(--bg-primary)] px-6 text-center text-[var(--text-muted)]">
+      <div className="flex h-full items-center justify-center bg-[var(--bg-secondary)] px-6 text-center text-[var(--text-muted)]">
         <div className="max-w-sm space-y-3">
-          <div className="text-lg font-semibold text-[var(--text-main)]">Select a channel</div>
-          <p className="text-sm leading-relaxed">Choose a channel row to inspect metadata and annotations here.</p>
+          <div className="text-[16px] font-bold text-[var(--text-main)]">Select a channel</div>
+          <p className="text-[13px] leading-5">Choose a channel row to inspect metadata and annotations here.</p>
         </div>
       </div>
     );
@@ -759,14 +806,14 @@ export default function ChannelSummaryPanel({
 
   if (selectedCount > 1) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-primary)]">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]">
         <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
           <div className="space-y-4 p-4">
-            <section className="space-y-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4">
+            <section className="space-y-3 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-4">
               <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Batch actions</div>
-                <div className="mt-1 text-sm font-medium text-[var(--text-main)]">{selectedCount.toLocaleString()} channels selected</div>
-                <p className="mt-2 text-xs text-[var(--text-muted)]">
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Batch actions</div>
+                <div className="mt-1 text-[13px] font-semibold text-[var(--text-main)]">{selectedCount.toLocaleString()} channels selected</div>
+                <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
                   Tag selected channels, copy channel or related video IDs/URLs, or {inclusionView === 'excluded' ? 'restore' : 'exclude'} all associated videos in one step.
                 </p>
               </div>
@@ -776,16 +823,16 @@ export default function ChannelSummaryPanel({
                   onChange={(event) => setTagInput(event.target.value)}
                   onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitTag(); } }}
                   placeholder="Add tag to selected channels"
-                  className="min-w-0 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-none"
+                  className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
                 />
-                <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90">
+                <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90">
                   <Plus size={14} /> Add
                 </button>
                 <button
                   type="button"
                   onClick={() => onBatchExcludeChannels?.()}
                   disabled={!onBatchExcludeChannels}
-                  className="shrink-0 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 text-[12px] font-medium text-[var(--text-main)] transition-colors hover:border-red-500 hover:text-red-600 disabled:opacity-50"
+                  className="shrink-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 text-[12px] font-semibold text-[var(--text-main)] transition-colors hover:border-red-500 hover:text-red-600 disabled:opacity-50"
                   title={inclusionView === 'excluded' ? 'Restore associated videos for selected channels' : 'Exclude associated videos for selected channels'}
                 >
                   <span className="inline-flex items-center gap-1.5">
@@ -799,7 +846,7 @@ export default function ChannelSummaryPanel({
                     type="button"
                     onClick={() => setIsBatchCopyMenuOpen((current) => !current)}
                     disabled={!onBatchCopySelection}
-                    className="inline-flex items-center gap-1.5 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[12px] font-medium text-[var(--text-main)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 text-[12px] font-semibold text-[var(--text-main)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
                     aria-expanded={isBatchCopyMenuOpen}
                   >
                     <Copy size={13} />
@@ -807,13 +854,13 @@ export default function ChannelSummaryPanel({
                     <ChevronDown size={12} className={isBatchCopyMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
                   </button>
                   {isBatchCopyMenuOpen ? (
-                    <div ref={batchCopyMenuRef} className="absolute right-0 top-full z-30 mt-1 w-52 border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-xl">
+                    <div ref={batchCopyMenuRef} className="absolute right-0 top-full z-30 mt-1 w-52 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-1 shadow-xl">
                       {CHANNEL_BATCH_COPY_OPTIONS.map((option) => (
                         <button
                           key={option.mode}
                           type="button"
                           onClick={() => { void submitBatchCopy(option.mode); }}
-                          className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
+                          className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[11px] text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
                         >
                           <Copy size={12} className="shrink-0 text-[var(--text-muted)]" />
                           {option.label}
@@ -824,11 +871,11 @@ export default function ChannelSummaryPanel({
                 </div>
               </div>
               <div className="space-y-2 border-t border-[var(--border-color)] pt-3">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Shared tags across selection</div>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Shared tags across selection</div>
                 {sharedTags.length > 0 ? (
                   <div className="flex min-h-[1.75rem] flex-wrap gap-2">
                     {sharedTags.map((tag) => (
-                      <span key={tag} className="flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1 text-[11px] text-[var(--text-main)]">
+                      <span key={tag} className="flex items-center gap-1 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1 text-[12px] text-[var(--text-main)]">
                         <span>{tag}</span>
                         <button type="button" onClick={() => removeTag(tag)} className="text-[var(--text-muted)] transition-colors hover:text-red-500">
                           <X size={10} />
@@ -837,7 +884,7 @@ export default function ChannelSummaryPanel({
                     ))}
                   </div>
                 ) : (
-                  <p className="text-[11px] text-[var(--text-muted)]">No shared channel tags across the current selection.</p>
+                  <p className="font-mono text-[13px] leading-5 text-[var(--text-muted)]">No shared channel tags across the current selection.</p>
                 )}
               </div>
               {batchCopyFeedback ? (
@@ -847,19 +894,19 @@ export default function ChannelSummaryPanel({
               ) : null}
             </section>
 
-            <section className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-4">
-              <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[var(--text-main)]">
+            <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-4">
+              <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                 <StickyNote size={14} /> Batch channel notes
               </div>
-              <p className="text-xs text-[var(--text-muted)]">Apply the same note block to all selected channels.</p>
+              <p className="font-mono text-[13px] leading-5 text-[var(--text-muted)]">Apply the same note block to all selected channels.</p>
               <textarea
                 value={batchNotesDraft}
                 onChange={(event) => setBatchNotesDraft(event.target.value)}
                 placeholder="Apply the same note block to all selected channels..."
-                className="custom-scrollbar min-h-[12rem] w-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                className="custom-scrollbar min-h-[12rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
               <div className="mt-3 flex justify-end">
-                <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+                <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
                   Apply to selected channels
                 </button>
               </div>
@@ -876,13 +923,13 @@ export default function ChannelSummaryPanel({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-primary)]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]">
       <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="min-w-0 space-y-4 px-4 pb-4 pt-2">
           <header className="sticky top-0 z-20 -mx-4 min-w-0 border-b border-[var(--border-color)] bg-[color-mix(in_oklab,var(--bg-primary)_94%,transparent)] px-4 pb-3 pt-2 backdrop-blur">
             <div className="flex min-w-0 items-start justify-between gap-3">
               <div className="flex min-w-0 items-start gap-3">
-                <div className="relative mt-0.5 h-[129px] w-[129px] shrink-0 overflow-hidden rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--text-main)_6%,transparent)]">
+                <div className="relative mt-0.5 h-[129px] w-[129px] shrink-0 overflow-hidden rounded-full border border-[var(--border-color)]/70 bg-[var(--bg-primary)] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--text-main)_6%,transparent)]">
                   <span className="absolute inset-0 flex items-center justify-center text-[13px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">
                     {monogram}
                   </span>
@@ -901,18 +948,15 @@ export default function ChannelSummaryPanel({
                   ) : null}
                 </div>
                 <div className="min-w-0 space-y-1">
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">Channel viewer</div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Channel viewer</div>
                   <button
                     type="button"
                     onClick={handleNavigateToVideos}
-                    className="min-w-0 max-w-full text-left text-[32px] font-semibold leading-tight text-[var(--text-main)] transition-colors hover:text-[var(--accent)] hover:underline"
+                    className="min-w-0 max-w-full text-left text-[22px] font-bold leading-tight text-[var(--text-main)] transition-colors hover:text-[var(--accent)] hover:underline"
                     title="Show videos for this channel"
                   >
                     <span className="break-words [overflow-wrap:anywhere]">{formatValue(activeRow.channel_name)}</span>
                   </button>
-                  {Number(activeRow.video_count_in_dataset || 0) > 0 ? (
-                    <div className="text-[12px] font-medium text-[var(--text-muted)]">{Number(activeRow.video_count_in_dataset).toLocaleString()} videos in dataset</div>
-                  ) : null}
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -921,7 +965,7 @@ export default function ChannelSummaryPanel({
                     href={youtubeChannelUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex shrink-0 items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5 text-[12px] font-semibold text-[var(--text-main)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
                     title="Open channel on YouTube"
                   >
                     <ExternalLink size={13} /> Open
@@ -931,23 +975,27 @@ export default function ChannelSummaryPanel({
             </div>
 
             <div className="mt-2 flex min-w-0 flex-wrap gap-1.5 text-[11px] text-[var(--text-muted)]">
-              <span className="min-w-0 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">ID: {formatValue(activeRow.channel_id)}</span>
-              <span className="min-w-0 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">Selected: {selectedCount.toLocaleString()}</span>
+              <span className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text-muted)]">ID: {formatValue(activeRow.channel_id)}</span>
+              <span className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text-muted)]">Selected: {selectedCount.toLocaleString()}</span>
               {activeRow.earliest_publish_date ? (
-                <span className="min-w-0 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">From: {formatValue(activeRow.earliest_publish_date)}</span>
+                <span className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text-muted)]">From: {formatValue(activeRow.earliest_publish_date)}</span>
               ) : null}
               {activeRow.latest_publish_date ? (
-                <span className="min-w-0 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1">To: {formatValue(activeRow.latest_publish_date)}</span>
+                <span className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5 font-mono text-[12px] text-[var(--text-muted)]">To: {formatValue(activeRow.latest_publish_date)}</span>
               ) : null}
             </div>
 
-            <div className="mt-2 flex gap-1.5">
+            <div className="mt-2 inline-flex overflow-hidden rounded-[6px] border border-[var(--border-color)] bg-[var(--bg-primary)]">
               {(['metadata', 'annotations'] as const).map((value) => (
                 <button
                   key={value}
                   type="button"
                   onClick={() => setTab(value)}
-                  className={`border px-3 py-1.5 text-[12px] font-semibold transition-colors ${tab === value ? 'border-[var(--accent)] bg-[var(--accent)] text-white' : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-main)] hover:bg-[var(--grid-hover)]'}`}
+                  className={`min-w-[6rem] border-l border-[var(--border-color)] px-3 py-1.5 text-[11px] font-semibold transition-colors first:border-l-0 ${
+                    tab === value
+                      ? 'bg-[var(--grid-hover)] text-[var(--text-main)]'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-main)]'
+                  }`}
                 >
                   {value === 'metadata' ? 'Metadata' : 'Annotations'}
                 </button>
@@ -959,28 +1007,29 @@ export default function ChannelSummaryPanel({
             <div className="space-y-3 min-w-0">
               <section className="grid min-w-0 grid-cols-2 gap-2">
                 {metricCards.map((metric) => (
-                  <article key={metric.key} className="min-w-0 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2.5">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">{metric.label}</div>
+                  <article key={metric.key} className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{metric.label}</div>
+                    <div className="mt-0.5 font-mono text-[11px] leading-4 text-[var(--text-muted)]">{metric.context}</div>
                     <div className="mt-1 min-w-0">{renderMetadataValue(metric.key, metric.value, { metric: true })}</div>
                   </article>
                 ))}
               </section>
 
-              <section className="min-w-0 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <section className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
                 <div className="flex min-w-0 items-center justify-between gap-2 border-b border-[var(--border-color)] px-3 py-2.5">
                   <div>
-                    <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">Description</h3>
-                    <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Qualitative summary for quick context.</p>
+                    <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Description</h3>
+                    <p className="mt-0.5 font-mono text-[12px] leading-5 text-[var(--text-muted)]">Qualitative summary for quick context.</p>
                   </div>
                   {description ? (
-                    <button type="button" onClick={addDescriptionQuote} className="inline-flex shrink-0 items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:underline">
+                    <button type="button" onClick={addDescriptionQuote} className="inline-flex shrink-0 items-center gap-1 border-b border-[var(--border-color)]/50 px-1 py-1 text-[12px] font-medium text-[var(--text-muted)] hover:text-[var(--text-main)]">
                       <Quote size={12} /> Quote
                     </button>
                   ) : null}
                 </div>
                 <div
                   ref={descriptionRef}
-                  className="custom-scrollbar max-h-[18rem] min-h-[8rem] overflow-y-auto overflow-x-hidden px-3 py-3 text-[13px] leading-6 text-[var(--text-main)]"
+                  className="custom-scrollbar max-h-[18rem] min-h-[8rem] overflow-y-auto overflow-x-hidden px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)]"
                 >
                   <div className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                     {description || <span className="text-[var(--text-muted)]">No channel description available.</span>}
@@ -988,19 +1037,19 @@ export default function ChannelSummaryPanel({
                 </div>
               </section>
 
-              <section className="min-w-0 rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <section className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
                 <div className="border-b border-[var(--border-color)] px-3 py-2.5">
-                  <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">Profile snapshot</h3>
-                  <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Identity metadata, taxonomy, and channel-level tags.</p>
+                  <h3 className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Profile snapshot</h3>
+                  <p className="mt-0.5 font-mono text-[12px] leading-5 text-[var(--text-muted)]">Identity metadata, taxonomy, and channel-level tags.</p>
                 </div>
                 <div className="space-y-3 px-3 py-3">
-                  <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2.5">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">Channel user tags</div>
+                  <div className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Channel user tags</div>
                     <div className="mt-1.5 min-w-0">
                       {mergedProfileTags.length ? (
                         <div className="custom-scrollbar flex max-h-20 min-w-0 flex-wrap gap-1.5 overflow-y-auto pr-1">
                           {mergedProfileTags.map((tag) => (
-                            <span key={tag} className="inline-flex max-w-full items-center rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-main)]">
+                            <span key={tag} className="inline-flex max-w-full items-center rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-main)]">
                               <span className="break-words [overflow-wrap:anywhere]">{tag}</span>
                             </span>
                           ))}
@@ -1012,11 +1061,11 @@ export default function ChannelSummaryPanel({
                   </div>
 
                   {profileSnapshotKeys.length ? (
-                    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2.5">
+                    <div className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2.5">
                       <div className="space-y-2">
                         {profileSnapshotKeys.map((key) => (
                           <div key={key} className="grid min-w-0 gap-1 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:items-start">
-                            <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">{fieldLabel(key)}</div>
+                            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{fieldLabel(key)}</div>
                             <div className="min-w-0">{renderMetadataValue(key, activeRow?.[key], { compactRows: true })}</div>
                           </div>
                         ))}
@@ -1033,14 +1082,14 @@ export default function ChannelSummaryPanel({
               {renderCompactSection('Linking', metadataSections.linking)}
 
               {metadataSections.imported.length ? (
-                <details className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                  <summary className="cursor-pointer list-none px-3 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                <details className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)]">
+                  <summary className="cursor-pointer list-none px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                     Imported fields ({metadataSections.imported.length.toLocaleString()})
                   </summary>
                   <div className="space-y-2 border-t border-[var(--border-color)] px-3 py-3">
                     {metadataSections.imported.map((key) => (
                       <div key={key} className="grid min-w-0 gap-1.5 sm:grid-cols-[minmax(0,9rem)_minmax(0,1fr)] sm:items-start">
-                        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">{fieldLabel(key)}</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">{fieldLabel(key)}</div>
                         <div className="min-w-0">{renderMetadataValue(key, activeRow?.[key], { compactRows: true })}</div>
                       </div>
                     ))}
@@ -1050,18 +1099,18 @@ export default function ChannelSummaryPanel({
             </div>
           ) : (
             <div className="space-y-3 min-w-0">
-              <section className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--text-main)]">
+              <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-3">
+                <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                   <Tag size={14} /> {selectedCount > 1 ? 'Batch channel tags' : 'Channel tags'}
                 </div>
                 <div className="mb-3 flex min-w-0 flex-wrap gap-2">
                   {sharedTags.map((tag) => (
-                    <span key={tag} className="inline-flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-primary)] px-2 py-1 text-xs text-[var(--text-main)]">
+                    <span key={tag} className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2 py-1 text-[12px] text-[var(--text-main)]">
                       {tag}
                       <button type="button" onClick={() => removeTag(tag)} className="text-[var(--text-muted)] hover:text-[var(--text-main)]">x</button>
                     </span>
                   ))}
-                  {sharedTags.length === 0 ? <span className="text-xs text-[var(--text-muted)]">No tags yet.</span> : null}
+                  {sharedTags.length === 0 ? <span className="font-mono text-[13px] leading-5 text-[var(--text-muted)]">No tags yet.</span> : null}
                 </div>
                 <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_auto]">
                   <input
@@ -1069,16 +1118,16 @@ export default function ChannelSummaryPanel({
                     onChange={(event) => setTagInput(event.target.value)}
                     onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitTag(); } }}
                     placeholder={selectedCount > 1 ? 'Add tag to selected channels' : 'Add channel tag'}
-                    className="min-w-0 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-none"
+                    className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
                   />
-                  <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90">
+                  <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90">
                     <Plus size={14} /> Add
                   </button>
                 </div>
               </section>
 
-              <section className="rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--text-main)]">
+              <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-3">
+                <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
                   <StickyNote size={14} /> {selectedCount > 1 ? 'Batch channel notes' : 'Channel notes'}
                 </div>
                 {selectedCount > 1 ? (
@@ -1087,10 +1136,10 @@ export default function ChannelSummaryPanel({
                       value={batchNotesDraft}
                       onChange={(event) => setBatchNotesDraft(event.target.value)}
                       placeholder="Apply the same note block to all selected channels..."
-                      className="custom-scrollbar min-h-[12rem] w-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                      className="custom-scrollbar min-h-[12rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
                     />
                     <div className="mt-3 flex justify-end">
-                      <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+                      <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
                         Apply to selected channels
                       </button>
                     </div>
@@ -1110,7 +1159,7 @@ export default function ChannelSummaryPanel({
                       if (activeKey) onUpdateChannelNotes?.(activeKey, next);
                     }}
                     placeholder="# Notes\n\nAdd channel-level observations, quotes, and coding decisions here..."
-                    className="custom-scrollbar min-h-[14rem] w-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                    className="custom-scrollbar min-h-[14rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
                   />
                 )}
               </section>
