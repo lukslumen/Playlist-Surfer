@@ -3,13 +3,11 @@ import { AgGridReact } from 'ag-grid-react';
 import {
   ColDef,
   GridReadyEvent,
-  RowSelectedEvent,
   CellClickedEvent,
   CellContextMenuEvent,
   FilterChangedEvent,
   GridApi,
   SortChangedEvent,
-  SelectionChangedEvent,
   ColumnResizedEvent,
   themeQuartz,
 } from 'ag-grid-community';
@@ -19,18 +17,19 @@ import {
   DashboardThumbnailSortRule,
   InclusionView,
   SavedView,
-  VideoSelectionState,
   ViewScope,
 } from '../types';
 import { BooleanMapFilter, GenericValueFilter, TagFilter, parseListString } from './CustomFilters';
 import { BooleanMapSchema, ExplorerFilterModel, parseBooleanMapValue } from '../lib/filterCoordinator';
 import { formatDateDisplay, formatDurationDisplay, getColumnDisplayName, getColumnHeaderTooltip, getDefaultGridColumnSizing, isDateLikeColumn, isDurationColumn, resolveVideoId, TRANSCRIPT_COLUMN } from '../lib/data';
 import { extractSortRulesFromColumnState } from '../lib/dashboardThumbnails';
+import { ScopeSelectionState, ScopeSelectionUpdate } from '../lib/selectionState';
 
 interface MetadataGridProps {
   rows: any[];
   schema: ColumnSchema[];
-  onRowSelected: (row: any | null) => void;
+  selection: ScopeSelectionState;
+  onSelectionChange?: (update: ScopeSelectionUpdate) => void;
   isLoading: boolean;
   activeView?: SavedView;
   filterModel: ExplorerFilterModel;
@@ -42,9 +41,6 @@ interface MetadataGridProps {
   onSortModelChange?: (sortRules: DashboardThumbnailSortRule[]) => void;
   visibleColumns: string[];
   onFileDrop?: (file: File) => void;
-  visibleVideoIds: string[];
-  selectionState: VideoSelectionState;
-  onSelectionStateChange?: (selectionState: VideoSelectionState) => void;
   inclusionView: InclusionView;
   onMoveSelection?: () => void;
   onExcludeSelection?: () => void;
@@ -52,8 +48,6 @@ interface MetadataGridProps {
   viewScope?: ViewScope;
   onVideoChannelClick?: (args: { channelName: string; row: any }) => void;
   onChannelNavigateToVideos?: (channelRow: any) => void;
-  selectedChannelKeys?: string[];
-  onChannelSelectionChange?: (rows: any[]) => void;
   onClearFilters?: () => void;
   onShowAllSources?: () => void;
   onToggleInclusionView?: () => void;
@@ -75,17 +69,11 @@ function shallowEqualFilterModel(a: ExplorerFilterModel | null | undefined, b: E
   return aEntries.every(([key, value]) => JSON.stringify(value) === JSON.stringify((b || {})[key]));
 }
 
-const EMPTY_SELECTION_STATE: VideoSelectionState = {
-  mode: 'none',
-  ids: [],
-  anchorVideoId: null,
-  focusVideoId: null,
-};
-
 export default function MetadataGrid({
   rows,
   schema,
-  onRowSelected,
+  selection,
+  onSelectionChange,
   isLoading,
   activeView,
   filterModel,
@@ -97,9 +85,6 @@ export default function MetadataGrid({
   onSortModelChange,
   visibleColumns,
   onFileDrop,
-  visibleVideoIds,
-  selectionState,
-  onSelectionStateChange,
   inclusionView,
   onMoveSelection,
   onExcludeSelection,
@@ -107,8 +92,6 @@ export default function MetadataGrid({
   viewScope = 'videos',
   onVideoChannelClick,
   onChannelNavigateToVideos,
-  selectedChannelKeys = [],
-  onChannelSelectionChange,
   onClearFilters,
   onShowAllSources,
   onToggleInclusionView,
@@ -117,13 +100,10 @@ export default function MetadataGrid({
   onColumnWidthsChange,
 }: MetadataGridProps) {
   const isChannelScope = viewScope === 'channels';
-  const isAllVisibleSelected = selectionState.mode === 'allVisible';
-  const explicitSelectedVideoIds = selectionState.mode === 'explicit' ? selectionState.ids : [];
-  const selectedVideoCount = isAllVisibleSelected ? visibleVideoIds.length : explicitSelectedVideoIds.length;
+  const selectedRowCount = selection.selectedKeys.length;
   const gridApiRef = useRef<GridApi | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const selectionStateRef = useRef<VideoSelectionState>(selectionState);
-  const syncingSelectionRef = useRef(false);
+  const selectionRef = useRef<ScopeSelectionState>(selection);
   const syncingFilterModelRef = useRef(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<{
@@ -133,7 +113,6 @@ export default function MetadataGrid({
   } | null>(null);
 
   const contextActionLabel = inclusionView === 'included' ? 'Move selected videos to Excluded' : 'Restore selected videos to Included';
-  const visibleVideoIdSet = useMemo(() => new Set(visibleVideoIds), [visibleVideoIds]);
   const resolveChannelKey = useCallback((row: any) => String(row?.channel_key || row?.channel_id || row?.channel_name || '').trim(), []);
   const showNoRowsRecovery = schema.length > 0 && !isLoading && rows.length === 0;
   const sampleValuesByColumn = useMemo(() => {
@@ -158,14 +137,26 @@ export default function MetadataGrid({
       .sort((a, b) => a.value.localeCompare(b.value));
   }, [isChannelScope, rows]);
 
-  const applySelectionState = useCallback((nextState: VideoSelectionState) => {
-    selectionStateRef.current = nextState;
-    onSelectionStateChange?.(nextState);
-  }, [onSelectionStateChange]);
+  const applySelection = useCallback((update: ScopeSelectionUpdate) => {
+    const selectedKeys = Array.from(new Set((update.selectedKeys || []).filter(Boolean)));
+    const normalized: ScopeSelectionUpdate = {
+      selectedKeys,
+      anchorKey: selectedKeys.length ? (update.anchorKey ?? selectedKeys[0]) : null,
+      focusKey: selectedKeys.length ? (update.focusKey ?? selectedKeys[selectedKeys.length - 1]) : null,
+      detailKey: update.detailKey ?? (selectedKeys[selectedKeys.length - 1] || selectionRef.current.detailKey || null),
+    };
+    selectionRef.current = {
+      selectedKeys: normalized.selectedKeys,
+      anchorKey: normalized.anchorKey ?? null,
+      focusKey: normalized.focusKey ?? null,
+      detailKey: normalized.detailKey ?? null,
+    };
+    onSelectionChange?.(normalized);
+  }, [onSelectionChange]);
 
   useEffect(() => {
-    selectionStateRef.current = selectionState;
-  }, [selectionState]);
+    selectionRef.current = selection;
+  }, [selection]);
 
   const columnDefs = useMemo<ColDef[]>(() => {
     const orderedSchema = [
@@ -319,39 +310,31 @@ export default function MetadataGrid({
     const api = gridApiRef.current;
     if (!api) return;
     const uniqueIds = Array.from(new Set(rowIds.filter(Boolean)));
-    syncingSelectionRef.current = true;
     api.deselectAll();
     uniqueIds.forEach((rowId) => {
       api.getRowNode(rowId)?.setSelected(true, false);
     });
-    syncingSelectionRef.current = false;
   }, []);
 
   const clearGridSelection = useCallback(() => {
     const api = gridApiRef.current;
     if (!api) return;
-    syncingSelectionRef.current = true;
     api.deselectAll();
-    syncingSelectionRef.current = false;
   }, []);
 
-  const getDisplayedVideoIds = useCallback((api: GridApi) => {
-    const ids: string[] = [];
-    api.forEachNodeAfterFilterAndSort((node) => {
-      const videoId = resolveVideoId(node.data);
-      if (videoId) ids.push(videoId);
-    });
-    return ids;
-  }, []);
+  const resolveRowKey = useCallback((row: any) => {
+    if (isChannelScope) return resolveChannelKey(row);
+    return resolveVideoId(row);
+  }, [isChannelScope, resolveChannelKey]);
 
-  const getDisplayedChannelKeys = useCallback((api: GridApi) => {
+  const getDisplayedKeys = useCallback((api: GridApi) => {
     const keys: string[] = [];
     api.forEachNodeAfterFilterAndSort((node) => {
-      const key = resolveChannelKey(node.data);
+      const key = resolveRowKey(node.data);
       if (key) keys.push(key);
     });
     return keys;
-  }, [resolveChannelKey]);
+  }, [resolveRowKey]);
 
   const getRangeSelectionKeys = useCallback((api: GridApi, startIndex: number, endIndex: number) => {
     const start = Math.min(startIndex, endIndex);
@@ -359,36 +342,11 @@ export default function MetadataGrid({
     const keys: string[] = [];
     for (let index = start; index <= end; index += 1) {
       const node = api.getDisplayedRowAtIndex(index);
-      const key = resolveChannelKey(node?.data);
+      const key = resolveRowKey(node?.data);
       if (key) keys.push(key);
     }
     return keys;
-  }, [resolveChannelKey]);
-
-  const buildExplicitSelectionState = useCallback((ids: string[], anchorVideoId?: string | null, focusVideoId?: string | null): VideoSelectionState => {
-    const uniqueIds = Array.from(new Set(ids.filter((videoId) => visibleVideoIdSet.has(videoId))));
-    if (!uniqueIds.length) return EMPTY_SELECTION_STATE;
-    const resolvedAnchor = anchorVideoId && uniqueIds.includes(anchorVideoId) ? anchorVideoId : uniqueIds[0];
-    const resolvedFocus = focusVideoId && uniqueIds.includes(focusVideoId) ? focusVideoId : uniqueIds[uniqueIds.length - 1];
-    return {
-      mode: 'explicit',
-      ids: uniqueIds,
-      anchorVideoId: resolvedAnchor,
-      focusVideoId: resolvedFocus,
-    };
-  }, [visibleVideoIdSet]);
-
-  const getRangeSelectionIds = useCallback((api: GridApi, startIndex: number, endIndex: number) => {
-    const start = Math.min(startIndex, endIndex);
-    const end = Math.max(startIndex, endIndex);
-    const ids: string[] = [];
-    for (let index = start; index <= end; index += 1) {
-      const node = api.getDisplayedRowAtIndex(index);
-      const videoId = resolveVideoId(node?.data);
-      if (videoId) ids.push(videoId);
-    }
-    return ids;
-  }, []);
+  }, [resolveRowKey]);
 
   const syncGridFilterModel = useCallback((nextFilterModel: ExplorerFilterModel) => {
     if (!gridApiRef.current) return;
@@ -408,17 +366,13 @@ export default function MetadataGrid({
     syncGridFilterModel(filterModel);
     if (!isChannelScope) {
       onSortModelChange?.(extractSortRulesFromColumnState(params.api.getColumnState()));
-      if (selectionState.mode === 'explicit') {
-        syncSelectedRows(selectionState.ids);
-      } else {
-        clearGridSelection();
-      }
-    } else if (selectedChannelKeys.length > 0) {
-      syncSelectedRows(selectedChannelKeys);
+    }
+    if (selection.selectedKeys.length > 0) {
+      syncSelectedRows(selection.selectedKeys);
     } else {
       clearGridSelection();
     }
-  }, [activeView, clearGridSelection, filterModel, isChannelScope, onGridReady, onSortModelChange, selectionState, selectedChannelKeys, syncGridFilterModel, syncSelectedRows]);
+  }, [activeView, clearGridSelection, filterModel, isChannelScope, onGridReady, onSortModelChange, selection.selectedKeys, syncGridFilterModel, syncSelectedRows]);
 
   useEffect(() => {
     if (!gridApiRef.current) return;
@@ -441,35 +395,12 @@ export default function MetadataGrid({
   }, [filterModel, syncGridFilterModel]);
 
   useEffect(() => {
-    if (isChannelScope) {
-      if (selectedChannelKeys.length > 0) {
-        syncSelectedRows(selectedChannelKeys);
-        return;
-      }
-      clearGridSelection();
-      return;
-    }
-    if (selectionState.mode === 'explicit') {
-      syncSelectedRows(selectionState.ids);
+    if (selection.selectedKeys.length > 0) {
+      syncSelectedRows(selection.selectedKeys);
       return;
     }
     clearGridSelection();
-  }, [clearGridSelection, isChannelScope, selectionState, selectedChannelKeys, syncSelectedRows]);
-
-  const onRowSelectedHandler = useCallback((event: RowSelectedEvent) => {
-    if (syncingSelectionRef.current || !event.node.isSelected()) return;
-    onRowSelected(event.data);
-  }, [onRowSelected]);
-
-  const onSelectionChangedHandler = useCallback((event: SelectionChangedEvent) => {
-    if (syncingSelectionRef.current) return;
-    if (isChannelScope) {
-      const selectedNodes = event.api.getSelectedNodes();
-      const selectedRows = selectedNodes.map((node) => node.data).filter(Boolean);
-      onChannelSelectionChange?.(selectedRows);
-      onRowSelected(selectedRows[selectedRows.length - 1] ?? null);
-    }
-  }, [isChannelScope, onChannelSelectionChange, onRowSelected]);
+  }, [clearGridSelection, selection.selectedKeys, syncSelectedRows]);
 
   const onFilterChangedHandler = useCallback((event: FilterChangedEvent) => {
     setContextMenu(null);
@@ -496,45 +427,6 @@ export default function MetadataGrid({
     rootRef.current?.focus();
 
     const colId = event.column.getColId().toLowerCase();
-    if (isChannelScope) {
-      const api = gridApiRef.current;
-      if (!api) return;
-      const channelKey = resolveChannelKey(event.data);
-      if (!channelKey) return;
-      const nativeEvent = event.event as MouseEvent | undefined;
-      const rowIndex = typeof event.node?.rowIndex === 'number' ? event.node.rowIndex : null;
-      const isShift = Boolean(nativeEvent?.shiftKey);
-      const isToggle = Boolean(nativeEvent?.ctrlKey || nativeEvent?.metaKey);
-
-      if (isShift && rowIndex !== null) {
-        const anchorKey = selectedChannelKeys[0] || channelKey;
-        const anchorNode = anchorKey ? api.getRowNode(anchorKey) : null;
-        const anchorIndex = typeof anchorNode?.rowIndex === 'number' ? anchorNode.rowIndex : rowIndex;
-        const rangeKeys = getRangeSelectionKeys(api, anchorIndex, rowIndex);
-        syncSelectedRows(rangeKeys);
-        onChannelSelectionChange?.(rangeKeys.map((key) => api.getRowNode(key)?.data).filter(Boolean));
-        onRowSelected(event.data);
-        return;
-      }
-
-      if (isToggle) {
-        const toggled = new Set(selectedChannelKeys.filter(Boolean));
-        if (toggled.has(channelKey)) toggled.delete(channelKey);
-        else toggled.add(channelKey);
-        const nextKeys = Array.from(toggled);
-        if (!nextKeys.length) clearGridSelection();
-        else syncSelectedRows(nextKeys);
-        onChannelSelectionChange?.(nextKeys.map((key) => api.getRowNode(key)?.data).filter(Boolean));
-        onRowSelected(nextKeys.length ? event.data : null);
-        return;
-      }
-
-      syncSelectedRows([channelKey]);
-      onChannelSelectionChange?.([event.data]);
-      onRowSelected(event.data);
-      return;
-    }
-
     if (['channeltitle', 'channel_title', 'channel_name'].includes(colId) && event.value && onVideoChannelClick) {
       onVideoChannelClick({ channelName: String(event.value), row: event.data });
       return;
@@ -555,172 +447,170 @@ export default function MetadataGrid({
 
     const api = gridApiRef.current;
     if (!api) return;
-    const videoId = resolveVideoId(event.data);
-    if (!videoId) return;
+    const rowKey = resolveRowKey(event.data);
+    if (!rowKey) return;
     const nativeEvent = event.event as MouseEvent | undefined;
     const rowIndex = typeof event.node?.rowIndex === 'number' ? event.node.rowIndex : null;
     const isShift = Boolean(nativeEvent?.shiftKey);
     const isToggle = Boolean(nativeEvent?.ctrlKey || nativeEvent?.metaKey);
 
     if (isShift && rowIndex !== null) {
-      const anchorId = selectionState.anchorVideoId || selectionState.focusVideoId || selectionState.ids[0] || videoId;
-      const anchorNode = anchorId ? api.getRowNode(anchorId) : null;
+      const current = selectionRef.current;
+      const anchorKey = current.anchorKey || current.focusKey || current.selectedKeys[0] || rowKey;
+      const anchorNode = anchorKey ? api.getRowNode(anchorKey) : null;
       const anchorIndex = typeof anchorNode?.rowIndex === 'number' ? anchorNode.rowIndex : rowIndex;
-      const rangeIds = getRangeSelectionIds(api, anchorIndex, rowIndex);
-      const nextSelection = buildExplicitSelectionState(rangeIds, anchorId, videoId);
-      syncSelectedRows(nextSelection.ids);
-      applySelectionState(nextSelection);
-      onRowSelected(event.data);
+      const rangeKeys = getRangeSelectionKeys(api, anchorIndex, rowIndex);
+      syncSelectedRows(rangeKeys);
+      applySelection({
+        selectedKeys: rangeKeys,
+        anchorKey,
+        focusKey: rowKey,
+        detailKey: rowKey,
+      });
       return;
     }
 
     if (isToggle) {
-      const baseIds = selectionState.mode === 'allVisible'
-        ? getDisplayedVideoIds(api)
-        : selectionState.mode === 'explicit'
-          ? selectionState.ids
-          : [];
-      const toggled = new Set(baseIds.filter((id) => visibleVideoIdSet.has(id)));
-      if (toggled.has(videoId)) toggled.delete(videoId);
-      else toggled.add(videoId);
-      const nextSelection = buildExplicitSelectionState(
-        Array.from(toggled),
-        selectionState.anchorVideoId || videoId,
-        videoId,
-      );
-      if (nextSelection.mode === 'none') clearGridSelection();
-      else syncSelectedRows(nextSelection.ids);
-      applySelectionState(nextSelection);
-      onRowSelected(nextSelection.mode === 'none' ? null : event.data);
+      const current = selectionRef.current;
+      const toggled = new Set(current.selectedKeys);
+      if (toggled.has(rowKey)) toggled.delete(rowKey);
+      else toggled.add(rowKey);
+      const nextKeys = Array.from(toggled);
+      if (!nextKeys.length) clearGridSelection();
+      else syncSelectedRows(nextKeys);
+      applySelection({
+        selectedKeys: nextKeys,
+        anchorKey: nextKeys.length
+          ? ((current.anchorKey && nextKeys.includes(current.anchorKey)) ? current.anchorKey : rowKey)
+          : null,
+        focusKey: nextKeys.length ? rowKey : null,
+        detailKey: rowKey,
+      });
       return;
     }
 
-    const nextSelection = buildExplicitSelectionState([videoId], videoId, videoId);
-    syncSelectedRows(nextSelection.ids);
-    applySelectionState(nextSelection);
-    onRowSelected(event.data);
-  }, [applySelectionState, buildExplicitSelectionState, clearGridSelection, filterModel, getDisplayedVideoIds, getRangeSelectionIds, getRangeSelectionKeys, isChannelScope, onChannelNavigateToVideos, onChannelSelectionChange, onFilterModelChange, onRowSelected, onVideoChannelClick, resolveChannelKey, selectedChannelKeys, selectionState, syncGridFilterModel, syncSelectedRows, visibleVideoIdSet]);
+    syncSelectedRows([rowKey]);
+    applySelection({
+      selectedKeys: [rowKey],
+      anchorKey: rowKey,
+      focusKey: rowKey,
+      detailKey: rowKey,
+    });
+  }, [applySelection, clearGridSelection, filterModel, getRangeSelectionKeys, onFilterModelChange, onVideoChannelClick, resolveRowKey, syncGridFilterModel, syncSelectedRows]);
 
   const handleGridKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || shouldIgnoreGridShortcut(event.target) || !gridApiRef.current) return;
 
-    if (isChannelScope) {
-      const api = gridApiRef.current;
-      if ((event.ctrlKey || event.metaKey) && event.key === 'Delete' && selectedChannelKeys.length > 0) {
-        event.preventDefault();
-        onExcludeSelection?.();
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault();
-        const displayedKeys = getDisplayedChannelKeys(api);
-        if (!displayedKeys.length) {
-          clearGridSelection();
-          onChannelSelectionChange?.([]);
-          onRowSelected(null);
-          return;
-        }
-        syncSelectedRows(displayedKeys);
-        onChannelSelectionChange?.(displayedKeys.map((key) => api.getRowNode(key)?.data).filter(Boolean));
-        onRowSelected(api.getRowNode(displayedKeys[displayedKeys.length - 1])?.data ?? null);
-        return;
-      }
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
-        event.preventDefault();
-        clearGridSelection();
-        onChannelSelectionChange?.([]);
-        onRowSelected(null);
-      }
+    const api = gridApiRef.current;
+    const current = selectionRef.current;
+
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Delete' && selectedRowCount > 0) {
+      event.preventDefault();
+      onExcludeSelection?.();
       return;
     }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
       event.preventDefault();
-      const api = gridApiRef.current;
-      const displayedIds = getDisplayedVideoIds(api);
-      if (!displayedIds.length) {
+      const displayedKeys = getDisplayedKeys(api);
+      if (!displayedKeys.length) {
         clearGridSelection();
-        applySelectionState(EMPTY_SELECTION_STATE);
-        onRowSelected(null);
+        applySelection({
+          selectedKeys: [],
+          anchorKey: null,
+          focusKey: null,
+          detailKey: current.detailKey,
+        });
         return;
       }
-      const nextSelection = buildExplicitSelectionState(
-        displayedIds,
-        displayedIds[0],
-        displayedIds[displayedIds.length - 1],
-      );
-      syncSelectedRows(nextSelection.ids);
-      applySelectionState(nextSelection);
-      const focusNode = api.getRowNode(nextSelection.focusVideoId || displayedIds[displayedIds.length - 1]);
-      onRowSelected(focusNode?.data ?? null);
+      syncSelectedRows(displayedKeys);
+      applySelection({
+        selectedKeys: displayedKeys,
+        anchorKey: displayedKeys[0],
+        focusKey: displayedKeys[displayedKeys.length - 1],
+        detailKey: displayedKeys[displayedKeys.length - 1],
+      });
       return;
     }
 
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
       event.preventDefault();
       clearGridSelection();
-      applySelectionState(EMPTY_SELECTION_STATE);
-      onRowSelected(null);
+      applySelection({
+        selectedKeys: [],
+        anchorKey: null,
+        focusKey: null,
+        detailKey: current.detailKey,
+      });
       return;
     }
 
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Delete' && selectedVideoCount > 0) {
+    if (event.key === 'Delete' && selectedRowCount > 0) {
       event.preventDefault();
-      onExcludeSelection?.();
-      return;
-    }
-
-    if (event.key === 'Delete' && selectedVideoCount > 0) {
-      event.preventDefault();
-      onMoveSelection?.();
+      if (isChannelScope) onExcludeSelection?.();
+      else onMoveSelection?.();
       return;
     }
 
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
 
-    const api = gridApiRef.current;
     const displayedCount = api.getDisplayedRowCount();
     if (displayedCount === 0) return;
 
     event.preventDefault();
     const direction = event.key === 'ArrowDown' ? 1 : -1;
-    const currentSelection = selectionStateRef.current;
-    const anchorId = currentSelection.anchorVideoId
-      || currentSelection.focusVideoId
-      || currentSelection.ids[0]
-      || resolveVideoId(api.getDisplayedRowAtIndex(0)?.data);
-    const anchorNode = anchorId ? api.getRowNode(anchorId) : null;
-    const focusId = currentSelection.focusVideoId
-      || currentSelection.anchorVideoId
-      || currentSelection.ids[currentSelection.ids.length - 1]
-      || anchorId;
-    const focusNode = focusId ? api.getRowNode(focusId) : null;
+    const displayedKeys = getDisplayedKeys(api);
+    const defaultKey = displayedKeys[direction > 0 ? 0 : displayedKeys.length - 1] || null;
+    const focusKey = current.focusKey || current.detailKey || current.anchorKey || current.selectedKeys[current.selectedKeys.length - 1] || defaultKey;
+    const focusNode = focusKey ? api.getRowNode(focusKey) : null;
     const currentIndex = typeof focusNode?.rowIndex === 'number'
       ? focusNode.rowIndex
       : (direction > 0 ? -1 : displayedCount);
     const nextIndex = Math.max(0, Math.min(displayedCount - 1, currentIndex + direction));
     const nextNode = api.getDisplayedRowAtIndex(nextIndex);
-    const nextVideoId = resolveVideoId(nextNode?.data);
+    const nextKey = resolveRowKey(nextNode?.data);
+    if (!nextNode?.data || !nextKey) return;
 
-    if (!nextNode?.data || !nextVideoId) return;
-
-    if (event.shiftKey) {
-      const anchorIndex = typeof anchorNode?.rowIndex === 'number' ? anchorNode.rowIndex : nextIndex;
-      const rangeIds = getRangeSelectionIds(api, anchorIndex, nextIndex);
-      const nextSelection = buildExplicitSelectionState(rangeIds, anchorId || nextVideoId, nextVideoId);
-      syncSelectedRows(nextSelection.ids);
-      applySelectionState(nextSelection);
-      onRowSelected(nextNode.data);
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+      const currentSet = new Set(current.selectedKeys.filter(Boolean));
+      currentSet.add(nextKey);
+      const nextKeys = displayedKeys.filter((key) => currentSet.has(key));
+      syncSelectedRows(nextKeys);
+      applySelection({
+        selectedKeys: nextKeys,
+        anchorKey: current.anchorKey || current.selectedKeys[0] || focusKey || nextKey,
+        focusKey: nextKey,
+        detailKey: nextKey,
+      });
       api.ensureIndexVisible(nextIndex, 'middle');
       return;
     }
 
-    const nextSelection = buildExplicitSelectionState([nextVideoId], nextVideoId, nextVideoId);
-    syncSelectedRows(nextSelection.ids);
-    applySelectionState(nextSelection);
-    onRowSelected(nextNode.data);
+    if (event.shiftKey) {
+      const anchorKey = current.anchorKey || focusKey || nextKey;
+      const anchorNode = anchorKey ? api.getRowNode(anchorKey) : null;
+      const anchorIndex = typeof anchorNode?.rowIndex === 'number' ? anchorNode.rowIndex : nextIndex;
+      const rangeKeys = getRangeSelectionKeys(api, anchorIndex, nextIndex);
+      syncSelectedRows(rangeKeys);
+      applySelection({
+        selectedKeys: rangeKeys,
+        anchorKey,
+        focusKey: nextKey,
+        detailKey: nextKey,
+      });
+      api.ensureIndexVisible(nextIndex, 'middle');
+      return;
+    }
+
+    syncSelectedRows([nextKey]);
+    applySelection({
+      selectedKeys: [nextKey],
+      anchorKey: nextKey,
+      focusKey: nextKey,
+      detailKey: nextKey,
+    });
     api.ensureIndexVisible(nextIndex, 'middle');
-  }, [applySelectionState, buildExplicitSelectionState, clearGridSelection, getDisplayedChannelKeys, getDisplayedVideoIds, getRangeSelectionIds, isChannelScope, onChannelSelectionChange, onExcludeSelection, onMoveSelection, onRowSelected, selectedChannelKeys.length, selectedVideoCount, syncSelectedRows]);
+  }, [applySelection, clearGridSelection, getDisplayedKeys, getRangeSelectionKeys, isChannelScope, onExcludeSelection, onMoveSelection, resolveRowKey, selectedRowCount, syncSelectedRows]);
 
   const handleCellContextMenu = useCallback((event: CellContextMenuEvent) => {
     if (isChannelScope) return;
@@ -730,16 +620,18 @@ export default function MetadataGrid({
 
     event.event?.preventDefault?.();
 
-    const alreadySelected = isAllVisibleSelected || explicitSelectedVideoIds.includes(videoId);
-    const nextVideoIds = isAllVisibleSelected
-      ? visibleVideoIds
-      : (alreadySelected ? explicitSelectedVideoIds : [videoId]);
+    const current = selectionRef.current;
+    const alreadySelected = current.selectedKeys.includes(videoId);
+    const nextVideoIds = alreadySelected ? current.selectedKeys : [videoId];
 
     if (!alreadySelected) {
-      const nextSelection = buildExplicitSelectionState([videoId], videoId, videoId);
-      syncSelectedRows(nextSelection.ids);
-      applySelectionState(nextSelection);
-      onRowSelected(event.data);
+      syncSelectedRows([videoId]);
+      applySelection({
+        selectedKeys: [videoId],
+        anchorKey: videoId,
+        focusKey: videoId,
+        detailKey: videoId,
+      });
     }
 
     const nativeEvent = event.event as MouseEvent | undefined;
@@ -748,7 +640,7 @@ export default function MetadataGrid({
       y: nativeEvent?.clientY ?? 0,
       videoIds: nextVideoIds,
     });
-  }, [applySelectionState, buildExplicitSelectionState, explicitSelectedVideoIds, isAllVisibleSelected, isChannelScope, onRowSelected, syncSelectedRows, visibleVideoIds]);
+  }, [applySelection, isChannelScope, syncSelectedRows]);
 
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -783,17 +675,11 @@ export default function MetadataGrid({
     <div
       ref={rootRef}
       tabIndex={0}
+      data-metadata-grid-root="true"
       onKeyDownCapture={handleGridKeyDown}
       onMouseDownCapture={() => rootRef.current?.focus()}
       className="relative h-full w-full focus:outline-none"
     >
-      {!isChannelScope && isAllVisibleSelected && selectedVideoCount > 0 && (
-        <div className="pointer-events-none absolute left-3 top-3 z-20 inline-flex items-center gap-2 border border-[var(--accent)] bg-[var(--bg-primary)] px-3 py-1 text-[11px] font-medium text-[var(--text-main)] shadow-sm">
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
-          All visible rows selected ({selectedVideoCount.toLocaleString()})
-        </div>
-      )}
-
       {isLoading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50">
           <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-gray-900" />
@@ -847,8 +733,6 @@ export default function MetadataGrid({
               return resolveVideoId(params.data) || String(params.data?.id || params.data?.video_id || params.data?.Video_ID || '');
             }}
             onGridReady={onGridReadyHandler}
-            onRowSelected={onRowSelectedHandler}
-            onSelectionChanged={onSelectionChangedHandler}
             onFilterChanged={onFilterChangedHandler}
             onSortChanged={onSortChangedHandler}
             onColumnResized={onColumnResizedHandler}
@@ -856,7 +740,7 @@ export default function MetadataGrid({
             onCellContextMenu={handleCellContextMenu}
             rowSelection={{
               mode: 'multiRow',
-              enableClickSelection: true,
+              enableClickSelection: false,
               checkboxes: false,
               headerCheckbox: false,
               ctrlASelectsRows: false,

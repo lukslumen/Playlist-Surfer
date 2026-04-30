@@ -33,7 +33,6 @@ import {
   ResearchLogMarkdownOptions,
   SavedViewDashboardSnapshot,
   ViewScope,
-  VideoSelectionState,
   WatchHistoryEntry,
   SourceRegistryState,
   SourceVisibilityState,
@@ -45,6 +44,17 @@ import {
   LongTaskProgress,
   SourceKind,
 } from './types';
+import {
+  EMPTY_EXPLORER_SELECTION,
+  EMPTY_SCOPE_SELECTION,
+  clearScopeSelectionAction,
+  getScopeSelection,
+  pruneScopeSelectionAction,
+  selectionReducer,
+  setScopeSelectionAction,
+  type ScopeSelectionState,
+  type ScopeSelectionUpdate,
+} from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
@@ -755,6 +765,12 @@ function isEditableShortcutTarget(target: EventTarget | null) {
   ].join(','));
 }
 
+function isGridShortcutTarget(target: EventTarget | null) {
+  const element = target as HTMLElement | null;
+  if (!element) return false;
+  return Boolean(element.closest('[data-metadata-grid-root="true"]'));
+}
+
 function hasShortcutModifier(event: KeyboardEvent) {
   return event.ctrlKey || event.metaKey;
 }
@@ -803,12 +819,24 @@ async function copyTextToClipboard(text: string) {
   }
 }
 
-const EMPTY_VIDEO_SELECTION_STATE: VideoSelectionState = {
-  mode: 'none',
-  ids: [],
-  anchorVideoId: null,
-  focusVideoId: null,
-};
+function buildScopeSelectionFromKeys(keys: string[], detailKey?: string | null): ScopeSelectionState {
+  const selectedKeys = Array.from(new Set((keys || []).map((key) => String(key || '').trim()).filter(Boolean)));
+  if (!selectedKeys.length) {
+    return {
+      ...EMPTY_SCOPE_SELECTION,
+      detailKey: detailKey ?? null,
+    };
+  }
+  const resolvedDetail = detailKey && selectedKeys.includes(detailKey)
+    ? detailKey
+    : selectedKeys[selectedKeys.length - 1];
+  return {
+    selectedKeys,
+    anchorKey: selectedKeys[0],
+    focusKey: selectedKeys[selectedKeys.length - 1],
+    detailKey: resolvedDetail,
+  };
+}
 
 type IncludeExcludeUndoEntry = IncludeExcludeAction & { historyEventId?: string };
 
@@ -1122,7 +1150,6 @@ export default function App() {
     fileName: null,
     schema: [],
     isRightPanelCollapsed: persisted.isRightPanelCollapsed ?? true,
-    selectedRow: null,
     savedViews: persisted.savedViews ?? [],
     activeViewId: persisted.activeViewId ?? null,
     annotations: persisted.annotations ?? {},
@@ -1167,7 +1194,21 @@ export default function App() {
   const [inclusionView, setInclusionView] = useState<InclusionView>(() => persisted.inclusionView === 'excluded' ? 'excluded' : 'included');
   const [excludedVideoIds, setExcludedVideoIds] = useState<string[]>(() => persisted.excludedVideoIds ?? []);
   const [excludedVideoMetaById, setExcludedVideoMetaById] = useState<Record<string, ExcludedVideoMeta>>(() => persisted.excludedVideoMetaById ?? {});
-  const [videoSelection, setVideoSelection] = useState<VideoSelectionState>(EMPTY_VIDEO_SELECTION_STATE);
+  const [selectionState, dispatchSelection] = useReducer(selectionReducer, EMPTY_EXPLORER_SELECTION, () => {
+    const legacySelectedRow = (persisted as any)?.selectedRow;
+    const legacyVideoId = String((persisted as any)?.selectedVideoId || resolveVideoId(legacySelectedRow) || '').trim();
+    const legacyChannelKey = String(
+      (persisted as any)?.selectedChannelKey
+      || legacySelectedRow?.channel_key
+      || (legacySelectedRow?.channel_id ? `id:${String(legacySelectedRow.channel_id).trim()}` : '')
+      || (legacySelectedRow?.channel_name ? `name:${String(legacySelectedRow.channel_name).trim().toLowerCase()}` : '')
+      || '',
+    ).trim();
+    return {
+      videos: buildScopeSelectionFromKeys(legacyVideoId ? [legacyVideoId] : [], legacyVideoId || null),
+      channels: buildScopeSelectionFromKeys(legacyChannelKey ? [legacyChannelKey] : [], legacyChannelKey || null),
+    };
+  });
   const [includeExcludeUndoStack, setIncludeExcludeUndoStack] = useState<IncludeExcludeUndoEntry[]>([]);
   const [includeExcludeRedoStack, setIncludeExcludeRedoStack] = useState<IncludeExcludeUndoEntry[]>([]);
   const [isKeyboardHelpOpen, setIsKeyboardHelpOpen] = useState(false);
@@ -1219,7 +1260,6 @@ export default function App() {
   const [channelVisibleColumns, setChannelVisibleColumns] = useState<string[]>(() => {
     return persisted.channelVisibleColumns ?? [];
   });
-  const [selectedChannelKeys, setSelectedChannelKeys] = useState<string[]>([]);
   const [gridReadyVersion, setGridReadyVersion] = useState(0);
   const [filterModel, setFilterModel] = useState<ExplorerFilterModel>({});
   const gridApiRef = useRef<GridApi | null>(null);
@@ -1234,6 +1274,18 @@ export default function App() {
   const [isChannelDrilldownFilterActive, setIsChannelDrilldownFilterActive] = useState(false);
   const navigationRestoreInFlightRef = useRef(false);
   const lastNavigationKeyRef = useRef<string | null>(null);
+  const initialSelectionResolvedRef = useRef<{ videos: boolean; channels: boolean }>({ videos: false, channels: false });
+  const videoSelection = selectionState.videos;
+  const channelSelection = selectionState.channels;
+  const selectedChannelKeys = channelSelection.selectedKeys;
+
+  const applyScopeSelection = useCallback((scope: ViewScope, update: ScopeSelectionUpdate) => {
+    dispatchSelection(setScopeSelectionAction(scope, update));
+  }, []);
+
+  const clearScopeSelection = useCallback((scope: ViewScope, preserveDetail = true) => {
+    dispatchSelection(clearScopeSelectionAction(scope, preserveDetail));
+  }, []);
 
   useEffect(() => {
     const syncFullscreenState = () => setIsAppFullscreen(Boolean(document.fullscreenElement));
@@ -1497,9 +1549,7 @@ export default function App() {
     ? unifiedChannelFilterState.tagValueIndexByColumn
     : unifiedFilterState.tagValueIndexByColumn;
   const activeGridFilterModel = viewScope === 'channels' ? channelFilterModel : filterModel;
-  const isAllVisibleSelected = videoSelection.mode === 'allVisible';
-  const explicitSelectedVideoIds = videoSelection.mode === 'explicit' ? videoSelection.ids : [];
-  const selectedVideoIdsForActions = isAllVisibleSelected ? visibleVideoIds : explicitSelectedVideoIds;
+  const selectedVideoIdsForActions = viewScope === 'videos' ? videoSelection.selectedKeys : [];
   const selectedVideoCount = selectedVideoIdsForActions.length;
   const sourceMaskedRowByVideoId = useMemo(() => {
     const next = new Map<string, any>();
@@ -1554,11 +1604,8 @@ export default function App() {
   const batchSelectionKey = useMemo(() => {
     if (viewScope === 'channels') return 'inactive';
     if (selectedVideoCount <= 1) return 'inactive';
-    if (isAllVisibleSelected) {
-      return `all-visible:${inclusionView}:${visibleVideoIds.length}:${filteredViewVersion}`;
-    }
-    return `explicit:${selectedVideoCount}:${explicitSelectedVideoIds[0] || ''}:${explicitSelectedVideoIds[explicitSelectedVideoIds.length - 1] || ''}`;
-  }, [explicitSelectedVideoIds, filteredViewVersion, inclusionView, isAllVisibleSelected, selectedVideoCount, viewScope, visibleVideoIds.length]);
+    return `explicit:${selectedVideoCount}:${selectedVideoIdsForActions[0] || ''}:${selectedVideoIdsForActions[selectedVideoIdsForActions.length - 1] || ''}:${filteredViewVersion}`;
+  }, [filteredViewVersion, selectedVideoCount, selectedVideoIdsForActions, viewScope]);
   const hasUserTags = useMemo(() => Object.keys(userTagsByVideoId).length > 0, [userTagsByVideoId]);
   const filteredColumns = unifiedFilterState.filteredColumns;
   const schemaColumnNames = useMemo(() => displaySchema.map((column) => column.column_name), [displaySchema]);
@@ -1661,43 +1708,40 @@ export default function App() {
       }))
   ), [sourceRegistry.byId, sourceRegistry.orderedIds, sourceVisibility.hiddenSourceIds]);
 
-  const handleVideoSelectionStateChange = useCallback((nextState: VideoSelectionState) => {
-    if (nextState.mode === 'allVisible') {
-      if (!visibleVideoIds.length) {
-        setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    setSelectedChannelKeys([]);
-        return;
-      }
-      setVideoSelection({
-        mode: 'allVisible',
-        ids: [],
-        anchorVideoId: nextState.anchorVideoId || visibleVideoIds[0],
-        focusVideoId: nextState.focusVideoId || visibleVideoIds[visibleVideoIds.length - 1],
+  const handleGridSelectionChange = useCallback((update: ScopeSelectionUpdate) => {
+    if (viewScope === 'channels') {
+      const validKeys = new Set(filteredChannelRows.map((row) => resolveChannelRowKey(row)).filter(Boolean));
+      const selectedKeys = update.selectedKeys.filter((key) => validKeys.has(key));
+      applyScopeSelection('channels', {
+        ...update,
+        selectedKeys,
+        anchorKey: selectedKeys.length
+          ? ((update.anchorKey && selectedKeys.includes(update.anchorKey)) ? update.anchorKey : selectedKeys[0])
+          : null,
+        focusKey: selectedKeys.length
+          ? ((update.focusKey && selectedKeys.includes(update.focusKey)) ? update.focusKey : selectedKeys[selectedKeys.length - 1])
+          : null,
+        detailKey: update.detailKey ?? channelSelection.detailKey,
       });
+      if (selectedKeys.length > 1) {
+        setState((previous) => (previous.isRightPanelCollapsed ? { ...previous, isRightPanelCollapsed: false } : previous));
+      }
       return;
     }
 
-    if (nextState.mode === 'explicit') {
-      const nextIds = normalizeVideoIds(nextState.ids, visibleVideoIdSet);
-      if (!nextIds.length) {
-        setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    setSelectedChannelKeys([]);
-        return;
-      }
-      const nextAnchor = nextState.anchorVideoId && nextIds.includes(nextState.anchorVideoId) ? nextState.anchorVideoId : nextIds[0];
-      const nextFocus = nextState.focusVideoId && nextIds.includes(nextState.focusVideoId) ? nextState.focusVideoId : nextIds[nextIds.length - 1];
-      setVideoSelection({
-        mode: 'explicit',
-        ids: nextIds,
-        anchorVideoId: nextAnchor,
-        focusVideoId: nextFocus,
-      });
-      return;
-    }
-
-    setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    setSelectedChannelKeys([]);
-  }, [visibleVideoIdSet, visibleVideoIds]);
+    const selectedKeys = update.selectedKeys.filter((key) => visibleVideoIdSet.has(key));
+    applyScopeSelection('videos', {
+      ...update,
+      selectedKeys,
+      anchorKey: selectedKeys.length
+        ? ((update.anchorKey && selectedKeys.includes(update.anchorKey)) ? update.anchorKey : selectedKeys[0])
+        : null,
+      focusKey: selectedKeys.length
+        ? ((update.focusKey && selectedKeys.includes(update.focusKey)) ? update.focusKey : selectedKeys[selectedKeys.length - 1])
+        : null,
+      detailKey: update.detailKey ?? videoSelection.detailKey,
+    });
+  }, [applyScopeSelection, channelSelection.detailKey, filteredChannelRows, videoSelection.detailKey, viewScope, visibleVideoIdSet]);
 
   useEffect(() => {
     thumbnailCachesRef.current = thumbnailCaches;
@@ -1760,6 +1804,8 @@ export default function App() {
       importedChannelMetadata,
       viewScope,
       channelFilterModel,
+      selectedVideoId: videoSelection.detailKey || videoSelection.focusKey || videoSelection.anchorKey || videoSelection.selectedKeys[0] || null,
+      selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
       videoColumnWidths,
       channelColumnWidths,
       sourceRegistry,
@@ -1824,6 +1870,14 @@ export default function App() {
     importedChannelMetadata,
     viewScope,
     channelFilterModel,
+    videoSelection.anchorKey,
+    videoSelection.detailKey,
+    videoSelection.focusKey,
+    videoSelection.selectedKeys,
+    channelSelection.anchorKey,
+    channelSelection.detailKey,
+    channelSelection.focusKey,
+    channelSelection.selectedKeys,
     videoColumnWidths,
     channelColumnWidths,
     sourceRegistry,
@@ -1901,19 +1955,8 @@ export default function App() {
   }, [channelSchema, hasChannelUserTags]);
 
   useEffect(() => {
-    const validKeys = new Set(channelRowsWithLinking.map((row) => resolveChannelRowKey(row)).filter(Boolean));
-    setSelectedChannelKeys((current) => {
-      if (!current.length) return current;
-      const next = current.filter((key) => validKeys.has(key));
-      return next.length === current.length ? current : next;
-    });
-    setState((previous) => {
-      if (!previous.selectedRow) return previous;
-      const selectedKey = resolveChannelRowKey(previous.selectedRow);
-      if (!selectedKey || validKeys.has(selectedKey)) return previous;
-      return { ...previous, selectedRow: null };
-    });
-  }, [channelRowsWithLinking]);
+    dispatchSelection(pruneScopeSelectionAction('channels', filteredChannelRows.map((row) => resolveChannelRowKey(row)).filter(Boolean)));
+  }, [filteredChannelRows]);
 
   useEffect(() => {
     if (!state.activeViewId) return;
@@ -1921,25 +1964,28 @@ export default function App() {
     setFilterModel(activeView?.filterModel || {});
   }, [state.activeViewId, state.savedViews]);
 
-  const selectedVideoId = videoSelection.focusVideoId || videoSelection.anchorVideoId || (state.selectedRow ? resolveVideoId(state.selectedRow) : null);
+  const selectedVideoId = viewScope === 'videos'
+    ? (videoSelection.detailKey || videoSelection.focusKey || videoSelection.anchorKey || videoSelection.selectedKeys[videoSelection.selectedKeys.length - 1] || null)
+    : null;
   const detailVideoId = selectedVideoId;
   const detailRow = useMemo(() => {
     if (viewScope !== 'videos' || !detailVideoId) return null;
-    const matchedRow = rows.find((row) => resolveVideoId(row) === detailVideoId);
-    if (matchedRow) return matchedRow;
-    if (state.selectedRow && resolveVideoId(state.selectedRow) === detailVideoId) return state.selectedRow;
-    return null;
-  }, [detailVideoId, rows, state.selectedRow, viewScope]);
+    return rows.find((row) => resolveVideoId(row) === detailVideoId) || null;
+  }, [detailVideoId, rows, viewScope]);
   const selectedChannelDetailRow = useMemo(() => {
     if (viewScope !== 'channels') return null;
-    const selectedKey = resolveChannelRowKey(state.selectedRow);
+    const selectedKey = channelSelection.detailKey
+      || channelSelection.focusKey
+      || channelSelection.anchorKey
+      || selectedChannelKeys[0]
+      || '';
     if (selectedKey) {
       const matchedByState = filteredChannelRows.find((row) => resolveChannelRowKey(row) === selectedKey);
       if (matchedByState) return matchedByState;
     }
     if (selectedChannelRows.length > 0) return selectedChannelRows[0];
     return filteredChannelRows[0] || null;
-  }, [filteredChannelRows, selectedChannelRows, state.selectedRow, viewScope]);
+  }, [channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, filteredChannelRows, selectedChannelKeys, selectedChannelRows, viewScope]);
   const hasLoadedData = workingSchema.length > 0 && baseRows.length > 0;
   const currentProjectName = useMemo(() => (state.fileName || 'ytde_project').replace(/\.(csv|zip)$/i, ''), [state.fileName]);
 
@@ -1993,22 +2039,18 @@ export default function App() {
     setVideoScopeChannelKeys(entry.videoScopeChannelKeys ?? null);
     setIsChannelDrilldownFilterActive(entry.isChannelDrilldownFilterActive);
     setChannelFilterModel(entry.channelFilterModel || {});
-    setState((previous) => ({ ...previous, activeViewId: entry.activeViewId, selectedRow: null }));
+    clearScopeSelection('videos', false);
+    clearScopeSelection('channels', false);
+    setState((previous) => ({ ...previous, activeViewId: entry.activeViewId }));
     setFilterModel(entry.filterModel || {});
     if (entry.viewScope === 'channels') {
       setViewScope('channels');
       setPendingViewerTarget(entry.channelId || entry.channelName ? { kind: 'channel', channelId: entry.channelId, channelName: entry.channelName || undefined } : null);
-      if (!entry.channelId && !entry.channelName) {
-        setSelectedChannelKeys([]);
-      }
       return;
     }
     setViewScope('videos');
     setPendingViewerTarget(entry.selectedVideoId ? { kind: 'video', videoId: entry.selectedVideoId } : null);
-    if (!entry.selectedVideoId) {
-      setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    }
-  }, []);
+  }, [clearScopeSelection]);
 
   const navigateHistoryByOffset = useCallback((offset: -1 | 1) => {
     setNavigationCursor((current) => {
@@ -2044,93 +2086,33 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (viewScope === 'channels') return;
-    setVideoSelection((current) => {
-      if (current.mode === 'allVisible') {
-        if (visibleVideoIds.length === 0) return EMPTY_VIDEO_SELECTION_STATE;
-        const nextAnchor = visibleVideoIds[0] || null;
-        const nextFocus = visibleVideoIds[visibleVideoIds.length - 1] || null;
-        if (current.anchorVideoId === nextAnchor && current.focusVideoId === nextFocus) return current;
-        return {
-          ...current,
-          anchorVideoId: nextAnchor,
-          focusVideoId: nextFocus,
-        };
-      }
-
-      if (current.mode === 'explicit') {
-        const visibleVideoIdSet = new Set<string>(visibleVideoIds);
-        const nextIds = normalizeVideoIds(current.ids, visibleVideoIdSet);
-        if (!nextIds.length) return EMPTY_VIDEO_SELECTION_STATE;
-        const nextAnchor = current.anchorVideoId && nextIds.includes(current.anchorVideoId) ? current.anchorVideoId : nextIds[0];
-        const nextFocus = current.focusVideoId && nextIds.includes(current.focusVideoId) ? current.focusVideoId : nextIds[nextIds.length - 1];
-        if (
-          nextIds.length === current.ids.length
-          && nextIds.every((id, index) => id === current.ids[index])
-          && nextAnchor === current.anchorVideoId
-          && nextFocus === current.focusVideoId
-        ) {
-          return current;
-        }
-        return {
-          mode: 'explicit',
-          ids: nextIds,
-          anchorVideoId: nextAnchor,
-          focusVideoId: nextFocus,
-        };
-      }
-
-      if (current.anchorVideoId || current.focusVideoId || current.ids.length) {
-        return EMPTY_VIDEO_SELECTION_STATE;
-      }
-      return current;
-    });
-  }, [viewScope, visibleVideoIds]);
+    dispatchSelection(pruneScopeSelectionAction('videos', visibleVideoIds));
+  }, [visibleVideoIds]);
 
   useEffect(() => {
-    if (viewScope === 'channels') return;
-    const fallbackRow = rows[0] || null;
-    if (!selectedVideoId) {
-      if (fallbackRow) {
-        const fallbackVideoId = resolveVideoId(fallbackRow);
-        if (fallbackVideoId) {
-          setState((previous) => ({ ...previous, selectedRow: fallbackRow }));
-          setVideoSelection({
-            mode: 'explicit',
-            ids: [fallbackVideoId],
-            anchorVideoId: fallbackVideoId,
-            focusVideoId: fallbackVideoId,
-          });
-          return;
-        }
-      }
-      if (selectedVideoCount === 0 && state.selectedRow) {
-        setState((previous) => ({ ...previous, selectedRow: null }));
-      }
+    if (rows.length === 0) {
+      initialSelectionResolvedRef.current.videos = false;
       return;
     }
-    const nextSelectedRow = rows.find((row) => resolveVideoId(row) === selectedVideoId);
-    if (nextSelectedRow && nextSelectedRow !== state.selectedRow) {
-      setState((previous) => ({ ...previous, selectedRow: nextSelectedRow }));
-      return;
+    if (viewScope === 'videos' && selectedVideoId) {
+      initialSelectionResolvedRef.current.videos = true;
     }
-    if (!nextSelectedRow && fallbackRow) {
-      const fallbackVideoId = resolveVideoId(fallbackRow);
-      if (fallbackVideoId) {
-        setState((previous) => ({ ...previous, selectedRow: fallbackRow }));
-        setVideoSelection({
-          mode: 'explicit',
-          ids: [fallbackVideoId],
-          anchorVideoId: fallbackVideoId,
-          focusVideoId: fallbackVideoId,
-        });
-        return;
-      }
-    }
-    if (!nextSelectedRow) {
-      setState((previous) => ({ ...previous, selectedRow: null }));
-    }
-  }, [rows, selectedVideoCount, selectedVideoId, state.selectedRow, viewScope]);
+  }, [rows.length, selectedVideoId, viewScope]);
+
+  useEffect(() => {
+    if (viewScope !== 'videos') return;
+    if (selectedVideoId) return;
+    if (initialSelectionResolvedRef.current.videos) return;
+    const fallbackVideoId = resolveVideoId(rows[0]);
+    if (!fallbackVideoId) return;
+    initialSelectionResolvedRef.current.videos = true;
+    applyScopeSelection('videos', {
+      selectedKeys: [fallbackVideoId],
+      anchorKey: fallbackVideoId,
+      focusKey: fallbackVideoId,
+      detailKey: fallbackVideoId,
+    });
+  }, [applyScopeSelection, rows, selectedVideoId, viewScope]);
 
   const hydrateProject = useCallback((args: {
     rows: any[];
@@ -2292,8 +2274,8 @@ export default function App() {
     setExcludedVideoIds(nextExcludedVideoIds);
     setExcludedVideoMetaById(args.excludedVideoMetaById ?? {});
     setInclusionView(nextInclusionView);
-    setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    setSelectedChannelKeys([]);
+    clearScopeSelection('videos', false);
+    clearScopeSelection('channels', false);
     setIncludeExcludeUndoStack([]);
     setIncludeExcludeRedoStack([]);
     setFilterModel({});
@@ -2332,7 +2314,6 @@ export default function App() {
       ...previous,
       fileName: args.fileName,
       schema: nextWorkingSchema,
-      selectedRow: null,
       savedViews: args.savedViews ?? previous.savedViews,
       activeViewId: args.activeViewId !== undefined ? args.activeViewId : previous.activeViewId,
       annotations,
@@ -3127,8 +3108,8 @@ export default function App() {
     clearAllThumbnailCaches();
 
     flushSync(() => {
-      setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-      setSelectedChannelKeys([]);
+      clearScopeSelection('videos', true);
+      clearScopeSelection('channels', true);
     });
 
     startFilterTransition(() => {
@@ -3381,21 +3362,34 @@ export default function App() {
     if (displayedCount <= 0) return;
 
     if (viewScope === 'channels') {
-      const selectedChannelKey = String(state.selectedRow?.channel_key || state.selectedRow?.channel_id || state.selectedRow?.channel_name || '');
+      const selectedChannelKey = channelSelection.focusKey
+        || channelSelection.detailKey
+        || channelSelection.anchorKey
+        || channelSelection.selectedKeys[channelSelection.selectedKeys.length - 1]
+        || '';
       const selectedNode = selectedChannelKey ? api?.getRowNode(selectedChannelKey) : null;
       const currentIndex = typeof selectedNode?.rowIndex === 'number' ? selectedNode.rowIndex : (direction > 0 ? -1 : displayedCount);
       const nextIndex = Math.max(0, Math.min(displayedCount - 1, currentIndex + direction));
       const nextRow = api?.getDisplayedRowAtIndex(nextIndex)?.data ?? activeGridRows[nextIndex];
       if (!nextRow) return;
       requestSelectionScroll('middle');
-      setState((previous) => ({ ...previous, selectedRow: nextRow }));
       api?.ensureIndexVisible(nextIndex, 'middle');
       const nextKey = String(nextRow?.channel_key || nextRow?.channel_id || nextRow?.channel_name || '');
-      if (nextKey) api?.getRowNode(nextKey)?.setSelected?.(true, true);
+      if (!nextKey) return;
+      applyScopeSelection('channels', {
+        selectedKeys: [nextKey],
+        anchorKey: nextKey,
+        focusKey: nextKey,
+        detailKey: nextKey,
+      });
       return;
     }
 
-    const focusId = videoSelection.focusVideoId || videoSelection.anchorVideoId || resolveVideoId(state.selectedRow);
+    const focusId = videoSelection.focusKey
+      || videoSelection.detailKey
+      || videoSelection.anchorKey
+      || videoSelection.selectedKeys[videoSelection.selectedKeys.length - 1]
+      || '';
     const focusNode = focusId ? api?.getRowNode(focusId) : null;
     const currentIndex = typeof focusNode?.rowIndex === 'number' ? focusNode.rowIndex : (direction > 0 ? -1 : displayedCount);
     const nextIndex = Math.max(0, Math.min(displayedCount - 1, currentIndex + direction));
@@ -3404,16 +3398,14 @@ export default function App() {
     if (!nextRow || !nextVideoId) return;
 
     requestSelectionScroll('middle');
-    setState((previous) => ({ ...previous, selectedRow: nextRow }));
-    setVideoSelection({
-      mode: 'explicit',
-      ids: [nextVideoId],
-      anchorVideoId: nextVideoId,
-      focusVideoId: nextVideoId,
+    applyScopeSelection('videos', {
+      selectedKeys: [nextVideoId],
+      anchorKey: nextVideoId,
+      focusKey: nextVideoId,
+      detailKey: nextVideoId,
     });
     api?.ensureIndexVisible(nextIndex, 'middle');
-    api?.getRowNode(nextVideoId)?.setSelected?.(true, false);
-  }, [activeGridRows, requestSelectionScroll, state.selectedRow, videoSelection, viewScope]);
+  }, [activeGridRows, applyScopeSelection, channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, channelSelection.selectedKeys, requestSelectionScroll, videoSelection.anchorKey, videoSelection.detailKey, videoSelection.focusKey, videoSelection.selectedKeys, viewScope]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -3463,15 +3455,16 @@ export default function App() {
       if (event.defaultPrevented) return;
 
       const isTyping = isEditableShortcutTarget(event.target);
+      const isGridTarget = isGridShortcutTarget(event.target);
       const hasBlockingOverlay = isCommandPaletteOpen || isKeyboardHelpOpen || isDashboardOpen || isImportOpen || isExportOpen || isColumnsOpen || isResearchLogOpen;
 
-      if (!isTyping && !hasBlockingOverlay && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      if (!isTyping && !isGridTarget && !hasBlockingOverlay && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
         event.preventDefault();
         navigateHistoryByOffset(event.key === 'ArrowLeft' ? -1 : 1);
         return;
       }
 
-      if (!isTyping && !hasBlockingOverlay && !event.altKey && !hasShortcutModifier(event) && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+      if (!isTyping && !isGridTarget && !hasBlockingOverlay && !event.shiftKey && !event.altKey && !hasShortcutModifier(event) && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
         event.preventDefault();
         moveActiveSelectionByDirection(event.key === 'ArrowDown' ? 1 : -1);
         return;
@@ -3544,6 +3537,7 @@ export default function App() {
 
       if (
         viewScope === 'videos'
+        && !isGridTarget
         && !hasBlockingOverlay
         && (event.ctrlKey || event.metaKey)
         && event.key === 'Delete'
@@ -3554,7 +3548,7 @@ export default function App() {
         return;
       }
 
-      if (viewScope !== 'videos' || isTyping || hasBlockingOverlay) return;
+      if (viewScope !== 'videos' || isTyping || hasBlockingOverlay || isGridTarget) return;
 
       if (event.key === 'Delete' && selectedVideoIdsForActions.length > 0) {
         event.preventDefault();
@@ -3923,10 +3917,7 @@ export default function App() {
         total: 4,
       });
       setChannelFilterModel({});
-      setSelectedChannelKeys([]);
-      if (viewScope === 'channels') {
-        setState((previous) => ({ ...previous, selectedRow: null }));
-      }
+      clearScopeSelection('channels', false);
     } finally {
       setIsGeneratingChannelMetadata(false);
       updateLongTaskProgress(null);
@@ -3985,9 +3976,8 @@ export default function App() {
     if (viewScope === 'channels') {
       clearChannelDrilldownState({ restoreVideoFilters: false });
       clearChannelScopedVideoUniverse();
-      setState((previous) => ({ ...previous, selectedRow: null }));
       setChannelFilterModel({});
-      setSelectedChannelKeys([]);
+      clearScopeSelection('channels', true);
       return;
     }
     const recoveredInclusionView = resolveRecoverableInclusionView({
@@ -3997,7 +3987,7 @@ export default function App() {
     });
     clearChannelDrilldownState({ restoreVideoFilters: false });
     clearChannelScopedVideoUniverse();
-    setState((previous) => ({ ...previous, activeViewId: null, selectedRow: null }));
+    setState((previous) => ({ ...previous, activeViewId: null }));
     updateExternalFilterModel({});
     setChannelFilterModel({});
     setViewScope('videos');
@@ -4005,9 +3995,9 @@ export default function App() {
     if (recoveredInclusionView === 'excluded') {
       console.warn('[view-recovery] Clear filters switched to "excluded" because "included" has no visible rows.');
     }
-    setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    setSelectedChannelKeys([]);
-  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, excludedBaseRows.length, includedBaseRows.length, updateExternalFilterModel, viewScope]);
+    clearScopeSelection('videos', true);
+    clearScopeSelection('channels', true);
+  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, excludedBaseRows.length, includedBaseRows.length, updateExternalFilterModel, viewScope]);
 
   const handleToggleSourceRows = useCallback((sourceId: string) => {
     setSourceVisibility((current) => {
@@ -4187,11 +4177,10 @@ export default function App() {
         savedViews: nextSavedViews,
         activeViewId: previous.activeViewId && nextSavedViews.some((view) => view.id === previous.activeViewId) ? previous.activeViewId : null,
         annotations: Object.fromEntries(Object.entries(previous.annotations).filter(([videoId]) => survivingVideoIds.has(videoId))),
-        selectedRow: null,
       }));
       setSavedViewsVersion((version) => version + 1);
-      setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-      setSelectedChannelKeys([]);
+      clearScopeSelection('videos', false);
+      clearScopeSelection('channels', false);
       dispatchUserTags({ type: 'hydrate', state: Object.fromEntries(Object.entries(userTagsByVideoId).filter(([videoId]) => survivingVideoIds.has(videoId))) });
       setNotesByVideoId((previous) => Object.fromEntries(Object.entries(previous).filter(([videoId]) => survivingVideoIds.has(videoId))));
       setWatchHistoryByVideoId((previous) => Object.fromEntries(Object.entries(previous).filter(([videoId]) => survivingVideoIds.has(videoId))));
@@ -4638,43 +4627,6 @@ export default function App() {
     setState((previous) => ({ ...previous, schema: workingSchema }));
   }, [workingSchema]);
 
-  const handleRowSelected = useCallback((row: any | null) => {
-    selectionScrollModeRef.current = 'none';
-    setState((previous) => ({ ...previous, selectedRow: row }));
-
-    if (viewScope !== 'videos') return;
-    const rowVideoId = resolveVideoId(row);
-    if (!rowVideoId) return;
-
-    if (videoSelection.mode === 'none') {
-      setVideoSelection({
-        mode: 'explicit',
-        ids: [rowVideoId],
-        anchorVideoId: rowVideoId,
-        focusVideoId: rowVideoId,
-      });
-      return;
-    }
-
-    if (videoSelection.mode === 'explicit' && videoSelection.ids.length <= 1) {
-      if (videoSelection.focusVideoId === rowVideoId && videoSelection.anchorVideoId === rowVideoId && videoSelection.ids[0] === rowVideoId) return;
-      setVideoSelection({
-        mode: 'explicit',
-        ids: [rowVideoId],
-        anchorVideoId: rowVideoId,
-        focusVideoId: rowVideoId,
-      });
-    }
-  }, [videoSelection, viewScope]);
-
-  const handleChannelSelectionChange = useCallback((selectedRows: any[]) => {
-    const nextKeys = selectedRows.map((row) => resolveChannelRowKey(row)).filter(Boolean);
-    setSelectedChannelKeys(nextKeys);
-    if (nextKeys.length > 1) {
-      setState((previous) => (previous.isRightPanelCollapsed ? { ...previous, isRightPanelCollapsed: false } : previous));
-    }
-  }, []);
-
   const handleViewScopeChange = useCallback((scope: ViewScope) => {
     setDefaultGridResetStage(0);
     if (scope === 'channels') {
@@ -4697,10 +4649,10 @@ export default function App() {
 
   const handleInclusionViewChange = useCallback((view: InclusionView) => {
     setInclusionView(view);
-    setVideoSelection(EMPTY_VIDEO_SELECTION_STATE);
-    setSelectedChannelKeys([]);
+    clearScopeSelection('videos', true);
+    clearScopeSelection('channels', true);
     setFilteredViewVersion((version) => version + 1);
-  }, []);
+  }, [clearScopeSelection]);
 
   const handleVideoChannelClick = useCallback(({ channelName, row }: { channelName: string; row: any }) => {
     const normalizedChannelName = channelName?.trim() || resolveChannelName(row);
@@ -4719,8 +4671,12 @@ export default function App() {
     if (!channelName) return;
     const channelKey = resolveChannelRowKey(channelRow);
     if (channelKey) {
-      setSelectedChannelKeys([channelKey]);
-      setState((previous) => ({ ...previous, selectedRow: channelRow }));
+      applyScopeSelection('channels', {
+        selectedKeys: [channelKey],
+        anchorKey: channelKey,
+        focusKey: channelKey,
+        detailKey: channelKey,
+      });
     }
     if (!isChannelDrilldownFilterActive) {
       drilldownPreviousVideoFilterRef.current = filterModel;
@@ -4744,7 +4700,7 @@ export default function App() {
     setIsChannelDrilldownFilterActive(true);
     setViewScope('videos');
     requestSelectionScroll('middle');
-  }, [clearChannelScopedVideoUniverse, displaySchema, filterModel, isChannelDrilldownFilterActive, requestSelectionScroll, updateExternalFilterModel]);
+  }, [applyScopeSelection, clearChannelScopedVideoUniverse, displaySchema, filterModel, isChannelDrilldownFilterActive, requestSelectionScroll, updateExternalFilterModel]);
 
   const toggleRightPanel = useCallback(() => {
     setState((previous) => ({ ...previous, isRightPanelCollapsed: !previous.isRightPanelCollapsed }));
@@ -5093,7 +5049,7 @@ ${heading}
   useEffect(() => {
     if (viewScope !== 'videos') return;
     if (!gridApiRef.current) return;
-    const focusId = videoSelection.focusVideoId || videoSelection.anchorVideoId || (videoSelection.mode === 'explicit' ? videoSelection.ids[0] : null);
+    const focusId = videoSelection.focusKey || videoSelection.detailKey || videoSelection.anchorKey || videoSelection.selectedKeys[0] || null;
     if (!focusId) return;
     const node = gridApiRef.current.getRowNode(focusId);
     if (typeof node?.rowIndex === 'number') {
@@ -5101,28 +5057,26 @@ ${heading}
         gridApiRef.current.ensureIndexVisible(node.rowIndex, 'middle');
         selectionScrollModeRef.current = 'none';
       }
-      node.setSelected?.(true, false);
     }
   }, [videoSelection, viewScope]);
 
   useEffect(() => {
     if (viewScope !== 'channels') return;
     if (!gridApiRef.current) return;
-    const selectedRowKey = resolveChannelRowKey(state.selectedRow);
-    const channelKey = selectedRowKey || selectedChannelKeys[0] || '';
+    const channelKey = channelSelection.focusKey
+      || channelSelection.detailKey
+      || channelSelection.anchorKey
+      || selectedChannelKeys[0]
+      || '';
     if (!channelKey) return;
     const node = gridApiRef.current.getRowNode(channelKey);
     if (typeof node?.rowIndex === 'number') {
-      if (!node.isSelected?.()) {
-        gridApiRef.current.deselectAll?.();
-        node.setSelected?.(true, true);
-      }
       if (selectionScrollModeRef.current === 'middle') {
         gridApiRef.current.ensureIndexVisible(node.rowIndex, 'middle');
         selectionScrollModeRef.current = 'none';
       }
     }
-  }, [gridReadyVersion, selectedChannelKeys, state.selectedRow, viewScope]);
+  }, [channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, gridReadyVersion, selectedChannelKeys, viewScope]);
 
   const handleDashboardNavigateToVideo = useCallback((videoId: string) => {
     setIsDashboardOpen(false);
@@ -5170,12 +5124,11 @@ ${heading}
       const targetRow = rows.find((row) => resolveVideoId(row) === pendingViewerTarget.videoId);
       if (!targetRow) return;
       requestSelectionScroll('middle');
-      setState((previous) => ({ ...previous, selectedRow: targetRow }));
-      setVideoSelection({
-        mode: 'explicit',
-        ids: [pendingViewerTarget.videoId],
-        anchorVideoId: pendingViewerTarget.videoId,
-        focusVideoId: pendingViewerTarget.videoId,
+      applyScopeSelection('videos', {
+        selectedKeys: [pendingViewerTarget.videoId],
+        anchorKey: pendingViewerTarget.videoId,
+        focusKey: pendingViewerTarget.videoId,
+        detailKey: pendingViewerTarget.videoId,
       });
       setPendingViewerTarget(null);
       return;
@@ -5194,16 +5147,11 @@ ${heading}
       }
       const channelKey = resolveChannelRowKey(channelRow);
       requestSelectionScroll('middle');
-      setSelectedChannelKeys(channelKey ? [channelKey] : []);
-      setState((previous) => ({ ...previous, selectedRow: channelRow }));
-      window.requestAnimationFrame(() => {
-        const api = gridApiRef.current;
-        if (!api || !channelKey) return;
-        const node = api.getRowNode(channelKey);
-        if (!node || typeof node.rowIndex !== 'number') return;
-        api.ensureIndexVisible(node.rowIndex, 'middle');
-        api.deselectAll?.();
-        node.setSelected?.(true, true);
+      applyScopeSelection('channels', {
+        selectedKeys: channelKey ? [channelKey] : [],
+        anchorKey: channelKey || null,
+        focusKey: channelKey || null,
+        detailKey: channelKey || null,
       });
       setPendingViewerTarget(null);
       return;
@@ -5214,10 +5162,9 @@ ${heading}
       return;
     }
     requestSelectionScroll('middle');
-    setSelectedChannelKeys([]);
-    setState((previous) => ({ ...previous, selectedRow: null }));
+    clearScopeSelection('channels', false);
     setPendingViewerTarget(null);
-  }, [channelRowsWithLinking, pendingViewerTarget, requestSelectionScroll, rows, viewScope]);
+  }, [applyScopeSelection, channelRowsWithLinking, clearScopeSelection, pendingViewerTarget, requestSelectionScroll, rows, viewScope]);
 
   const currentNavigationEntry = useMemo<AppNavigationEntry>(() => ({
     viewScope,
@@ -5226,12 +5173,12 @@ ${heading}
     filterModel,
     channelFilterModel,
     selectedVideoId: viewScope === 'videos' ? selectedVideoId : null,
-    channelId: viewScope === 'channels' ? String(state.selectedRow?.channel_id || '').trim() || null : null,
-    channelName: viewScope === 'channels' ? String(state.selectedRow?.channel_name || '').trim() || null : null,
+    channelId: viewScope === 'channels' ? String(selectedChannelDetailRow?.channel_id || '').trim() || null : null,
+    channelName: viewScope === 'channels' ? String(selectedChannelDetailRow?.channel_name || '').trim() || null : null,
     videoScopeChannelKeys: videoScopeChannelKeys?.length ? videoScopeChannelKeys : null,
     isChannelDrilldownFilterActive,
     drilldownPreviousVideoFilter: drilldownPreviousVideoFilterRef.current ?? null,
-  }), [channelFilterModel, filterModel, inclusionView, isChannelDrilldownFilterActive, selectedVideoId, state.activeViewId, state.selectedRow, videoScopeChannelKeys, viewScope]);
+  }), [channelFilterModel, filterModel, inclusionView, isChannelDrilldownFilterActive, selectedChannelDetailRow?.channel_id, selectedChannelDetailRow?.channel_name, selectedVideoId, state.activeViewId, videoScopeChannelKeys, viewScope]);
 
   useEffect(() => {
     if (!hasLoadedData) return;
@@ -5329,7 +5276,9 @@ ${heading}
       flushSync(() => {
         setViewScope('videos');
         setChannelFilterModel({});
-        setState((previous) => ({ ...previous, activeViewId: null, selectedRow: null }));
+        clearScopeSelection('videos', true);
+        clearScopeSelection('channels', true);
+        setState((previous) => ({ ...previous, activeViewId: null }));
         updateExternalFilterModel({});
       });
       if (isFirstReset) {
@@ -5346,10 +5295,12 @@ ${heading}
     flushSync(() => {
       setViewScope('videos');
       setChannelFilterModel({});
-      setState((previous) => ({ ...previous, activeViewId: view.id || null, selectedRow: null }));
+      clearScopeSelection('videos', true);
+      clearScopeSelection('channels', true);
+      setState((previous) => ({ ...previous, activeViewId: view.id || null }));
       updateExternalFilterModel((view.filterModel || {}) as ExplorerFilterModel);
     });
-  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, defaultGridResetStage, resetChannelLayoutToDefault, resetVideoLayoutToDefault, updateExternalFilterModel]);
+  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, defaultGridResetStage, resetChannelLayoutToDefault, resetVideoLayoutToDefault, updateExternalFilterModel]);
 
   useEffect(() => {
     const validSavedViewKeys = new Set(state.savedViews.map((view) => buildSavedViewThumbnailScopeKey(view.id)));
@@ -6844,7 +6795,8 @@ ${heading}
                   <MetadataGrid
                     rows={activeGridRows}
                     schema={activeGridSchema}
-                    onRowSelected={handleRowSelected}
+                    selection={getScopeSelection(selectionState, viewScope)}
+                    onSelectionChange={handleGridSelectionChange}
                     isLoading={isLoadingRows || isIngesting || isGeneratingChannelMetadata}
                     activeView={viewScope === 'videos' ? state.savedViews.find((view) => view.id === state.activeViewId) : undefined}
                     filterModel={activeGridFilterModel}
@@ -6856,9 +6808,6 @@ ${heading}
                     onSortModelChange={viewScope === 'videos' ? setVideoSortRules : undefined}
                     visibleColumns={activeScopeVisibleColumns}
                     onFileDrop={viewScope === 'videos' ? handleFileUpload : undefined}
-                    visibleVideoIds={viewScope === 'videos' ? visibleVideoIds : []}
-                    selectionState={viewScope === 'videos' ? videoSelection : EMPTY_VIDEO_SELECTION_STATE}
-                    onSelectionStateChange={viewScope === 'videos' ? handleVideoSelectionStateChange : undefined}
                     inclusionView={inclusionView}
                     onMoveSelection={viewScope === 'videos' ? handleMoveSelectedVideos : undefined}
                     onExcludeSelection={viewScope === 'videos' ? handleExcludeSelectedVideos : (viewScope === 'channels' ? handleBatchExcludeChannels : undefined)}
@@ -6866,8 +6815,6 @@ ${heading}
                     viewScope={viewScope}
                     onVideoChannelClick={handleVideoChannelClick}
                     onChannelNavigateToVideos={handleChannelNavigateToVideos}
-                    selectedChannelKeys={viewScope === 'channels' ? selectedChannelKeys : []}
-                    onChannelSelectionChange={viewScope === 'channels' ? handleChannelSelectionChange : undefined}
                     onClearFilters={clearAllExplorerFilters}
                     onShowAllSources={viewScope === 'videos' ? handleShowAllSources : undefined}
                     onToggleInclusionView={viewScope === 'videos'
@@ -6959,7 +6906,7 @@ ${heading}
           {viewScope === 'channels' && channelFilteredColumns.length > 0 && ' (Filtering Active)'}
           {viewScope === 'videos' && selectedVideoCount > 0 && (
             <span>
-              {' - '}<b className="text-[var(--text-main)]">{selectedVideoCount.toLocaleString()}</b> selected{isAllVisibleSelected && ' (all visible)'}
+              {' - '}<b className="text-[var(--text-main)]">{selectedVideoCount.toLocaleString()}</b> selected
             </span>
           )}
         </div>

@@ -45,14 +45,6 @@ export interface Annotation {
 
 export type InclusionView = 'included' | 'excluded';
 export type ViewScope = 'videos' | 'channels';
-export type VideoSelectionMode = 'none' | 'explicit' | 'allVisible';
-
-export interface VideoSelectionState {
-  mode: VideoSelectionMode;
-  ids: string[];
-  anchorVideoId: string | null;
-  focusVideoId: string | null;
-}
 
 export interface IncludeExcludeAction {
   kind: 'exclude' | 'restore';
@@ -586,7 +578,6 @@ export interface AppState {
   fileName: string | null;
   schema: ColumnSchema[];
   isRightPanelCollapsed: boolean;
-  selectedRow: any | null;
   savedViews: SavedView[];
   activeViewId: string | null;
   annotations: Record<string, Annotation>;
