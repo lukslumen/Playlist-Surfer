@@ -280,6 +280,7 @@ export interface DashboardThumbnailCacheEntry {
   candidateUrls?: string[];
   activeUrl?: string;
   fallbackIndex?: number;
+  activeCandidateIndex?: number;
   status: 'pending' | 'loaded' | 'failed';
   mimeType?: string;
   byteLength?: number;
@@ -292,6 +293,7 @@ export interface DashboardThumbnailCacheEntry {
 export interface DashboardThumbnailCacheSnapshot {
   scopeKey: DashboardThumbnailScopeKey;
   label: string;
+  sessionId: number;
   rowCount: number;
   totalCandidates: number;
   calculatedAt: string;

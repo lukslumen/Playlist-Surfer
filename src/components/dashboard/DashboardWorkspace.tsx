@@ -30,8 +30,20 @@ type Props = {
   onZoomIn: () => void;
   onLoadFullThumbnails: () => void;
   onLoadFilteredThumbnails: () => void;
-  onThumbnailEntryLoad: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, loadedUrl?: string) => void;
-  onThumbnailEntryError: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, failedUrl?: string) => void;
+  onThumbnailEntryLoad: (
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    sessionId: number,
+    dedupeKey: string,
+    candidateIndex: number,
+    loadedUrl?: string,
+  ) => void;
+  onThumbnailEntryError: (
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    sessionId: number,
+    dedupeKey: string,
+    candidateIndex: number,
+    failedUrl?: string,
+  ) => void;
   onRetryFailedThumbnails: () => void;
   onDocumentSizeChange?: (size: { width: number; height: number }) => void;
   onNavigateToVideo?: (videoId: string) => void;
@@ -459,6 +471,8 @@ export default function DashboardWorkspace({
     ? `${thumbnailLoadProgress.completed.toLocaleString()}/${thumbnailLoadProgress.total.toLocaleString()}`
     : null;
   const thumbnailSkeletonCount = Math.max(12, Math.min(24, thumbnailLayout.columns * Math.max(thumbnailLayout.rows, 3)));
+  const thumbnailLoadSessionId = thumbnailCache?.sessionId ?? 0;
+  const eagerTileCount = Math.max(18, thumbnailLayout.columns * 4);
 
   const thumbnailContent = (
     <div className="exactdash-thumbnails-root">
@@ -503,18 +517,33 @@ export default function DashboardWorkspace({
               paddingTop: `${thumbnailLayout.offsetY}px`,
             }}
           >
-            {thumbnailCache?.entries.map((entry) => {
+            {thumbnailCache?.entries.map((entry, entryIndex) => {
               const tileImageUrl = entry.objectUrl || entry.activeUrl || entry.sourceUrl;
+              const activeCandidateIndex = Number.isFinite(entry.activeCandidateIndex)
+                ? Number(entry.activeCandidateIndex)
+                : Math.max(0, Number(entry.fallbackIndex ?? 0));
               const content = (
                 <>
                   {tileImageUrl ? (
                     <img
                       src={tileImageUrl}
                       alt={entry.title || entry.videoId}
-                      loading="lazy"
+                      loading={entryIndex < eagerTileCount ? 'eager' : 'lazy'}
                       decoding="async"
-                      onLoad={() => onThumbnailEntryLoad(thumbnailCache.scopeKey, entry.dedupeKey, tileImageUrl)}
-                      onError={() => onThumbnailEntryError(thumbnailCache.scopeKey, entry.dedupeKey, tileImageUrl)}
+                      onLoad={() => onThumbnailEntryLoad(
+                        thumbnailCache.scopeKey,
+                        thumbnailLoadSessionId,
+                        entry.dedupeKey,
+                        activeCandidateIndex,
+                        tileImageUrl,
+                      )}
+                      onError={() => onThumbnailEntryError(
+                        thumbnailCache.scopeKey,
+                        thumbnailLoadSessionId,
+                        entry.dedupeKey,
+                        activeCandidateIndex,
+                        tileImageUrl,
+                      )}
                     />
                   ) : null}
                   {entry.status === 'pending' ? <div className="exactdash-thumb-pending">Loading</div> : null}

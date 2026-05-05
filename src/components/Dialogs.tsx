@@ -2319,8 +2319,20 @@ interface DatasetDashboardDialogProps {
   onZoomIn: () => void;
   onLoadFullThumbnails: () => void;
   onLoadFilteredThumbnails: () => void;
-  onThumbnailEntryLoad: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, loadedUrl?: string) => void;
-  onThumbnailEntryError: (scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'], dedupeKey: string, failedUrl?: string) => void;
+  onThumbnailEntryLoad: (
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    sessionId: number,
+    dedupeKey: string,
+    candidateIndex: number,
+    loadedUrl?: string,
+  ) => void;
+  onThumbnailEntryError: (
+    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
+    sessionId: number,
+    dedupeKey: string,
+    candidateIndex: number,
+    failedUrl?: string,
+  ) => void;
   onRetryFailedThumbnails: () => void;
   onNavigateToVideo?: (videoId: string) => void;
   onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
