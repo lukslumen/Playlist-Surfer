@@ -28,20 +28,40 @@ Still open from phase 1:
 - On-screen feedback when nothing moved. There's no toast system yet (phase 3).
 - A Shift-click right after switching to the Excluded view was ignored once. Seen manually, not reproduced since.
 
-### Baseline performance (before phase 2)
-| Rows | CSV | Import (parse + to grid) | Exclude 1 row | Undo | Select all | JS heap |
-|---|---|---|---|---|---|---|
-| 10k | 30 MB | 0.9 s + 0.8 s | **1.1 s** | 1.2 s | 0.3 s | **1.28 GB** |
-| 100k | 301 MB | 3.4 s + 4.7 s | **tab crashes** | (crashed here in run 1) | – | – |
+## Progress, phase 2 (branch `refactor/phase2-pipeline`, stacked on phase 0/1)
 
-Exclude-one-row is about 20× over the 50 ms target at 10k rows, and the heap is about 40× the CSV size. At 100k, import completes but the tab runs out of memory on the first exclude or undo. That's the row-copy chain and per-action recomputation described in 2.3. **Phase 2 is required before 100k is usable**, and the 10k numbers say it pays off well below that size too.
+**Measurement correction.** The first baseline was taken on the dev server. In development, React 19 diffs every component prop for its profiler, including the 100k-row arrays, which made everything about 6× slower. It also counted uncollected garbage as heap. Perf runs now use an unminified production build (`playwright.perf.config.ts`) and time interactions inside the page, from keydown to the first painted frame, taking the median of 5 runs.
 
-Rerun with `node scripts/generate-perf-fixture.mjs 100000` followed by `PERF=1 PERF_ROWS=10000,100000 npx playwright test e2e/perf.spec.ts`.
+| Production build | 10k before | 10k after | 100k before | 100k after | Target 10k / 100k |
+|---|---|---|---|---|---|
+| Import (parse + to grid) | 0.9 s + 0.6 s | 0.8 s + 0.5 s | 4.1 s + 4.5 s | 3.4 s + 2.9 s | – |
+| Exclude 1 row | 173 ms* | **40 ms** | 1.4 s* | **64 ms** | 50 / 100 ms |
+| Undo | 207 ms* | **14 ms** | 1.5 s* | **60 ms** | |
+| Select all | 283 ms* | 11 ms | **tab crashed** | 145 ms | |
+| Exclude all | 69 ms* | 19 ms | – | 130 ms | |
+
+\* Measured with Playwright polling, which adds up to about 100 ms. The trend is right but the numbers aren't exact.
+
+What made the difference:
+1. **Tag-filter option lists are built on demand**, per column, when a filter opens. Before, every tag column's values were rebuilt over all rows on every change: about 60% of an exclude at 100k. Saved-view filtering also no longer builds them.
+2. **Grid column definitions stay stable.** The column-type props keep their identity while unchanged (`useStableValue`), width samples are taken once per schema, and two misspelled grid options are fixed: they made AG Grid fuzzy-match option names on every update.
+3. **Batched, diff-based grid selection** (`setNodesSelected`). Selecting rows one at a time fired 100k events and crashed the tab on select-all.
+4. **Row objects stay stable across include/exclude.** The overlays run before the inclusion split, so AG Grid skips rows it already has.
+
+**Two data-loss bugs found and fixed while measuring:**
+- **Curation lost on reload from about 30k rows.** All app state (exclusions, notes, tags, views, lineage) went to localStorage, whose roughly 5 MB quota was exceeded. The write threw silently and nothing was saved. It now lives in IndexedDB, with a one-time migration from localStorage.
+- **Dataset lost on reload from about 20k rows.** The row autosave was a single IndexedDB value. Chromium rejects values above about 133 MB, and 100k rows serialize to 610 MB. Rows are now stored in 1,000-row chunks within one transaction.
+
+Both are verified at 10k and 100k: the data and the exclusions come back after a reload (`e2e/profile/storage.profile.ts`).
+
+Memory: about 760 MB of live heap at 100k rows (301 MB CSV), mostly the text itself. That's acceptable for the 100k target. A 1M-row file would need the long text kept out of the grid rows (the plan's 1M safety valve).
+
+Run: `node scripts/generate-perf-fixture.mjs 100000`, then `PERF=1 PERF_ROWS=10000,100000 npx playwright test --config playwright.perf.config.ts e2e/perf.spec.ts`.
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
 - **UI and domain logic → refactor step by step.** `src/lib/` (linking, dashboards, archive and manifest, timestamp notes, selection) is mostly pure and worth keeping. The mess sits in the app shell: `App.tsx` and a few oversized components.
-- **Data layer → keep rows in memory, but make the pipeline efficient.** At 100k rows × ~35 columns, keeping the data in JS is fine (roughly 100–300 MB) and gives the snappiest UI: synchronous, no scroll flicker, AG Grid's client-side model with full sort and filter. The problem today isn't the approach, it's the waste. Rows are copied about 6 times through a chain of `useMemo`s, and every exclusion recomputes the whole chain, including text inference over every row. Fixing that is a refactor, not a rebuild.
+- **Data layer → keep rows in memory, but make the pipeline efficient.** At 100k rows × ~35 columns, keeping the data in JS is fine (roughly 100–300 MB) and gives the snappiest UI: synchronous, no scroll flicker, AG Grid's client-side model with full sort and filter. The problem today isn't the approach, it's the waste. Rows are copied about 6 times through a chain of `useMemo`s, and every exclusion recomputes the whole chain, including text inference over every row. Fixing that is a refactor, not a rebuild. **Confirmed by phase 2:** with in-memory rows, exclude and undo now run in 40–64 ms up to 100k rows, so a DuckDB-backed engine isn't needed for the 100k target.
 - **1M rows → graceful degradation.** Show a warning on import, load long text columns (transcripts, descriptions) on demand, and run heavy passes in the worker. Moving to a DuckDB-backed data engine stays an option, decided by the Phase 0 performance tests rather than now.
 - **DuckDB:** it's currently only a CSV parser, and a heavy download. Phase 0 measures it against PapaParse on 100k rows and keeps whichever is better overall (start-up time, parse time, memory).
 
