@@ -78,13 +78,32 @@ Continued (same branch):
 6. **Persistence.** `state/usePersistence.ts` saves one `persistedAppState` object whenever any of its fields changes. That replaces a 45-entry dependency list. It also stopped re-serializing all rows on every tab hide (about 600 MB at 100k rows) and now re-saves rows after a special-field mapping change, which used to be missed.
 7. **Layout.** `components/layout/` holds `StatusFooter`, `RightPanelShell` and `ChannelMetadataEmptyState`.
 
-App.tsx is now **5,377 lines** (from 7,256). Speed is unchanged (exclude 43 / 64 ms at 10k / 100k).
+8. **Navigation history.** It's now pure (`lib/navigation.ts`) with the `useNavigationHistory` hook. This fixed three bugs:
+   - **Forward never worked after Back:** the restore spans several renders and the intermediate locations were recorded.
+   - **The restore ran inside a state updater.**
+   - **An off-by-one at the 120-entry cap.**
+9. **Thumbnails.** There are pure entry transitions in `lib/thumbnailCache.ts` and a `useThumbnailCaches` hook. Fixed: the loaded/failed counter could get stuck, because it was read from a lazily run updater. Progress is now derived from the cache.
+10. **Channel metadata.** There are pure helpers in `lib/channelMetadata.ts`, plus `useChannelAnnotations` (notes and tags) and `useChannelRows` (the derived table).
+11. **Linking.** There are pure helpers in `lib/linkingState.ts` and a `useLinkingActions` hook, and one override path replaces three copies of the same logic. Fixed: channel link aggregates were stamped with the wrong fingerprint format and showed as stale after every reload.
+12. **Restore.** `lib/projectRestore.ts` holds the autosave restore and the backup unpack/restore as pure functions.
+13. **DetailPanel.** Its helpers moved out (`lib/youtubeApi.ts`, `lib/detailNotes.ts`, `components/detail/*`), and the multi-selection screen is now `BatchSelectionPanel`. DetailPanel went from 1,703 to 1,014 lines.
+
+New tests:
+- e2e for back/forward, the channels view, linking, merging, and a backup export → restore in a fresh browser.
+- Every e2e test now fails on an uncaught page error (`e2e/test.ts`).
+
+Totals: 68 unit tests and 17 e2e tests.
+
+**App.tsx: 7,256 → 4,251 lines.** Domain logic now lives in 20+ pure, tested `lib/` modules and 14 `state/` hooks.
+
+**Perf correction:** repeated runs show exclude at 100k rows is bimodal, at about 60 ms or about 125 ms (GC and scheduling). The median is about 100 ms, right around the target; the 64 ms figure in the phase 2 table was a lucky run. The code at the end of phase 2 measures the same (97–120 ms), so phase 3 introduced no regression. At 10k rows it's about 36 ms.
 
 Still open:
-- **App's remaining state:** thumbnails, navigation history, channel metadata, linking, dashboards, and hydrate/restore. These are mostly large handlers that read many state values. The import-plan pattern (pure plan plus a thin hook) fits them well.
-- **Large components:** `DetailPanel` (1,703 lines), `TemplateDashboard` (1,274) and `ChannelSummaryPanel` (1,172) into container and view parts.
-- **Lint warnings:** 47 left, mostly `exhaustive-deps` in App.
-- **Startup:** restoring the last project waits for DuckDB-WASM to initialise (several seconds), although reading rows from IndexedDB doesn't need it.
+- **DetailPanel's single-video view** (YouTube player lifecycle, watch sessions, timestamps): the next split would be a `useYouTubePlayer` hook. It isn't covered by automated tests, because it needs the YouTube embed over the network, so split it with a manual check.
+- **`TemplateDashboard` (1,274 lines) and `ChannelSummaryPanel` (1,172 lines).**
+- **Failed backup restores give no feedback:** they're only logged to the console. It needs a visible error, which means a toast system.
+- **Lint warnings:** 48, mostly `exhaustive-deps`.
+- **Startup:** the restore waits for DuckDB to initialise, though reading rows from IndexedDB doesn't need it.
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
