@@ -62,6 +62,13 @@ export function useInclusionState(persisted: {
 
 type InclusionStateApi = ReturnType<typeof useInclusionState>;
 
+export interface InclusionActionResult {
+  kind: InclusionActionKind;
+  requestedCount: number;
+  changedCount: number;
+  skippedCount: number;
+}
+
 export interface ApplyInclusionOptions {
   skipUndo?: boolean;
   reason?: string;
@@ -91,6 +98,8 @@ export function useInclusionActions(args: {
   onChanged: () => void;
   appendResearchHistory: (event: NewResearchHistoryEvent) => void;
   markResearchHistoryEventReverted: (eventId?: string) => void;
+  /** Reports every user-initiated action, including ones that changed nothing (for feedback). */
+  onResult?: (result: InclusionActionResult) => void;
 }) {
   const {
     inclusion,
@@ -107,6 +116,7 @@ export function useInclusionActions(args: {
     onChanged,
     appendResearchHistory,
     markResearchHistoryEventReverted,
+    onResult,
   } = args;
   const { inclusionView, inclusionStateRef, setInclusionState, setUndoStack, setRedoStack, undoStack, redoStack } = inclusion;
 
@@ -128,6 +138,15 @@ export function useInclusionActions(args: {
       filterSummary,
     });
     const { changedVideoIds } = result;
+    // Undo/redo replay known changes; only report actions the user started.
+    if (!options?.skipUndo) {
+      onResult?.({
+        kind,
+        requestedCount: new Set(videoIds).size,
+        changedCount: changedVideoIds.length,
+        skippedCount: result.skippedVideoIds.length,
+      });
+    }
     if (changedVideoIds.length === 0) return;
 
     const eventId = options?.skipUndo ? undefined : createHistoryId('exclusion');
@@ -162,7 +181,7 @@ export function useInclusionActions(args: {
       }
       onChanged();
     });
-  }, [appendResearchHistory, inclusionStateRef, inclusionView, onBeforeChange, onChanged, setInclusionState, setRedoStack, setUndoStack, sourceRowByVideoId, sourceVideoIdSet, startTransition, viewScope]);
+  }, [appendResearchHistory, inclusionStateRef, inclusionView, onBeforeChange, onChanged, onResult, setInclusionState, setRedoStack, setUndoStack, sourceRowByVideoId, sourceVideoIdSet, startTransition, viewScope]);
 
   const handleMoveVideos = useCallback((videoIds: string[]) => {
     applyIncludeExcludeAction(videoIds);

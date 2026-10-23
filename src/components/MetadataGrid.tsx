@@ -52,6 +52,8 @@ interface MetadataGridProps {
   onMoveSelection?: (keys: string[]) => void;
   onExcludeSelection?: (keys: string[]) => void;
   onMoveVideos?: (videoIds: string[]) => void;
+  /** A video row without a recognisable video ID was clicked; it can't be selected or excluded. */
+  onUnkeyedRowInteraction?: () => void;
   viewScope?: ViewScope;
   onVideoChannelClick?: (args: { channelName: string; row: any }) => void;
   onChannelNavigateToVideos?: (channelRow: any) => void;
@@ -96,6 +98,7 @@ export default function MetadataGrid({
   onMoveSelection,
   onExcludeSelection,
   onMoveVideos,
+  onUnkeyedRowInteraction,
   viewScope = 'videos',
   onVideoChannelClick,
   onChannelNavigateToVideos,
@@ -345,6 +348,24 @@ export default function MetadataGrid({
     api.deselectAll();
   }, []);
 
+  // Rows without a usable key still need a unique, stable grid id: AG Grid mishandles duplicate ids
+  // (it warned about '' for every row lacking a video ID). Row objects are stable, so key them.
+  const unkeyedRowIdsRef = useRef(new WeakMap<object, string>());
+  const unkeyedRowCounterRef = useRef(0);
+  const getRowId = useCallback((params: { data: any }) => {
+    const key = isChannelScope
+      ? String(params.data?.channel_key || params.data?.channel_id || params.data?.channel_name || '')
+      : resolveVideoId(params.data) || '';
+    if (key || !params.data || typeof params.data !== 'object') return key;
+    let id = unkeyedRowIdsRef.current.get(params.data);
+    if (!id) {
+      unkeyedRowCounterRef.current += 1;
+      id = `__unkeyed:${unkeyedRowCounterRef.current}`;
+      unkeyedRowIdsRef.current.set(params.data, id);
+    }
+    return id;
+  }, [isChannelScope]);
+
   const resolveRowKey = useCallback((row: any) => {
     if (isChannelScope) return resolveChannelKey(row);
     return resolveVideoId(row);
@@ -471,7 +492,10 @@ export default function MetadataGrid({
     const api = gridApiRef.current;
     if (!api) return;
     const rowKey = resolveRowKey(event.data);
-    if (!rowKey) return;
+    if (!rowKey) {
+      if (!isChannelScope) onUnkeyedRowInteraction?.();
+      return;
+    }
     const nativeEvent = event.event as MouseEvent | undefined;
     const rowIndex = typeof event.node?.rowIndex === 'number' ? event.node.rowIndex : null;
     const isShift = Boolean(nativeEvent?.shiftKey);
@@ -519,7 +543,7 @@ export default function MetadataGrid({
       focusKey: rowKey,
       detailKey: rowKey,
     });
-  }, [applySelection, clearGridSelection, filterModel, getRangeSelectionKeys, onFilterModelChange, onVideoChannelClick, resolveRowKey, syncGridFilterModel, syncSelectedRows]);
+  }, [applySelection, clearGridSelection, filterModel, getRangeSelectionKeys, isChannelScope, onFilterModelChange, onUnkeyedRowInteraction, onVideoChannelClick, resolveRowKey, syncGridFilterModel, syncSelectedRows]);
 
   const handleGridKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || shouldIgnoreGridShortcut(event.target) || !gridApiRef.current) return;
@@ -641,7 +665,10 @@ export default function MetadataGrid({
     if (isChannelScope) return;
     rootRef.current?.focus();
     const videoId = resolveVideoId(event.data);
-    if (!videoId) return;
+    if (!videoId) {
+      onUnkeyedRowInteraction?.();
+      return;
+    }
 
     event.event?.preventDefault?.();
 
@@ -665,7 +692,7 @@ export default function MetadataGrid({
       y: nativeEvent?.clientY ?? 0,
       videoIds: nextVideoIds,
     });
-  }, [applySelection, isChannelScope, syncSelectedRows]);
+  }, [applySelection, isChannelScope, onUnkeyedRowInteraction, syncSelectedRows]);
 
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -751,12 +778,7 @@ export default function MetadataGrid({
             theme={themeQuartz}
             rowData={rows}
             columnDefs={columnDefs}
-            getRowId={(params) => {
-              if (isChannelScope) {
-                return String(params.data?.channel_key || params.data?.channel_id || params.data?.channel_name || '');
-              }
-              return resolveVideoId(params.data) || String(params.data?.id || params.data?.video_id || params.data?.Video_ID || '');
-            }}
+            getRowId={getRowId}
             onGridReady={onGridReadyHandler}
             onFilterChanged={onFilterChangedHandler}
             onSortChanged={onSortChangedHandler}

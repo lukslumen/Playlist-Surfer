@@ -20,8 +20,10 @@ export function useImportFlow(deps: {
   readCSVBuffer: (fileName: string, buffer: ArrayBuffer) => Promise<{ schema: ColumnSchema[]; rows: any[] }>;
   updateLongTaskProgress: (progress: LongTaskProgressUpdate | null) => void;
   setIsLoadingRows: (loading: boolean) => void;
+  /** Called when a file could not be read or parsed. */
+  onReadError?: (fileName: string, error: unknown) => void;
 }) {
-  const { readCSVBuffer, updateLongTaskProgress, setIsLoadingRows } = deps;
+  const { readCSVBuffer, updateLongTaskProgress, setIsLoadingRows, onReadError } = deps;
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingSchema, setPendingSchema] = useState<any[]>([]);
@@ -65,11 +67,12 @@ export function useImportFlow(deps: {
       setIsImportOpen(true);
     } catch (error) {
       console.error('Failed to read CSV:', error);
+      onReadError?.(file.name, error);
     } finally {
       updateLongTaskProgress(null);
       setIsLoadingRows(false);
     }
-  }, [readCSVBuffer, setIsLoadingRows, updateLongTaskProgress]);
+  }, [onReadError, readCSVBuffer, setIsLoadingRows, updateLongTaskProgress]);
 
   /**
    * Runs an import with the long-task overlay. `perform` reports steps through `progress`; on success

@@ -26,8 +26,12 @@ export function usePersistence(args: {
   rows: any[];
   schema: ColumnSchema[];
   fileName: string | null;
+  /** Called when saving fails, so the user can be told their changes may not survive a reload. */
+  onSaveError?: (what: 'state' | 'rows', error: unknown) => void;
 }) {
-  const { state, rows, schema, fileName } = args;
+  const { state, rows, schema, fileName, onSaveError } = args;
+  const onSaveErrorRef = useRef(onSaveError);
+  onSaveErrorRef.current = onSaveError;
   const latestStateRef = useRef<Record<string, unknown> | null>(null);
   const savedStateRef = useRef<Record<string, unknown> | null>(null);
   const rowsSnapshotRef = useRef({ rows, schema, fileName });
@@ -47,6 +51,7 @@ export function usePersistence(args: {
     savePersistedState(snapshot).catch((error) => {
       savedStateRef.current = null;
       console.warn(`[state] Failed to save app state (${reason}).`, error);
+      onSaveErrorRef.current?.('state', error);
     });
   }, []);
 
@@ -67,6 +72,7 @@ export function usePersistence(args: {
     } catch (error) {
       savedRowsRef.current = null;
       console.warn(`[autosave] Failed to persist snapshot (${reason}).`, error);
+      onSaveErrorRef.current?.('rows', error);
     }
   }, []);
 

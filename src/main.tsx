@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 import { preloadPersistedState } from './lib/persistedState';
+import { ToastProvider } from './components/toast/ToastProvider';
 import { ModuleRegistry, AllCommunityModule } from 'ag-grid-community';
 
 ModuleRegistry.registerModules([ AllCommunityModule ]);
@@ -11,7 +12,9 @@ ModuleRegistry.registerModules([ AllCommunityModule ]);
 void preloadPersistedState().finally(() => {
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App />
+      <ToastProvider>
+        <App />
+      </ToastProvider>
     </StrictMode>,
   );
 });

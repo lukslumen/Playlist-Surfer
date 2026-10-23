@@ -38,7 +38,9 @@ import { useDialogs } from './state/useDialogs';
 import { useImportFlow } from './state/useImportFlow';
 import { addEnrichmentSource, importProgressTitle, planMergeImport, planReplaceImport } from './lib/importPlan';
 import { useResearchHistory } from './state/useResearchHistory';
-import { useInclusionActions, useInclusionState } from './state/useInclusion';
+import { useInclusionActions, useInclusionState, type InclusionActionResult } from './state/useInclusion';
+import { useToast } from './components/toast/ToastProvider';
+import { autosaveRestoreFailedToast, describeInclusionResult, readFailedToast, restoreFailedToast, saveFailedToast } from './lib/feedbackMessages';
 import { usePersistence } from './state/usePersistence';
 import { useNavigationHistory } from './state/useNavigationHistory';
 import { useThumbnailCaches } from './state/useThumbnailCaches';
@@ -57,6 +59,7 @@ import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog'
 
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
+  const { showToast } = useToast();
   const persisted = useMemo(() => {
     const saved = getBootPersistedStateJson();
     let initial: any = {};
@@ -284,6 +287,9 @@ export default function App() {
     });
   }, []);
 
+  const handleCsvReadError = useCallback((fileName: string, error: unknown) => {
+    showToast(readFailedToast(fileName, error));
+  }, [showToast]);
   const {
     isImportOpen,
     pendingFile,
@@ -295,7 +301,12 @@ export default function App() {
     closeImport,
     openCsvForImport,
     runImport,
-  } = useImportFlow({ readCSVBuffer, updateLongTaskProgress, setIsLoadingRows });
+  } = useImportFlow({
+    readCSVBuffer,
+    updateLongTaskProgress,
+    setIsLoadingRows,
+    onReadError: handleCsvReadError,
+  });
   const {
     isCommandPaletteOpen, setIsCommandPaletteOpen,
     isKeyboardHelpOpen, setIsKeyboardHelpOpen,
@@ -758,6 +769,7 @@ export default function App() {
     rows: sourceRows,
     schema: sourceSchema,
     fileName: state.fileName ?? null,
+    onSaveError: (what, error) => showToast(saveFailedToast(what, error)),
   });
 
   useEffect(() => {
@@ -1105,10 +1117,11 @@ export default function App() {
       console.warn(`[autosave] Restore completed (${trigger}) from snapshot saved at ${autosavedSnapshot.savedAt}.`);
     } catch (error) {
       console.warn(`[autosave] Restore failed (${trigger}).`, error);
+      showToast(autosaveRestoreFailedToast(error));
     } finally {
       isAutoRestoreInFlightRef.current = false;
     }
-  }, [hydrateProject, persisted]);
+  }, [hydrateProject, persisted, showToast]);
 
   useEffect(() => {
     const mountRaf = window.requestAnimationFrame(() => {
@@ -1173,11 +1186,12 @@ export default function App() {
       hydrateProject(planBackupRestore({ manifest, noteFiles, parsed, restoredThumbnailCaches }));
     } catch (error) {
       console.error('Failed to restore backup:', error);
+      showToast(restoreFailedToast(file.name, error));
     } finally {
       updateLongTaskProgress(null);
       setIsLoadingRows(false);
     }
-  }, [hydrateProject, readCSVBuffer, updateLongTaskProgress]);
+  }, [hydrateProject, readCSVBuffer, showToast, updateLongTaskProgress]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     if (file.name.toLowerCase().endsWith('.zip')) {
@@ -1340,6 +1354,18 @@ export default function App() {
     watchHistoryByVideoId,
   ]);
 
+  const handleUnkeyedRowInteraction = useCallback(() => {
+    showToast({
+      kind: 'warning',
+      key: 'unkeyed-row',
+      message: "This row has no video ID, so it can't be selected or excluded",
+      detail: 'Rows need a videoId, video_id, id or Video_ID column value. Check the column mapping in the import dialog.',
+    });
+  }, [showToast]);
+  const handleInclusionResult = useCallback((result: InclusionActionResult) => {
+    const toast = describeInclusionResult(result);
+    if (toast) showToast(toast);
+  }, [showToast]);
   const handleBeforeInclusionChange = useCallback(() => {
     clearAllThumbnailCaches();
     clearScopeSelection('videos', true);
@@ -1372,6 +1398,7 @@ export default function App() {
     onChanged: handleInclusionChanged,
     appendResearchHistory,
     markResearchHistoryEventReverted,
+    onResult: handleInclusionResult,
   });
 
   // The batch button and Ctrl/Cmd+Delete used to always exclude, which did nothing in the Excluded view.
@@ -4012,6 +4039,7 @@ ${heading}
                     onMoveSelection={viewScope === 'videos' ? handleMoveSelectedVideos : undefined}
                     onExcludeSelection={viewScope === 'videos' ? handleExcludeSelectedVideos : (viewScope === 'channels' ? handleBatchExcludeChannels : undefined)}
                     onMoveVideos={viewScope === 'videos' ? handleMoveVideos : undefined}
+                    onUnkeyedRowInteraction={handleUnkeyedRowInteraction}
                     viewScope={viewScope}
                     onVideoChannelClick={handleVideoChannelClick}
                     onChannelNavigateToVideos={handleChannelNavigateToVideos}
