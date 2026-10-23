@@ -92,7 +92,7 @@ function normalizeTimestampLabel(seconds: number, durationSeconds?: number) {
 
 function normalizeRefSeconds(ref: TimestampRef) {
   if (Number.isFinite(ref.seconds)) return Math.max(0, Math.floor(ref.seconds));
-  const parsed = parseTimestampToken(ref.label.replace(/[\[\]]/g, ''));
+  const parsed = parseTimestampToken(ref.label.replace(/[[\]]/g, ''));
   return parsed ?? 0;
 }
 
