@@ -3,13 +3,13 @@ import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDuckDB } from './hooks/useDuckDB';
-import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ProjectArchiveManifest, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailLoadProgress, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ExcludedVideoMeta, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchHistoryEvent, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
+import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ProjectArchiveManifest, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailLoadProgress, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
 import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import { applyFriendlyColumnMappings, applyMerge, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, mergeChannelMetadataRows, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
+import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, mergeChannelMetadataRows, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
 import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
 import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
@@ -21,7 +21,7 @@ import { THUMBNAIL_LIMIT, buildSavedViewThumbnailScopeKey, buildThumbnailSortSig
 import { cn } from './lib/utils';
 import { getBootPersistedStateJson, savePersistedState } from './lib/persistedState';
 import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
-import { applySupportMappings, buildDefaultProjectSourceState, buildSourceId, computeSourceVisibilityInclusionCounts, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, GENERATED_SOURCE_ID, joinUnique, LINKING_FILTER_COLUMNS, LINKING_GENERATED_COLUMNS, normalizeJoinKey, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
+import { applySupportMappings, buildDefaultProjectSourceState, computeSourceVisibilityInclusionCounts, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
 import { CHANNEL_BASE_SCHEMA, CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
 import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
 import { buildThumbnailEntriesFromCacheSeed, createObjectUrl, FILTERED_TEMP_THUMBNAIL_SCOPE, revokeDroppedThumbnailUrls, revokeThumbnailUrls, summarizeThumbnailProgress, THUMBNAIL_ZOOM_STEPS } from './lib/thumbnailCache';
@@ -29,9 +29,12 @@ import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFile
 import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
 import { describeFilterModelEntry, formatDurationLabel, parseDateLabel, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
 import type { AppNavigationEntry } from './lib/navigation';
+import type { HydrateProjectArgs } from './lib/projectHydration';
 import { LongTaskOverlay } from './components/LongTaskOverlay';
 import { useShortcuts } from './hooks/useShortcuts';
 import { useDialogs } from './state/useDialogs';
+import { useImportFlow } from './state/useImportFlow';
+import { addEnrichmentSource, importProgressTitle, planMergeImport, planReplaceImport } from './lib/importPlan';
 import { useResearchHistory } from './state/useResearchHistory';
 import { useInclusionActions, useInclusionState } from './state/useInclusion';
 import { ExportDialog } from './components/dialogs/ExportDialog';
@@ -191,27 +194,6 @@ export default function App() {
   const [isGeneratingChannelMetadata, setIsGeneratingChannelMetadata] = useState(false);
   const [datasetVersion, setDatasetVersion] = useState(0);
   const [filteredViewVersion, setFilteredViewVersion] = useState(0);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [pendingSchema, setPendingSchema] = useState<any[]>([]);
-  const [pendingRows, setPendingRows] = useState<any[]>([]);
-  const clearPendingImport = useCallback(() => {
-    setPendingFile(null);
-    setPendingRows([]);
-    setPendingSchema([]);
-  }, []);
-  const {
-    isCommandPaletteOpen, setIsCommandPaletteOpen,
-    isKeyboardHelpOpen, setIsKeyboardHelpOpen,
-    isDashboardOpen, setIsDashboardOpen,
-    isImportOpen, setIsImportOpen,
-    isExportOpen, setIsExportOpen,
-    isColumnsOpen, setIsColumnsOpen,
-    isResearchLogOpen, setIsResearchLogOpen,
-    hasBlockingOverlay,
-    closeTopOverlay,
-  } = useDialogs({ onCloseImport: clearPendingImport });
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isImportSubmitting, setIsImportSubmitting] = useState(false);
   const [longTaskProgress, setLongTaskProgress] = useState<LongTaskProgress | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
     return persisted.visibleColumns ?? [];
@@ -273,6 +255,29 @@ export default function App() {
       setLongTaskProgress(progress);
     });
   }, []);
+
+  const {
+    isImportOpen,
+    pendingFile,
+    pendingSchema,
+    pendingRows,
+    importError,
+    setImportError,
+    isImportSubmitting,
+    closeImport,
+    openCsvForImport,
+    runImport,
+  } = useImportFlow({ readCSVBuffer, updateLongTaskProgress, setIsLoadingRows });
+  const {
+    isCommandPaletteOpen, setIsCommandPaletteOpen,
+    isKeyboardHelpOpen, setIsKeyboardHelpOpen,
+    isDashboardOpen, setIsDashboardOpen,
+    isExportOpen, setIsExportOpen,
+    isColumnsOpen, setIsColumnsOpen,
+    isResearchLogOpen, setIsResearchLogOpen,
+    hasBlockingOverlay,
+    closeTopOverlay,
+  } = useDialogs({ isImportOpen, closeImport });
 
   const workingSchema = useMemo(() => stripDeletedColumnsFromSchema(sourceSchema, deletedColumns), [sourceSchema, deletedColumns]);
   const baseRows = useMemo(() => stripDeletedColumnsFromRows(sourceRows, deletedColumns), [sourceRows, deletedColumns]);
@@ -1093,50 +1098,7 @@ export default function App() {
     });
   }, [applyScopeSelection, rows, selectedVideoId, viewScope]);
 
-  const hydrateProject = useCallback((args: {
-    rows: any[];
-    schema?: any[];
-    fileName: string | null;
-    visible?: string[];
-    channelVisible?: string[];
-    videoColumnWidths?: Record<string, number>;
-    channelColumnWidths?: Record<string, number>;
-    annotations?: Record<string, Annotation>;
-    notesByVideoId?: Record<string, string>;
-    channelNotesById?: Record<string, string>;
-    channelTagsById?: Record<string, string[]>;
-    savedViews?: SavedView[];
-    activeViewId?: string | null;
-    projectOverview?: string;
-    projectNotes?: string;
-    researchLogSectionComments?: Partial<Record<ResearchLogCommentSectionId, string>>;
-    researchHistory?: ResearchHistoryEvent[];
-    watchHistoryByVideoId?: Record<string, WatchHistoryEntry>;
-    theme?: AppState['theme'];
-    isRightPanelCollapsed?: boolean;
-    deletedColumns?: string[];
-    specialMappings?: Partial<SpecialMappings>;
-    excludedVideoIds?: string[];
-    excludedVideoMetaById?: Record<string, ExcludedVideoMeta>;
-    inclusionView?: InclusionView;
-    dashboardSnapshots?: Partial<Record<DashboardScope, DatasetDashboardSnapshot>>;
-    savedViewDashboardSnapshots?: Record<string, SavedViewDashboardSnapshot>;
-    savedViewsVersion?: number;
-    channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
-    importedChannelMetadata?: ImportedChannelMetadataState | null;
-    thumbnailCaches?: Record<string, DashboardThumbnailCacheSnapshot>;
-    viewScope?: ViewScope;
-    channelFilterModel?: ExplorerFilterModel;
-    channelSnapshotShouldBeFresh?: boolean;
-    autoExpandPanel?: boolean;
-    sourceRegistry?: SourceRegistryState;
-    sourceVisibility?: SourceVisibilityState;
-    rowLineage?: RowLineageState;
-    columnLineage?: ColumnLineageState;
-    generatedMetadata?: GeneratedMetadataState;
-    linkingState?: LinkingState;
-    channelLinkingState?: ChannelLinkingState;
-  }) => {
+  const hydrateProject = useCallback((args: HydrateProjectArgs) => {
     const nextSourceRows = args.rows;
     const nextSourceSchema = applyFriendlyColumnMappings(args.schema || deriveSchemaFromRows(nextSourceRows), args.fileName || '');
     const nextDeletedColumns = args.deletedColumns ?? [];
@@ -1629,107 +1591,32 @@ export default function App() {
       await restoreProjectBackup(file);
       return;
     }
-
-    try {
-      setImportError(null);
-      setIsLoadingRows(true);
-      updateLongTaskProgress({
-        title: 'Preparing CSV import',
-        detail: `Reading ${file.name}`,
-        completed: 0,
-        total: 100,
-      });
-      const buffer = await readFileBufferWithProgress(file, (completed, total) => {
-        updateLongTaskProgress({
-          title: 'Preparing CSV import',
-          detail: `Reading ${file.name}`,
-          completed: Math.min(40, Math.round((completed / Math.max(total, 1)) * 40)),
-          total: 100,
-        });
-      });
-      updateLongTaskProgress({
-        title: 'Preparing CSV import',
-        detail: 'Parsing rows and inferring columns',
-        completed: 50,
-        total: 100,
-        indeterminate: true,
-      });
-      await waitForNextPaint();
-      const { schema, rows: parsedRows } = await readCSVBuffer(file.name, buffer);
-      const decoratedSchema = applyFriendlyColumnMappings(schema, file.name);
-      updateLongTaskProgress({
-        title: 'Preparing CSV import',
-        detail: `Loaded ${parsedRows.length.toLocaleString()} rows`,
-        completed: 100,
-        total: 100,
-      });
-      setPendingFile(file);
-      setPendingSchema(decoratedSchema);
-      setPendingRows(parsedRows);
-      setIsImportOpen(true);
-    } catch (error) {
-      console.error('Failed to read CSV:', error);
-    } finally {
-      updateLongTaskProgress(null);
-      setIsLoadingRows(false);
-    }
-  }, [readCSVBuffer, restoreProjectBackup, updateLongTaskProgress]);
+    await openCsvForImport(file);
+  }, [openCsvForImport, restoreProjectBackup]);
 
   const handleImportConfirm = useCallback(async ({ options, incomingRows }: ImportSubmission) => {
     if (!pendingFile) return;
-    try {
-      setImportError(null);
-      setIsImportSubmitting(true);
-      setIsLoadingRows(true);
-      const progressTitle = options.importKind === 'channelMetadata'
-        ? 'Merging channel metadata'
-        : (options.mode === 'replace' || sourceRows.length === 0 ? 'Importing CSV' : 'Merging CSV');
-      updateLongTaskProgress({
-        title: progressTitle,
-        detail: 'Preparing import settings',
-        completed: 1,
-        total: 5,
-      });
-      await waitForNextPaint();
-      const autoMappings: Partial<SpecialMappings> = {
-        ...detectSpecialMappings(pendingSchema),
-        ...(options.specialMappings || {}),
-      };
-
+    const fileName = pendingFile.name;
+    await runImport(importProgressTitle(options, sourceRows.length > 0), async (progress) => {
       if (options.importKind === 'channelMetadata') {
         if (!sourceRows.length) {
           throw new Error('Import a video dataset before merging channel metadata.');
         }
         const relationshipType = options.channelMetadataRelationship || 'channelId';
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Matching imported channel rows to existing channels',
-          completed: 2,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
+        await progress('Matching imported channel rows to existing channels', 2, { indeterminate: true });
         const mergeResult = buildImportedChannelMetadataState({
           existingVideoRows: sourceRows,
           incomingRows,
           incomingSchema: pendingSchema,
           relationshipType,
-          sourceFileName: pendingFile.name,
+          sourceFileName: fileName,
           previousState: importedChannelMetadata,
         });
         const nextImportedState = mergeResult.state;
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Rebuilding the channel table',
-          completed: 3,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const nextChannelRows = buildChannelMetadataRows(activeBaseRows, nextImportedState);
+        await progress('Rebuilding the channel table', 3, { indeterminate: true });
         setImportedChannelMetadata(nextImportedState);
         setChannelMetadataSnapshot({
-          rows: nextChannelRows,
+          rows: buildChannelMetadataRows(activeBaseRows, nextImportedState),
           calculatedAt: new Date().toISOString(),
           datasetVersionAtCalculation: datasetVersion,
           inclusionViewAtCalculation: inclusionView,
@@ -1738,25 +1625,12 @@ export default function App() {
           cacheKeyAtCalculation: currentChannelMetadataCacheKey,
         });
         setChannelFilterModel({});
-        setSourceRegistry((current) => {
-          const sourceId = buildSourceId('source/enrichment', pendingFile.name);
-          const next: SourceRegistryState = {
-            ...current,
-            byId: {
-              ...current.byId,
-              [sourceId]: {
-                id: sourceId,
-                label: pendingFile.name,
-                kind: 'enrichment',
-                rowCount: incomingRows.length,
-                contributedColumns: pendingSchema.map((column) => column.column_name),
-                createdAt: new Date().toISOString(),
-              },
-            },
-            orderedIds: joinUnique([...current.orderedIds, sourceId]),
-          };
-          return next;
-        });
+        setSourceRegistry((current) => addEnrichmentSource(current, {
+          fileName,
+          rowCount: incomingRows.length,
+          columns: pendingSchema.map((column) => column.column_name),
+          now: new Date().toISOString(),
+        }));
         setChannelLinkingState((current) => ({
           ...current,
           stale: true,
@@ -1764,335 +1638,115 @@ export default function App() {
         }));
         appendResearchHistory({
           type: 'import_merge_completed',
-          summary: `Merged channel metadata from ${pendingFile.name}: ${mergeResult.updatedCount.toLocaleString()} matched / updated, ${mergeResult.skippedCount.toLocaleString()} skipped.`,
+          summary: `Merged channel metadata from ${fileName}: ${mergeResult.updatedCount.toLocaleString()} matched / updated, ${mergeResult.skippedCount.toLocaleString()} skipped.`,
           details: `Relationship: ${relationshipType === 'channelId' ? 'channelId → channelId' : 'normalized channel title'}; matched on ${mergeResult.relationshipColumn || 'n/a'}.`,
         });
-      } else if (options.mode === 'replace' || sourceRows.length === 0) {
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Applying mapped support fields',
-          completed: 2,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const preparedRows = applySupportMappings(incomingRows, autoMappings);
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Deriving column schema',
-          completed: 3,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const preparedSchema = deriveSchemaFromRows(preparedRows, pendingSchema);
-        const isFirstDataset = sourceRows.length === 0;
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Rebuilding project state',
-          completed: 4,
-          total: 5,
-        });
-        await waitForNextPaint();
-        hydrateProject({
-          rows: preparedRows,
-          schema: preparedSchema,
-          fileName: pendingFile.name,
-          visible: options.selectedColumns,
-          annotations: extractAnnotationsFromRows(preparedRows, {}),
-          notesByVideoId: {},
-          channelNotesById: {},
-          channelTagsById: {},
-          savedViews: [],
-          activeViewId: null,
-          projectOverview: state.projectOverview,
-          projectNotes: state.projectNotes,
-          researchLogSectionComments: state.researchLogSectionComments,
-          researchHistory: [],
-          watchHistoryByVideoId: {},
-          specialMappings: autoMappings,
-          excludedVideoIds: [],
-          excludedVideoMetaById: {},
-          inclusionView: 'included',
-          savedViewDashboardSnapshots: {},
-          savedViewsVersion: 0,
-          channelMetadataSnapshot: null,
-          importedChannelMetadata: null,
-          viewScope: 'videos',
-          autoExpandPanel: isFirstDataset,
-          generatedMetadata: createEmptyGeneratedMetadata(),
-          linkingState: {
-            ...createEmptyLinkingState(),
-            sourceCandidateProfiles: profileLinkingColumnCandidates(preparedRows),
-          },
-          channelLinkingState: createEmptyChannelLinkingState(),
-        });
-        appendResearchHistory({
-          type: 'import_replace_completed',
-          summary: `Imported ${preparedRows.length.toLocaleString()} rows by replacing the current project with ${pendingFile.name}.`,
-        });
-        if (autoMappings.transcriptColumn || autoMappings.descriptionColumn || autoMappings.tagColumn) {
-          appendResearchHistory({
-            type: 'special_mapping_updated',
-            summary: 'Special field mappings updated during import.',
-            details: `Transcript: ${autoMappings.transcriptColumn || 'unmapped'}; Description: ${autoMappings.descriptionColumn || 'unmapped'}; Tags: ${autoMappings.tagColumn || 'unmapped'}.`,
-          });
-        }
-      } else {
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Applying merge rules and resolving conflicts',
-          completed: 2,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const mergeResult = applyMerge({
-          existingRows: sourceRows,
-          incomingRows,
-          existingSchema: sourceSchema,
-          incomingSchema: pendingSchema,
-          joinColumn: options.joinColumn,
-          incomingJoinColumn: options.incomingJoinColumn,
-          mergeOptions: options.mergeOptions!,
-        });
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Updating row lineage and source metadata',
-          completed: 3,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const sourceStateBase = sourceRegistry.orderedIds.length
-          ? {
+        return;
+      }
+
+      const plan = options.mode === 'replace' || sourceRows.length === 0
+        ? await planReplaceImport({
+            incomingRows,
+            incomingSchema: pendingSchema,
+            fileName,
+            options,
+            specialMappings: { ...detectSpecialMappings(pendingSchema), ...(options.specialMappings || {}) },
+            carryOver: {
+              projectOverview: state.projectOverview,
+              projectNotes: state.projectNotes,
+              researchLogSectionComments: state.researchLogSectionComments,
+            },
+            isFirstDataset: sourceRows.length === 0,
+            progress,
+          })
+        : await planMergeImport({
+            current: {
+              rows: sourceRows,
+              schema: sourceSchema,
+              fileName: state.fileName,
+              videoColumnWidths,
+              channelColumnWidths,
+              annotations: mergeAnnotationsWithUserTags(state.annotations, userTagsByVideoId),
+              notesByVideoId,
+              channelNotesById,
+              channelTagsById,
+              savedViews: state.savedViews,
+              activeViewId: state.activeViewId,
+              projectOverview: state.projectOverview,
+              projectNotes: state.projectNotes,
+              researchLogSectionComments: state.researchLogSectionComments,
+              researchHistory,
+              watchHistoryByVideoId,
+              specialMappings,
+              deletedColumns,
+              excludedVideoIds,
+              excludedVideoMetaById,
+              inclusionView,
+              savedViewDashboardSnapshots,
+              savedViewsVersion,
+              importedChannelMetadata,
+              viewScope,
               sourceRegistry,
+              sourceVisibility,
               rowLineage,
               columnLineage,
-              sourceVisibility,
-            }
-          : buildDefaultProjectSourceState({
-              rows: sourceRows,
-              schema: sourceSchema.length ? sourceSchema : deriveSchemaFromRows(sourceRows),
-              fileName: state.fileName || 'dataset.csv',
-            });
-        const now = new Date().toISOString();
-        const incomingSourceId = buildSourceId('source/enrichment', pendingFile.name);
-        const joinColumn = options.joinColumn || 'videoId';
-        const incomingJoinColumn = options.incomingJoinColumn || joinColumn;
-        const existingByJoin = new Map<string, RowLineageState['byRowId'][string]>();
-        const existingByVideoId = new Map<string, RowLineageState['byRowId'][string]>();
-        sourceRows.forEach((row, index) => {
-          const rowId = resolveRowLineageKey(row, index);
-          const lineageEntry = sourceStateBase.rowLineage.byRowId[rowId];
-          if (lineageEntry) {
-            const joinKey = normalizeJoinKey(row?.[joinColumn]);
-            if (joinKey) existingByJoin.set(joinKey, lineageEntry);
-            const videoId = resolveVideoId(row);
-            if (videoId) existingByVideoId.set(videoId, lineageEntry);
-          }
-        });
-        const incomingJoinKeys = new Set(
-          incomingRows
-            .map((row) => normalizeJoinKey(row?.[incomingJoinColumn]))
-            .filter(Boolean),
-        );
-        const nextRowLineageByRowId: RowLineageState['byRowId'] = {};
-        mergeResult.rows.forEach((row, index) => {
-          const rowId = resolveRowLineageKey(row, index);
-          const joinKey = normalizeJoinKey(row?.[joinColumn]);
-          const existingLineage = (joinKey && existingByJoin.get(joinKey))
-            || (resolveVideoId(row) ? existingByVideoId.get(resolveVideoId(row) as string) : undefined);
-          if (existingLineage) {
-            nextRowLineageByRowId[rowId] = {
-              rowId,
-              baseSourceId: existingLineage.baseSourceId,
-              contributorSourceIds: joinUnique([
-                ...(existingLineage.contributorSourceIds || []),
-                ...(joinKey && incomingJoinKeys.has(joinKey) ? [incomingSourceId] : []),
-              ]),
-            };
-            return;
-          }
-          nextRowLineageByRowId[rowId] = {
-            rowId,
-            baseSourceId: incomingSourceId,
-            contributorSourceIds: [incomingSourceId],
-          };
-        });
-        const nextRowLineage: RowLineageState = { byRowId: nextRowLineageByRowId };
-        const nextSourceRegistry = withSourceRegistryCounts({
-          sourceRegistry: {
-            byId: {
-              ...sourceStateBase.sourceRegistry.byId,
-              [incomingSourceId]: {
-                id: incomingSourceId,
-                label: pendingFile.name,
-                kind: 'enrichment',
-                rowCount: incomingRows.length,
-                contributedColumns: pendingSchema.map((column) => column.column_name),
-                createdAt: now,
-              },
-              [GENERATED_SOURCE_ID]: sourceStateBase.sourceRegistry.byId[GENERATED_SOURCE_ID] || {
-                id: GENERATED_SOURCE_ID,
-                label: 'Generated metadata',
-                kind: 'generated',
-                rowCount: 0,
-                contributedColumns: ['content_intent', ...LINKING_GENERATED_COLUMNS],
-                createdAt: now,
-              },
+              generatedMetadata,
+              linkingState,
+              channelLinkingState,
             },
-            orderedIds: joinUnique([
-              ...sourceStateBase.sourceRegistry.orderedIds,
-              incomingSourceId,
-              GENERATED_SOURCE_ID,
-            ]),
-            primarySourceId: sourceStateBase.sourceRegistry.primarySourceId || incomingSourceId,
-          },
-          rowLineage: nextRowLineage,
-          defaultRowCount: mergeResult.rows.length,
-        });
-        const nextColumnLineage = ensureGeneratedColumnLineage({
-          byColumn: Object.fromEntries(
-            mergeResult.schema.map((column) => {
-              const previous = sourceStateBase.columnLineage.byColumn[column.column_name];
-              if (previous) return [column.column_name, previous];
-              return [column.column_name, {
-                column: column.column_name,
-                sourceId: incomingSourceId,
-                generated: false,
-                scope: 'videos',
-              }];
-            }),
-          ),
-        });
-        const nextSourceVisibility = reconcileSourceVisibility(sourceStateBase.sourceVisibility, nextSourceRegistry);
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Rebuilding project state',
-          completed: 4,
-          total: 5,
-        });
-        await waitForNextPaint();
-        const nextLinkingState: LinkingState = {
-          ...linkingState,
-          stale: true,
-          staleReason: 'Source rows changed after merge. Refresh linking summary.',
-          sourceCandidateProfiles: profileLinkingColumnCandidates(mergeResult.rows),
-        };
-        const nextChannelLinkingState: ChannelLinkingState = {
-          ...channelLinkingState,
-          stale: true,
-          staleReason: 'Source rows changed after merge. Refresh channel metadata to rebuild link aggregates.',
-        };
-        hydrateProject({
-          rows: mergeResult.rows,
-          schema: mergeResult.schema,
-          fileName: state.fileName || pendingFile.name,
-          visible: options.selectedColumns,
-          videoColumnWidths,
-          channelColumnWidths,
-          annotations: extractAnnotationsFromRows(mergeResult.rows, mergeAnnotationsWithUserTags(state.annotations, userTagsByVideoId)),
-          notesByVideoId,
-          channelNotesById,
-          channelTagsById,
-          savedViews: state.savedViews,
-          activeViewId: state.activeViewId,
-          projectOverview: state.projectOverview,
-          projectNotes: state.projectNotes,
-          researchLogSectionComments: state.researchLogSectionComments,
-          researchHistory,
-          watchHistoryByVideoId,
-          specialMappings: options.mergeOptions?.specialMappings || specialMappings,
-          deletedColumns,
-          excludedVideoIds,
-          excludedVideoMetaById,
-          inclusionView,
-          savedViewDashboardSnapshots,
-          savedViewsVersion,
-          channelMetadataSnapshot: null,
-          importedChannelMetadata,
-          viewScope,
-          sourceRegistry: nextSourceRegistry,
-          sourceVisibility: nextSourceVisibility,
-          rowLineage: nextRowLineage,
-          columnLineage: nextColumnLineage,
-          generatedMetadata,
-          linkingState: nextLinkingState,
-          channelLinkingState: nextChannelLinkingState,
-        });
-        appendResearchHistory({
-          type: 'import_merge_completed',
-          summary: `Merged ${incomingRows.length.toLocaleString()} incoming rows into ${sourceRows.length.toLocaleString()} existing rows.`,
-          details: `Project key: ${options.joinColumn || 'n/a'}; incoming key: ${options.incomingJoinColumn || options.joinColumn || 'n/a'}; mode: ${options.mergeOptions?.mergeMode || 'add-update'}.`,
-        });
-        const mergeMappings = options.mergeOptions?.specialMappings || {};
-        if (mergeMappings.transcriptColumn || mergeMappings.descriptionColumn || mergeMappings.tagColumn) {
-          appendResearchHistory({
-            type: 'special_mapping_updated',
-            summary: 'Special field mappings updated during merge.',
-            details: `Transcript: ${mergeMappings.transcriptColumn || 'unmapped'}; Description: ${mergeMappings.descriptionColumn || 'unmapped'}; Tags: ${mergeMappings.tagColumn || 'unmapped'}.`,
+            incomingRows,
+            incomingSchema: pendingSchema,
+            incomingFileName: fileName,
+            options,
+            progress,
           });
-        }
-      }
-      updateLongTaskProgress({
-        title: progressTitle,
-        detail: 'Finishing import',
-        completed: 5,
-        total: 5,
-      });
-      await waitForNextPaint();
-      setIsImportOpen(false);
-      setPendingFile(null);
-      setPendingRows([]);
-      setPendingSchema([]);
-    } catch (error) {
-      console.error('Failed to import/merge CSV:', error);
-      setImportError(error instanceof Error ? error.message : 'Failed to import or merge the CSV. Please try again.');
-    } finally {
-      updateLongTaskProgress(null);
-      setIsImportSubmitting(false);
-      setIsLoadingRows(false);
-    }
+      hydrateProject(plan.project);
+      plan.history.forEach((entry) => appendResearchHistory(entry));
+    });
   }, [
-    pendingFile,
-    pendingSchema,
-    sourceRows,
-    sourceSchema,
     activeBaseRows,
-    specialMappings,
-    importedChannelMetadata,
-    hydrateProject,
     appendResearchHistory,
-    state.annotations,
-    userTagsByVideoId,
-    state.fileName,
-    state.projectOverview,
-    state.projectNotes,
-    state.researchLogSectionComments,
-    state.savedViews,
-    state.activeViewId,
-    visibleColumns,
-    deletedColumns,
-    sourceRegistry,
-    sourceVisibility,
-    rowLineage,
-    columnLineage,
-    generatedMetadata,
-    linkingState,
+    channelColumnWidths,
     channelLinkingState,
-    updateLongTaskProgress,
-    notesByVideoId,
+    channelNotesById,
+    channelTagsById,
+    columnLineage,
+    currentChannelMetadataCacheKey,
+    datasetVersion,
+    deletedColumns,
     excludedVideoIds,
     excludedVideoMetaById,
+    exclusionMembershipFingerprint,
+    generatedMetadata,
+    hydrateProject,
+    importedChannelMetadata,
     inclusionView,
+    linkingState,
+    notesByVideoId,
+    pendingFile,
+    pendingSchema,
     researchHistory,
-    watchHistoryByVideoId,
+    rowLineage,
+    runImport,
     savedViewDashboardSnapshots,
     savedViewsVersion,
+    sourceRegistry,
+    sourceRows,
+    sourceSchema,
+    sourceVisibility,
+    specialMappings,
+    state.activeViewId,
+    state.annotations,
+    state.fileName,
+    state.projectNotes,
+    state.projectOverview,
+    state.researchLogSectionComments,
+    state.savedViews,
+    userTagsByVideoId,
+    videoColumnWidths,
+    videoCorpusFingerprint,
     viewScope,
-    datasetVersion,
-    inclusionView,
+    watchHistoryByVideoId,
   ]);
 
   const handleBeforeInclusionChange = useCallback(() => {
@@ -5855,10 +5509,7 @@ ${heading}
       <ImportDialog
         isOpen={isImportOpen}
         onClose={() => {
-          setIsImportOpen(false);
-          setPendingFile(null);
-          setPendingRows([]);
-          setPendingSchema([]);
+          closeImport();
           setImportError(null);
         }}
         fileName={pendingFile?.name || ''}
