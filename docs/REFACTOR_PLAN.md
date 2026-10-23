@@ -58,6 +58,29 @@ Memory: about 760 MB of live heap at 100k rows (301 MB CSV), mostly the text its
 
 Run: `node scripts/generate-perf-fixture.mjs 100000`, then `PERF=1 PERF_ROWS=10000,100000 npx playwright test --config playwright.perf.config.ts e2e/perf.spec.ts`.
 
+## Progress, phase 3 (branch `refactor/phase3-structure`, stacked on phase 2)
+
+App.tsx: **7,256 → 5,880 lines**. Every step is behaviour-preserving and was checked with typecheck, lint, 31 unit tests and 12 e2e tests, plus the perf run after the include/exclude move (unchanged: 40 ms / 68 ms at 10k / 100k).
+
+Done:
+1. **Helpers into `lib/`.** 79 top-level functions, constants and types moved with TypeScript's "Move to file" refactor into `projectSourceState`, `columnDefaults`, `fingerprints`, `thumbnailCache`, `projectNotes`, `keyboard`, `browser`, `researchHistory` and `navigation`, plus additions to `inclusion` and `selectionState`, and a `LongTaskOverlay` component.
+2. **One shortcut registry.** `lib/shortcuts.ts` (`APP_SHORTCUTS`) and the `useShortcuts` hook replace App's 175-line keydown handler. The help dialog is generated from the registry, so it now also lists Esc, the arrow keys, Ctrl+←/→ and Delete/Backspace.
+3. **State slices as hooks** in `src/state/`:
+   - `useDialogs`: dialog flags and Esc order.
+   - `useResearchHistory`.
+   - `useInclusion`: `useInclusionState` plus `useInclusionActions`. The research-log entry builder is now a pure, tested function.
+4. **`Dialogs.tsx` split** into `components/dialogs/`, one file per dialog plus `shared.tsx`.
+
+**Why hooks, not Zustand (yet):** the include/exclude update runs in a React transition so the grid stays responsive, and external stores can't be updated inside a transition. Hooks keep React's semantics while grouping the state by domain. Switching a slice to a store later is a small step if prop drilling becomes the main pain.
+
+Next in phase 3 (App's remaining state, by size of the win):
+- **Import flow:** pending file, schema, rows, errors, submit and progress. This is the largest remaining handler set.
+- **Persistence:** build and save the persisted state, and hydrate it. This includes the 40-field `nextPersistedState`.
+- **Thumbnails, navigation history, channel metadata and linking state.**
+- **App's JSX:** split it into layout components (`Workspace`, `RightPanel`, `DialogHost`).
+- **Large components:** `DetailPanel` (1,703 lines), `TemplateDashboard` (1,274) and `ChannelSummaryPanel` (1,172) into container and view parts.
+- **Lint warnings:** work through the remaining 48, mostly `exhaustive-deps` in App.
+
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
 - **UI and domain logic → refactor step by step.** `src/lib/` (linking, dashboards, archive and manifest, timestamp notes, selection) is mostly pure and worth keeping. The mess sits in the app shell: `App.tsx` and a few oversized components.
