@@ -40,6 +40,7 @@ import { addEnrichmentSource, importProgressTitle, planMergeImport, planReplaceI
 import { useResearchHistory } from './state/useResearchHistory';
 import { useInclusionActions, useInclusionState } from './state/useInclusion';
 import { usePersistence } from './state/usePersistence';
+import { useNavigationHistory } from './state/useNavigationHistory';
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
 import { ResearchLogDialog } from './components/dialogs/ResearchLogDialog';
@@ -184,8 +185,6 @@ export default function App() {
   const [videoColumnWidths, setVideoColumnWidths] = useState<Record<string, number>>(() => persisted.videoColumnWidths ?? {});
   const [channelColumnWidths, setChannelColumnWidths] = useState<Record<string, number>>(() => persisted.channelColumnWidths ?? {});
   const [videoScopeChannelKeys, setVideoScopeChannelKeys] = useState<string[] | null>(null);
-  const [navigationHistory, setNavigationHistory] = useState<AppNavigationEntry[]>([]);
-  const [navigationCursor, setNavigationCursor] = useState(-1);
   const [defaultGridResetStage, setDefaultGridResetStage] = useState<0 | 1>(0);
   const [sourceRegistry, setSourceRegistry] = useState<SourceRegistryState>(() => persisted.sourceRegistry ?? createEmptySourceRegistry());
   const [sourceVisibility, setSourceVisibility] = useState<SourceVisibilityState>(() => persisted.sourceVisibility ?? createEmptySourceVisibility());
@@ -215,8 +214,6 @@ export default function App() {
   const sourceSchemaRef = useRef<any[]>([]);
   const isAutoRestoreInFlightRef = useRef(false);
   const [isChannelDrilldownFilterActive, setIsChannelDrilldownFilterActive] = useState(false);
-  const navigationRestoreInFlightRef = useRef(false);
-  const lastNavigationKeyRef = useRef<string | null>(null);
   const initialSelectionResolvedRef = useRef<{ videos: boolean; channels: boolean }>({ videos: false, channels: false });
   const videoSelection = selectionState.videos;
   const channelSelection = selectionState.channels;
@@ -901,7 +898,6 @@ export default function App() {
   }, [channelSchema]);
 
   const restoreNavigationEntry = useCallback((entry: AppNavigationEntry) => {
-    navigationRestoreInFlightRef.current = true;
     drilldownPreviousVideoFilterRef.current = entry.drilldownPreviousVideoFilter ?? null;
     setDefaultGridResetStage(0);
     setInclusionView(entry.inclusionView);
@@ -920,16 +916,6 @@ export default function App() {
     setViewScope('videos');
     setPendingViewerTarget(entry.selectedVideoId ? { kind: 'video', videoId: entry.selectedVideoId } : null);
   }, [clearScopeSelection]);
-
-  const navigateHistoryByOffset = useCallback((offset: -1 | 1) => {
-    setNavigationCursor((current) => {
-      const target = current + offset;
-      const entry = navigationHistory[target];
-      if (!entry) return current;
-      restoreNavigationEntry(entry);
-      return target;
-    });
-  }, [navigationHistory, restoreNavigationEntry]);
 
   const markDerivedSnapshotsStale = useCallback((reason: string) => {
     setLinkingState((current) => ({
@@ -1131,10 +1117,7 @@ export default function App() {
     setChannelFilterModel(args.channelFilterModel ?? {});
     clearChannelDrilldownState({ restoreVideoFilters: false });
     setVideoScopeChannelKeys(null);
-    setNavigationHistory([]);
-    setNavigationCursor(-1);
-    navigationRestoreInFlightRef.current = false;
-    lastNavigationKeyRef.current = null;
+    resetNavigationHistory();
     setDashboardActiveTab('overview');
     setDashboardSnapshots(nextDashboardSnapshots);
     setSavedViewDashboardSnapshots(nextSavedViewSnapshots);
@@ -3454,25 +3437,16 @@ ${heading}
     drilldownPreviousVideoFilter: drilldownPreviousVideoFilterRef.current ?? null,
   }), [channelFilterModel, filterModel, inclusionView, isChannelDrilldownFilterActive, selectedChannelDetailRow?.channel_id, selectedChannelDetailRow?.channel_name, selectedVideoId, state.activeViewId, videoScopeChannelKeys, viewScope]);
 
-  useEffect(() => {
-    if (!hasLoadedData) return;
-    const entryKey = JSON.stringify(currentNavigationEntry);
-    if (navigationRestoreInFlightRef.current) {
-      navigationRestoreInFlightRef.current = false;
-      lastNavigationKeyRef.current = entryKey;
-      return;
-    }
-    if (lastNavigationKeyRef.current === entryKey) return;
-    lastNavigationKeyRef.current = entryKey;
-    setNavigationHistory((current) => {
-      const base = navigationCursor >= 0 ? current.slice(0, navigationCursor + 1) : current;
-      const last = base[base.length - 1];
-      if (last && JSON.stringify(last) === entryKey) return base;
-      const next = [...base, currentNavigationEntry];
-      setNavigationCursor(next.length - 1);
-      return next.slice(-120);
-    });
-  }, [currentNavigationEntry, hasLoadedData, navigationCursor]);
+  const {
+    navigateHistoryByOffset,
+    resetNavigationHistory,
+    canNavigateBack,
+    canNavigateForward,
+  } = useNavigationHistory({
+    enabled: hasLoadedData,
+    currentEntry: currentNavigationEntry,
+    restoreEntry: restoreNavigationEntry,
+  });
 
   const handleRenameProject = useCallback((nextName: string) => {
     const trimmed = nextName.trim();
@@ -5106,8 +5080,8 @@ ${heading}
         onRenameProject={handleRenameProject}
         onNavigateBack={() => navigateHistoryByOffset(-1)}
         onNavigateForward={() => navigateHistoryByOffset(1)}
-        canNavigateBack={navigationCursor > 0}
-        canNavigateForward={navigationCursor >= 0 && navigationCursor < navigationHistory.length - 1}
+        canNavigateBack={canNavigateBack}
+        canNavigateForward={canNavigateForward}
       />
 
       <main className="flex flex-1 overflow-hidden">
