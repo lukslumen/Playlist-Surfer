@@ -68,10 +68,21 @@ for (const size of SIZES) {
     });
 
     const firstCell = page.locator('.ag-center-cols-container .ag-row[row-index="0"] .ag-cell').first();
-    await firstCell.click();
-    await expect(footer(page)).toContainText('1 selected');
-    await timedKey(page, 'exclude 1 row', results, 'Delete', rowsText(size - 1));
-    await timedKey(page, 'undo exclude', results, 'ControlOrMeta+z', rowsText(size));
+    // Single interactions are noisy (GC, scheduling), so repeat and keep the median.
+    const samples: Record<string, number[]> = { 'exclude 1 row': [], 'undo exclude': [] };
+    for (let i = 0; i < 5; i += 1) {
+      await firstCell.click();
+      await expect(footer(page)).toContainText('1 selected');
+      const sample: Record<string, number> = {};
+      await timedKey(page, 'exclude 1 row', sample, 'Delete', rowsText(size - 1));
+      await timedKey(page, 'undo exclude', sample, 'ControlOrMeta+z', rowsText(size));
+      samples['exclude 1 row'].push(sample['exclude 1 row']);
+      samples['undo exclude'].push(sample['undo exclude']);
+    }
+    Object.entries(samples).forEach(([label, values]) => {
+      results[`${label} (median of 5)`] = [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+      console.log(`PERF median ${label}: ${results[`${label} (median of 5)`]} ms (${values.join(', ')})`);
+    });
 
     await firstCell.click();
     await expect(footer(page)).toContainText('1 selected');

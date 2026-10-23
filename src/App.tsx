@@ -1423,16 +1423,29 @@ export default function App() {
     const additions = generatedSchema.filter((column) => !existing.has(column.column_name));
     return [...workingSchema, ...additions];
   }, [generatedSchema, workingSchema]);
-  const activeBaseRowsWithGenerated = useMemo(
-    () => overlayGeneratedMetadataRows(activeBaseRows, generatedOverlayByVideoId),
-    [activeBaseRows, generatedOverlayByVideoId],
+  // Overlay generated metadata and user tags once for the whole dataset and only then split by
+  // inclusion: an include/exclude then just filters arrays, every other row keeps its object, and
+  // AG Grid can skip re-processing rows it already has.
+  const sourceRowsWithGenerated = useMemo(
+    () => overlayGeneratedMetadataRows(sourceMaskedRows, generatedOverlayByVideoId),
+    [generatedOverlayByVideoId, sourceMaskedRows],
   );
-  const includedBaseRowsWithGenerated = useMemo(
-    () => overlayGeneratedMetadataRows(includedBaseRows, generatedOverlayByVideoId),
-    [generatedOverlayByVideoId, includedBaseRows],
+  const sourceDisplayRows = useMemo(
+    () => buildDisplayRows(sourceRowsWithGenerated, userTagsByVideoId),
+    [sourceRowsWithGenerated, userTagsByVideoId],
   );
+  const generatedInclusionPartition = useMemo(
+    () => partitionRowsByInclusion(sourceRowsWithGenerated, excludedVideoIdSet),
+    [excludedVideoIdSet, sourceRowsWithGenerated],
+  );
+  const displayInclusionPartition = useMemo(
+    () => partitionRowsByInclusion(sourceDisplayRows, excludedVideoIdSet),
+    [excludedVideoIdSet, sourceDisplayRows],
+  );
+  const includedBaseRowsWithGenerated = generatedInclusionPartition.included;
+  const includedDisplayRows = displayInclusionPartition.included;
   const displaySchema = useMemo(() => buildDisplaySchema(workingSchemaWithGenerated, userTagsByVideoId), [workingSchemaWithGenerated, userTagsByVideoId]);
-  const displayRows = useMemo(() => buildDisplayRows(activeBaseRowsWithGenerated, userTagsByVideoId), [activeBaseRowsWithGenerated, userTagsByVideoId]);
+  const displayRows = inclusionView === 'excluded' ? displayInclusionPartition.excluded : displayInclusionPartition.included;
   const channelScopedDisplayRows = useMemo(() => {
     if (!videoScopeChannelKeys?.length) return displayRows;
     const allowed = new Set(videoScopeChannelKeys);
@@ -5438,10 +5451,6 @@ ${heading}
       [tagColumn]: { values: nextValues, matchMode: 'any' },
     });
   }, [filterModel, specialMappings.tagColumn, updateExternalFilterModel, workingSchema]);
-  const includedDisplayRows = useMemo(
-    () => buildDisplayRows(includedBaseRowsWithGenerated, userTagsByVideoId),
-    [includedBaseRowsWithGenerated, userTagsByVideoId],
-  );
   const includedBooleanMapColumns = useMemo(
     () => detectBooleanMapColumns(includedDisplayRows, displaySchema),
     [includedDisplayRows, displaySchema],
