@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo, useReducer, useTransition } from 'react';
 import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
-import { motion, AnimatePresence } from 'motion/react';
 import { useDuckDB } from './hooks/useDuckDB';
 import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ProjectArchiveManifest, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailLoadProgress, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
 import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
@@ -31,6 +30,9 @@ import { describeFilterModelEntry, formatDurationLabel, parseDateLabel, resolveE
 import type { AppNavigationEntry } from './lib/navigation';
 import type { HydrateProjectArgs } from './lib/projectHydration';
 import { LongTaskOverlay } from './components/LongTaskOverlay';
+import { StatusFooter } from './components/layout/StatusFooter';
+import { ChannelMetadataEmptyState } from './components/layout/ChannelMetadataEmptyState';
+import { RightPanelShell } from './components/layout/RightPanelShell';
 import { useShortcuts } from './hooks/useShortcuts';
 import { useDialogs } from './state/useDialogs';
 import { useImportFlow } from './state/useImportFlow';
@@ -5069,6 +5071,7 @@ ${heading}
     );
   }
 
+  const isBatchMode = selectedVideoCount > 1;
   return (
     <div className={cn('flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-main)]', state.theme === 'pink-pop' && 'pink-ui-mode')}>
       <TopBar
@@ -5112,23 +5115,7 @@ ${heading}
           <div className="flex h-full min-h-0 flex-col">
             <div className="relative min-h-0 flex-1">
               {hasLoadedData && viewScope === 'channels' && !channelRows.length ? (
-                <div className="flex h-full items-center justify-center p-6">
-                  <div className="w-full max-w-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6 text-center shadow-sm">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Channels view</div>
-                    <div className="mt-2 text-lg font-semibold text-[var(--text-main)]">Channel metadata hasn’t been generated yet</div>
-                    <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">Generate channel-level metadata from the current video list to switch into the channels table.</p>
-                    <div className="mt-5 flex justify-center">
-                      <button
-                        type="button"
-                        onClick={handleGenerateChannelMetadata}
-                        disabled={isGeneratingChannelMetadata}
-                        className="border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-4 py-2 text-sm font-medium text-[var(--text-main)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent)_14%,transparent)] disabled:opacity-50"
-                      >
-                        {isGeneratingChannelMetadata ? 'Generating...' : 'Generate channel metadata'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <ChannelMetadataEmptyState isGenerating={isGeneratingChannelMetadata} onGenerate={handleGenerateChannelMetadata} />
               ) : (
                 <div key={viewScope} className="h-full w-full">
                   <MetadataGrid
@@ -5175,86 +5162,62 @@ ${heading}
           )}
         </div>
 
-        <AnimatePresence initial={false}>
-          {hasLoadedData && !state.isRightPanelCollapsed && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '32%', opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-              className="detail-pane-shell h-full min-w-[420px] max-w-[620px] overflow-hidden border-l border-[var(--border-color)] bg-[var(--bg-secondary)]"
-            >
-              {(() => {
-                const isBatchMode = selectedVideoCount > 1;
-                if (viewScope !== 'videos') {
-                  return (
-                    <ChannelSummaryPanel
-                      row={selectedChannelDetailRow}
-                      defaultRow={filteredChannelRows[0] || null}
-                      selectedRows={selectedChannelRows}
-                      hasChannelRows={channelRows.length > 0}
-                      isGenerating={isGeneratingChannelMetadata}
-                      onGenerate={handleGenerateChannelMetadata}
-                      channelNotesById={channelNotesById}
-                      channelTagsById={channelTagsById}
-                      onUpdateChannelNotes={handleUpdateChannelNotes}
-                      onReplaceChannelTags={handleReplaceChannelTags}
-                      onBatchAddChannelTag={handleBatchAddChannelTag}
-                      onBatchRemoveChannelTag={handleBatchRemoveChannelTag}
-                      onBatchApplyChannelNotes={handleBatchApplyChannelNotes}
-                      inclusionView={inclusionView}
-                      onBatchExcludeChannels={handleBatchExcludeChannels}
-                      onBatchCopySelection={handleBatchCopyChannelSelection}
-                      onChannelNavigateToVideos={handleChannelNavigateToVideos}
-                    />
-                  );
-                }
-                return (
-                  <DetailPanel
-                    row={isBatchMode ? null : detailRow}
-                    annotation={isBatchMode ? undefined : (detailVideoId ? ({ ...(state.annotations[detailVideoId] || {}), tags: userTagsByVideoId[detailVideoId] || [] } as Annotation) : undefined)}
-                    savedNotes={isBatchMode ? '' : (detailVideoId ? (notesByVideoId[detailVideoId] || '') : '')}
-                    selectedCount={selectedVideoCount}
-                    batchSelectionKey={batchSelectionKey}
-                    onUpdateAnnotation={handleUpdateAnnotation}
-                    onUpdateNotes={handleUpdateVideoNotes}
-                    onApplyTagFilter={handleApplyTagFilter}
-                    onBatchAddTag={handleBatchAddTagToSelection}
-                    batchSharedTags={batchSharedTags}
-                    onBatchRemoveTag={handleBatchRemoveTagFromSelection}
-                    onBatchApplyNotes={handleBatchApplyNotesToSelection}
-                    onBatchExclude={handleExcludeSelectedVideos}
-                    inclusionView={inclusionView}
-                    onBatchCopySelection={handleBatchCopySelection}
-                    isBatchTagging={isTagWritePending}
-                    onWatchSession={handleWatchSession}
-                    openAnnotateRequestKey={openAnnotationsRequestKey}
-                  />
-                );
-              })()}
-            </motion.div>
+        <RightPanelShell isOpen={hasLoadedData && !state.isRightPanelCollapsed}>
+          {viewScope !== 'videos' ? (
+            <ChannelSummaryPanel
+              row={selectedChannelDetailRow}
+              defaultRow={filteredChannelRows[0] || null}
+              selectedRows={selectedChannelRows}
+              hasChannelRows={channelRows.length > 0}
+              isGenerating={isGeneratingChannelMetadata}
+              onGenerate={handleGenerateChannelMetadata}
+              channelNotesById={channelNotesById}
+              channelTagsById={channelTagsById}
+              onUpdateChannelNotes={handleUpdateChannelNotes}
+              onReplaceChannelTags={handleReplaceChannelTags}
+              onBatchAddChannelTag={handleBatchAddChannelTag}
+              onBatchRemoveChannelTag={handleBatchRemoveChannelTag}
+              onBatchApplyChannelNotes={handleBatchApplyChannelNotes}
+              inclusionView={inclusionView}
+              onBatchExcludeChannels={handleBatchExcludeChannels}
+              onBatchCopySelection={handleBatchCopyChannelSelection}
+              onChannelNavigateToVideos={handleChannelNavigateToVideos}
+            />
+          ) : (
+            <DetailPanel
+              row={isBatchMode ? null : detailRow}
+              annotation={isBatchMode ? undefined : (detailVideoId ? ({ ...(state.annotations[detailVideoId] || {}), tags: userTagsByVideoId[detailVideoId] || [] } as Annotation) : undefined)}
+              savedNotes={isBatchMode ? '' : (detailVideoId ? (notesByVideoId[detailVideoId] || '') : '')}
+              selectedCount={selectedVideoCount}
+              batchSelectionKey={batchSelectionKey}
+              onUpdateAnnotation={handleUpdateAnnotation}
+              onUpdateNotes={handleUpdateVideoNotes}
+              onApplyTagFilter={handleApplyTagFilter}
+              onBatchAddTag={handleBatchAddTagToSelection}
+              batchSharedTags={batchSharedTags}
+              onBatchRemoveTag={handleBatchRemoveTagFromSelection}
+              onBatchApplyNotes={handleBatchApplyNotesToSelection}
+              onBatchExclude={handleExcludeSelectedVideos}
+              inclusionView={inclusionView}
+              onBatchCopySelection={handleBatchCopySelection}
+              isBatchTagging={isTagWritePending}
+              onWatchSession={handleWatchSession}
+              openAnnotateRequestKey={openAnnotationsRequestKey}
+            />
           )}
-        </AnimatePresence>
+        </RightPanelShell>
       </main>
 
-      <footer className="status-footer flex h-6 flex-shrink-0 items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 text-[11px] text-[var(--text-muted)]">
-        <div>
-          {hasLoadedData ? (
-            <span>{viewScope === 'channels' ? 'Channels' : 'Videos'}: showing <b className="text-[var(--text-main)]">{displayedRowCount.toLocaleString()}</b> of {totalScopeRowCount.toLocaleString()} rows</span>
-          ) : 'No rows loaded'}
-          {viewScope === 'videos' && (filteredColumns.length > 0 || state.activeViewId) && ' (Filtering Active)'}
-          {viewScope === 'channels' && channelFilteredColumns.length > 0 && ' (Filtering Active)'}
-          {viewScope === 'videos' && selectedVideoCount > 0 && (
-            <span>
-              {' - '}<b className="text-[var(--text-main)]">{selectedVideoCount.toLocaleString()}</b> selected
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-          DuckDB-Wasm Engine: Active
-        </div>
-      </footer>
+      <StatusFooter
+        hasLoadedData={hasLoadedData}
+        viewScope={viewScope}
+        displayedRowCount={displayedRowCount}
+        totalRowCount={totalScopeRowCount}
+        isFilteringActive={viewScope === 'videos'
+          ? (filteredColumns.length > 0 || Boolean(state.activeViewId))
+          : channelFilteredColumns.length > 0}
+        selectedVideoCount={selectedVideoCount}
+      />
 
       <ExportDialog
         isOpen={isExportOpen}
