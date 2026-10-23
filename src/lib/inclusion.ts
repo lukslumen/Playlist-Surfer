@@ -1,4 +1,6 @@
-import type { ExcludedVideoMeta, IncludeExcludeAction, InclusionView, ViewScope } from '../types';
+import type { ExcludedVideoMeta, IncludeExcludeAction, InclusionView, ResearchHistoryEvent, ViewScope } from '../types';
+import { resolveVideoId } from './data';
+import { buildAlphabetizedVideoTitleChannelList } from './researchHistory';
 
 export type InclusionActionKind = IncludeExcludeAction['kind'];
 
@@ -109,3 +111,74 @@ export function normalizeVideoIds(videoIds: string[], validIds: Set<string>) {
 }
 
 export type IncludeExcludeUndoEntry = IncludeExcludeAction & { historyEventId?: string; };
+
+export interface InclusionHistoryInput {
+  kind: InclusionActionKind;
+  changedVideoIds: string[];
+  scope: ViewScope;
+  selectionMode: InclusionSelectionMode;
+  filterSummary: string;
+  reason?: string;
+  /** Rows of the changed videos, for the alphabetical list of manually excluded titles. */
+  changedRows: any[];
+  /** Exclusion records before the change, to explain restores of filtered-bulk exclusions. */
+  previousMetaById: Record<string, ExcludedVideoMeta>;
+  eventId?: string;
+  now: string;
+}
+
+/** The research-log entry for an include/exclude action, so the curation stays auditable. */
+export function buildInclusionHistoryEvent(input: InclusionHistoryInput): Omit<ResearchHistoryEvent, 'id'> & { id?: string } {
+  const { kind, changedVideoIds, selectionMode, filterSummary } = input;
+  const details: string[] = [];
+  if (input.reason?.trim()) details.push(`Reason: ${input.reason.trim()}`);
+  if (kind === 'exclude' && selectionMode === 'filtered_bulk' && filterSummary) {
+    details.push(`Filter context: ${filterSummary}`);
+  }
+  if (kind === 'exclude' && selectionMode === 'manual') {
+    const labels = buildAlphabetizedVideoTitleChannelList(input.changedRows);
+    if (labels.length) {
+      details.push('Manually selected rows (alphabetical Title — Channel):');
+      labels.forEach((label) => details.push(`- ${label}`));
+    }
+  }
+  if (kind === 'restore') {
+    const restoredFilteredBulkMeta = changedVideoIds
+      .map((videoId) => input.previousMetaById[videoId])
+      .filter((meta): meta is ExcludedVideoMeta => meta?.exclusionMode === 'filtered_bulk');
+    if (restoredFilteredBulkMeta.length) {
+      details.push(`Exception to prior filter logic: restored ${restoredFilteredBulkMeta.length.toLocaleString()} row(s) previously excluded by exclude-all filtered action(s).`);
+      const uniqueFilterSummaries = Array.from(new Set(
+        restoredFilteredBulkMeta
+          .map((meta) => String(meta.exclusionFilterSummary || '').trim())
+          .filter(Boolean),
+      ));
+      if (uniqueFilterSummaries.length) {
+        details.push(`Original filter context: ${uniqueFilterSummaries.join(' | ')}`);
+      }
+    }
+  }
+  return {
+    id: input.eventId,
+    type: kind === 'exclude' ? 'videos_excluded' : 'videos_restored',
+    createdAt: input.now,
+    summary: `${kind === 'exclude' ? 'Excluded' : 'Restored'} ${changedVideoIds.length.toLocaleString()} video(s).`,
+    affectedIds: changedVideoIds,
+    details: details.length ? details.join('\n') : undefined,
+    meta: {
+      scope: input.scope,
+      selectionMode,
+      filterSummary: filterSummary || undefined,
+      count: changedVideoIds.length,
+    },
+  };
+}
+
+/** Rows for the changed videos: from the caller's selection if given, else looked up by id. */
+export function pickChangedRows(changedVideoIds: string[], selectedRows: any[] | undefined, rowByVideoId: Map<string, any>) {
+  const changed = new Set(changedVideoIds);
+  if (Array.isArray(selectedRows) && selectedRows.length) {
+    return selectedRows.filter((row) => changed.has(resolveVideoId(row) || ''));
+  }
+  return changedVideoIds.map((videoId) => rowByVideoId.get(videoId)).filter((row): row is any => Boolean(row));
+}

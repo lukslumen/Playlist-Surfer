@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import {
   EMPTY_INCLUSION_STATE,
   applyInclusionChange,
+  buildInclusionHistoryEvent,
   invertInclusionActionKind,
   pruneInclusionState,
   resolveInclusionActionKind,
@@ -100,4 +101,52 @@ test('pruneInclusionState drops ids that left the dataset', () => {
   const pruned = pruneInclusionState(state, new Set(['b']));
   expect(pruned.excludedVideoIds).toEqual(['b']);
   expect(Object.keys(pruned.excludedVideoMetaById)).toEqual(['b']);
+});
+
+describe('buildInclusionHistoryEvent', () => {
+  const base = {
+    changedVideoIds: ['a', 'b'],
+    scope: 'videos' as const,
+    filterSummary: '',
+    previousMetaById: {},
+    now: '2026-10-23T12:00:00.000Z',
+  };
+
+  test('lists manually excluded videos alphabetically by title', () => {
+    const event = buildInclusionHistoryEvent({
+      ...base,
+      kind: 'exclude',
+      selectionMode: 'manual',
+      reason: 'off-topic',
+      changedRows: [
+        { videoId: 'b', videoTitle: 'Zebra', channelTitle: 'Chan' },
+        { videoId: 'a', videoTitle: 'Apple', channelTitle: 'Chan' },
+      ],
+    });
+    expect(event.type).toBe('videos_excluded');
+    expect(event.summary).toBe('Excluded 2 video(s).');
+    expect(event.affectedIds).toEqual(['a', 'b']);
+    const lines = String(event.details).split('\n');
+    expect(lines[0]).toBe('Reason: off-topic');
+    expect(lines.indexOf(lines.find((line) => line.includes('Apple'))!)).toBeLessThan(lines.indexOf(lines.find((line) => line.includes('Zebra'))!));
+  });
+
+  test('records the filter for bulk exclusions and explains restores of them', () => {
+    const bulk = buildInclusionHistoryEvent({ ...base, kind: 'exclude', selectionMode: 'filtered_bulk', filterSummary: 'views > 10', changedRows: [] });
+    expect(bulk.details).toBe('Filter context: views > 10');
+    expect(bulk.meta?.selectionMode).toBe('filtered_bulk');
+
+    const restore = buildInclusionHistoryEvent({
+      ...base,
+      kind: 'restore',
+      selectionMode: 'manual',
+      changedRows: [],
+      previousMetaById: {
+        a: { videoId: 'a', excludedAt: 'x', exclusionMode: 'filtered_bulk', exclusionFilterSummary: 'views > 10' },
+      },
+    });
+    expect(restore.type).toBe('videos_restored');
+    expect(restore.details).toContain('restored 1 row(s) previously excluded by exclude-all filtered action(s)');
+    expect(restore.details).toContain('Original filter context: views > 10');
+  });
 });
