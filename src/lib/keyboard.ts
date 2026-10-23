@@ -39,3 +39,8 @@ export function matchesStandardShortcut(event: KeyboardEvent, key: string) {
 export function matchesStandardShiftShortcut(event: KeyboardEvent, key: string) {
   return hasShortcutModifier(event) && event.shiftKey && !event.altKey && event.code === `Key${key.toUpperCase()}`;
 }
+
+/** Mac keyboards send Backspace for the key labelled "delete"; treat both as Delete. */
+export function isDeleteKey(key: string) {
+  return key === 'Delete' || key === 'Backspace';
+}

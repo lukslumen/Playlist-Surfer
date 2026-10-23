@@ -25,7 +25,7 @@ import { BooleanMapSchema, ExplorerFilterModel, parseBooleanMapValue } from '../
 import { formatDateDisplay, formatDurationDisplay, getColumnDisplayName, getColumnHeaderTooltip, getDefaultGridColumnSizing, isDateLikeColumn, isDurationColumn, resolveVideoId, TRANSCRIPT_COLUMN } from '../lib/data';
 import { extractSortRulesFromColumnState } from '../lib/dashboardThumbnails';
 import { ScopeSelectionState, ScopeSelectionUpdate } from '../lib/selectionState';
-import { isDeleteKey } from '../lib/utils';
+import { isDeleteKey } from '../lib/keyboard';
 import { useStableValue } from '../hooks/useStableValue';
 
 const EMPTY_BOOLEAN_MAP_SCHEMAS: Record<string, BooleanMapSchema> = {};

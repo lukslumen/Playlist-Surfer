@@ -148,7 +148,7 @@ import {
   sanitizeThumbnailPathSegment,
   selectThumbnailCandidates,
 } from './lib/dashboardThumbnails';
-import { cn, isDeleteKey } from './lib/utils';
+import { cn } from './lib/utils';
 import { getBootPersistedStateJson, savePersistedState } from './lib/persistedState';
 import {
   applyInclusionChange,
@@ -221,14 +221,6 @@ import {
   getArchiveEntry,
   stripNotesFromAnnotations,
 } from './lib/projectNotes';
-import {
-  hasShortcutModifier,
-  isEditableShortcutTarget,
-  isGridShortcutTarget,
-  matchesAltShiftShortcut,
-  matchesStandardShiftShortcut,
-  matchesStandardShortcut,
-} from './lib/keyboard';
 import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
 import {
   buildAlphabetizedVideoTitleChannelList,
@@ -242,6 +234,7 @@ import {
 } from './lib/researchHistory';
 import type { AppNavigationEntry } from './lib/navigation';
 import { LongTaskOverlay } from './components/LongTaskOverlay';
+import { useShortcuts } from './hooks/useShortcuts';
 
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
@@ -2622,182 +2615,56 @@ export default function App() {
     api?.ensureIndexVisible(nextIndex, 'middle');
   }, [activeGridRows, applyScopeSelection, channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, channelSelection.selectedKeys, requestSelectionScroll, videoSelection.anchorKey, videoSelection.detailKey, videoSelection.focusKey, videoSelection.selectedKeys, viewScope]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-
-      if (event.key === 'Escape') {
-        if (isCommandPaletteOpen) {
-          event.preventDefault();
-          setIsCommandPaletteOpen(false);
-          return;
-        }
-        if (isKeyboardHelpOpen) {
-          event.preventDefault();
-          setIsKeyboardHelpOpen(false);
-          return;
-        }
-        if (isDashboardOpen) {
-          event.preventDefault();
-          setIsDashboardOpen(false);
-          return;
-        }
-        if (isImportOpen) {
-          event.preventDefault();
-          setIsImportOpen(false);
-          setPendingFile(null);
-          setPendingRows([]);
-          setPendingSchema([]);
-          return;
-        }
-        if (isExportOpen) {
-          event.preventDefault();
-          setIsExportOpen(false);
-          return;
-        }
-        if (isColumnsOpen) {
-          event.preventDefault();
-          setIsColumnsOpen(false);
-          return;
-        }
-        if (isResearchLogOpen) {
-          event.preventDefault();
-          setIsResearchLogOpen(false);
-        }
-        return;
-      }
-
-      if (event.defaultPrevented) return;
-
-      const isTyping = isEditableShortcutTarget(event.target);
-      const isGridTarget = isGridShortcutTarget(event.target);
-      const hasBlockingOverlay = isCommandPaletteOpen || isKeyboardHelpOpen || isDashboardOpen || isImportOpen || isExportOpen || isColumnsOpen || isResearchLogOpen;
-
-      if (!isTyping && !isGridTarget && !hasBlockingOverlay && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-        event.preventDefault();
-        navigateHistoryByOffset(event.key === 'ArrowLeft' ? -1 : 1);
-        return;
-      }
-
-      if (!isTyping && !isGridTarget && !hasBlockingOverlay && !event.shiftKey && !event.altKey && !hasShortcutModifier(event) && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-        event.preventDefault();
-        moveActiveSelectionByDirection(event.key === 'ArrowDown' ? 1 : -1);
-        return;
-      }
-
-      if (!isTyping && !hasBlockingOverlay) {
-        if (matchesAltShiftShortcut(event, 't')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('thumbnails');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'a')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('attention');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'c')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('content');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'o')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('overview');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'v')) {
-          event.preventDefault();
-          setIsColumnsOpen(true);
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'e')) {
-          event.preventDefault();
-          setIsExportOpen(true);
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'i')) {
-          event.preventDefault();
-          handleRequestImport();
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'k')) {
-          event.preventDefault();
-          setIsKeyboardHelpOpen(true);
-          return;
-        }
-        if (matchesStandardShortcut(event, 'k')) {
-          event.preventDefault();
-          setIsCommandPaletteOpen(true);
-          return;
-        }
-        if (matchesStandardShortcut(event, 's')) {
-          event.preventDefault();
-          handleOpenSaveView();
-          return;
-        }
-        if (matchesStandardShortcut(event, 'z')) {
-          if (!includeExcludeUndoStack.length || viewScope !== 'videos') return;
-          event.preventDefault();
-          handleUndoIncludeExclude();
-          return;
-        }
-        if (matchesStandardShiftShortcut(event, 'z')) {
-          if (!includeExcludeRedoStack.length || viewScope !== 'videos') return;
-          event.preventDefault();
-          handleRedoIncludeExclude();
-          return;
-        }
-      }
-
-      if (
-        viewScope === 'videos'
-        && !isGridTarget
-        && !isTyping
-        && !hasBlockingOverlay
-        && (event.ctrlKey || event.metaKey)
-        && isDeleteKey(event.key)
-        && selectedVideoIdsForActions.length > 0
-      ) {
-        event.preventDefault();
-        handleExcludeSelectedVideos();
-        return;
-      }
-
-      if (viewScope !== 'videos' || isTyping || hasBlockingOverlay || isGridTarget) return;
-
-      if (isDeleteKey(event.key) && selectedVideoIdsForActions.length > 0) {
-        event.preventDefault();
-        handleMoveSelectedVideos();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    handleExcludeSelectedVideos,
-    handleMoveSelectedVideos,
-    handleOpenDatasetDashboardTab,
-    handleOpenSaveView,
-    handleRedoIncludeExclude,
-    handleRequestImport,
-    handleUndoIncludeExclude,
-    includeExcludeRedoStack.length,
-    includeExcludeUndoStack.length,
-    isColumnsOpen,
-    isCommandPaletteOpen,
-    isDashboardOpen,
-    isExportOpen,
-    isImportOpen,
-    isKeyboardHelpOpen,
-    isResearchLogOpen,
-    moveActiveSelectionByDirection,
-    navigateHistoryByOffset,
-    selectedVideoIdsForActions.length,
-    viewScope,
-    datasetVersion,
-    inclusionView,
-  ]);
+  const hasBlockingOverlay = isCommandPaletteOpen || isKeyboardHelpOpen || isDashboardOpen || isImportOpen || isExportOpen || isColumnsOpen || isResearchLogOpen;
+  const closeTopOverlay = () => {
+    if (isCommandPaletteOpen) setIsCommandPaletteOpen(false);
+    else if (isKeyboardHelpOpen) setIsKeyboardHelpOpen(false);
+    else if (isDashboardOpen) setIsDashboardOpen(false);
+    else if (isImportOpen) {
+      setIsImportOpen(false);
+      setPendingFile(null);
+      setPendingRows([]);
+      setPendingSchema([]);
+    } else if (isExportOpen) setIsExportOpen(false);
+    else if (isColumnsOpen) setIsColumnsOpen(false);
+    else if (isResearchLogOpen) setIsResearchLogOpen(false);
+    else return false;
+    return true;
+  };
+  const hasVideoSelection = viewScope === 'videos' && selectedVideoIdsForActions.length > 0;
+  useShortcuts({
+    closeOverlay: closeTopOverlay,
+    historyBack: () => navigateHistoryByOffset(-1),
+    historyForward: () => navigateHistoryByOffset(1),
+    selectNext: () => moveActiveSelectionByDirection(1),
+    selectPrevious: () => moveActiveSelectionByDirection(-1),
+    openThumbnailsDashboard: () => handleOpenDatasetDashboardTab('thumbnails'),
+    openAttentionDashboard: () => handleOpenDatasetDashboardTab('attention'),
+    openContentDashboard: () => handleOpenDatasetDashboardTab('content'),
+    openOverviewDashboard: () => handleOpenDatasetDashboardTab('overview'),
+    openColumns: () => setIsColumnsOpen(true),
+    openExport: () => setIsExportOpen(true),
+    openImport: () => handleRequestImport(),
+    openKeyboardHelp: () => setIsKeyboardHelpOpen(true),
+    openCommandPalette: () => setIsCommandPaletteOpen(true),
+    saveView: () => handleOpenSaveView(),
+    undo: () => {
+      if (!includeExcludeUndoStack.length || viewScope !== 'videos') return false;
+      handleUndoIncludeExclude();
+    },
+    redo: () => {
+      if (!includeExcludeRedoStack.length || viewScope !== 'videos') return false;
+      handleRedoIncludeExclude();
+    },
+    excludeSelection: () => {
+      if (!hasVideoSelection) return false;
+      handleExcludeSelectedVideos();
+    },
+    moveSelection: () => {
+      if (!hasVideoSelection) return false;
+      handleMoveSelectedVideos();
+    },
+  }, { hasBlockingOverlay });
 
   const handleUpdateAnnotation = useCallback((videoId: string, update: Partial<Annotation>) => {
     if (Array.isArray(update.tags)) {

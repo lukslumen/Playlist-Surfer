@@ -62,6 +62,7 @@ import {
   formatDateDisplay,
 } from '../lib/data';
 import DashboardWorkspace from './dashboard/DashboardWorkspace';
+import { KEYBOARD_SHORTCUT_HELP } from '../lib/shortcuts';
 
 
 function InfoHint({ text }: { text: string }) {
@@ -1814,22 +1815,6 @@ const RESEARCH_LOG_SECTIONS: Array<{ id: ResearchLogSectionId; label: string; ge
   { id: 'exportPreview', label: 'Export Preview', generated: true },
 ];
 
-const KEYBOARD_SHORTCUTS: Array<{ keys: string; action: string; }> = [
-  { keys: 'Alt/Option + Shift + T', action: 'thumbnails dashboard' },
-  { keys: 'Alt/Option + Shift + A', action: 'attention dashboard' },
-  { keys: 'Alt/Option + Shift + C', action: 'content dashboard' },
-  { keys: 'Alt/Option + Shift + O', action: 'overview dashboard' },
-  { keys: 'Alt/Option + Shift + V', action: 'toggle column visibility / edit view' },
-  { keys: 'Alt/Option + Shift + E', action: 'export' },
-  { keys: 'Alt/Option + Shift + I', action: 'import' },
-  { keys: 'Alt/Option + Shift + K', action: 'keyboard shortcuts help' },
-  { keys: 'Ctrl/Cmd + K', action: 'command palette' },
-  { keys: 'Ctrl/Cmd + S', action: 'Save view' },
-  { keys: 'Ctrl/Cmd + Z', action: 'undo' },
-  { keys: 'Ctrl/Cmd + Shift + Z', action: 'redo' },
-  { keys: 'Shift + T (player)', action: 'add timestamp annotation' },
-];
-
 export interface CommandPaletteItem {
   id: string;
   label: string;
@@ -2032,7 +2017,7 @@ export function KeyboardShortcutsDialog({
           <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-main)]"><X size={18} /></button>
         </div>
         <div className="space-y-2 p-4">
-          {KEYBOARD_SHORTCUTS.map((shortcut) => (
+          {KEYBOARD_SHORTCUT_HELP.map((shortcut) => (
             <div key={shortcut.keys} className="flex items-center justify-between gap-3 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-xs">
               <span className="text-[var(--text-main)]">{shortcut.action}</span>
               <kbd className="border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 font-mono text-[11px] text-[var(--text-muted)]">{shortcut.keys}</kbd>
