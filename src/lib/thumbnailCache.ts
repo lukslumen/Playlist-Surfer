@@ -1,5 +1,6 @@
-import type { DashboardThumbnailCacheEntry, DashboardThumbnailCacheSnapshot } from '../types';
-import { isSavedViewThumbnailScopeKey } from './dashboardThumbnails';
+import type { DashboardThumbnailCacheEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, ProjectArchiveManifest } from '../types';
+import { isPersistentThumbnailScopeKey, isSavedViewThumbnailScopeKey, resolveThumbnailCacheLabel } from './dashboardThumbnails';
+import { getArchiveEntry } from './projectNotes';
 
 export const FILTERED_TEMP_THUMBNAIL_SCOPE = 'filtered-temp';
 
@@ -281,4 +282,75 @@ export function normalizeRestoredThumbnailCaches(
   })) as Record<string, DashboardThumbnailCacheSnapshot>;
   const maxSessionId = Math.max(counter, ...Object.values(next).map((snapshot) => Number(snapshot.sessionId) || 0));
   return { caches: next, maxSessionId };
+}
+
+/** Thumbnail caches stored in a project backup, with object URLs for the archived image bytes. */
+export function restoreThumbnailCachesFromArchive(
+  manifest: ProjectArchiveManifest,
+  archiveFiles: Record<string, Uint8Array>,
+): Record<string, DashboardThumbnailCacheSnapshot> {
+  const index = manifest.thumbnailCacheIndex;
+  if (!index?.scopes) return {};
+
+  const restored: Record<string, DashboardThumbnailCacheSnapshot> = {};
+  (Object.entries(index.scopes) as Array<[string, DashboardThumbnailCacheIndex['scopes'][string]]>).forEach(([scopeKey, scopeIndex]) => {
+    if (!isPersistentThumbnailScopeKey(scopeKey)) return;
+    const entries: DashboardThumbnailCacheSnapshot['entries'] = scopeIndex.entries.map((entry) => {
+      const sourceUrl = String(entry.sourceUrl || '').trim();
+      const candidateUrls = sourceUrl ? [sourceUrl] : [];
+      const activeCandidateIndex = sourceUrl ? 0 : -1;
+      if (entry.status !== 'loaded' || !entry.fileName) {
+        return {
+          ...entry,
+          sourceUrl,
+          candidateUrls,
+          activeUrl: sourceUrl,
+          fallbackIndex: activeCandidateIndex,
+          activeCandidateIndex,
+          status: 'failed' as const,
+        };
+      }
+      const fileBytes = getArchiveEntry(archiveFiles, entry.fileName);
+      if (!fileBytes || fileBytes.length === 0) {
+        return {
+          ...entry,
+          sourceUrl,
+          candidateUrls,
+          activeUrl: sourceUrl,
+          fallbackIndex: activeCandidateIndex,
+          activeCandidateIndex,
+          status: 'failed' as const,
+          error: entry.error || 'Binary thumbnail payload missing from archive.',
+        };
+      }
+      const bytes = new Uint8Array(fileBytes);
+      return {
+        ...entry,
+        sourceUrl,
+        candidateUrls,
+        activeUrl: sourceUrl,
+        fallbackIndex: activeCandidateIndex,
+        activeCandidateIndex,
+        status: 'loaded' as const,
+        bytes,
+        byteLength: bytes.length,
+        objectUrl: createObjectUrl(bytes, entry.mimeType || 'image/jpeg'),
+      };
+    });
+
+    restored[scopeKey] = {
+      scopeKey,
+      label: scopeIndex.label || resolveThumbnailCacheLabel(scopeKey),
+      sessionId: 0,
+      rowCount: scopeIndex.rowCount ?? entries.length,
+      totalCandidates: scopeIndex.totalCandidates ?? entries.length,
+      calculatedAt: scopeIndex.calculatedAt || new Date().toISOString(),
+      datasetVersionAtCalculation: scopeIndex.datasetVersionAtCalculation ?? 0,
+      savedViewsVersionAtCalculation: scopeIndex.savedViewsVersionAtCalculation,
+      sortSignature: scopeIndex.sortSignature,
+      entries,
+    };
+  });
+
+  return restored;
 }

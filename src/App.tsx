@@ -2,14 +2,14 @@ import { useState, useCallback, useEffect, useRef, useMemo, useReducer, useTrans
 import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
 import { useDuckDB } from './hooks/useDuckDB';
-import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ProjectArchiveManifest, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
+import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
 import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
 import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
-import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
+import { createStoredZip, readStoredZip } from './lib/archive';
 import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
 import { buildDatasetDashboardStats } from './lib/datasetDashboard';
@@ -20,11 +20,11 @@ import { THUMBNAIL_LIMIT, buildSavedViewThumbnailScopeKey, buildThumbnailSortSig
 import { cn } from './lib/utils';
 import { getBootPersistedStateJson } from './lib/persistedState';
 import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
-import { applySupportMappings, buildDefaultProjectSourceState, computeSourceVisibilityInclusionCounts, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
+import { applySupportMappings, buildDefaultProjectSourceState, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
 import { CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
 import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
-import { buildThumbnailEntriesFromCacheSeed, createObjectUrl, FILTERED_TEMP_THUMBNAIL_SCOPE, normalizeRestoredThumbnailCaches } from './lib/thumbnailCache';
-import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, buildTagUsageSummary, extractAnnotationsFromRows, extractNotesFromArchive, getArchiveEntry, stripNotesFromAnnotations } from './lib/projectNotes';
+import { buildThumbnailEntriesFromCacheSeed, FILTERED_TEMP_THUMBNAIL_SCOPE, normalizeRestoredThumbnailCaches, restoreThumbnailCachesFromArchive } from './lib/thumbnailCache';
+import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, buildTagUsageSummary, extractAnnotationsFromRows, stripNotesFromAnnotations } from './lib/projectNotes';
 import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
 import { describeFilterModelEntry, formatDurationLabel, parseDateLabel, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
 import type { AppNavigationEntry } from './lib/navigation';
@@ -45,6 +45,7 @@ import { useThumbnailCaches } from './state/useThumbnailCaches';
 import { useChannelAnnotations } from './state/useChannelAnnotations';
 import { useChannelRows } from './state/useChannelRows';
 import { useLinkingActions } from './state/useLinkingActions';
+import { planAutosaveRestore, planBackupRestore, unpackProjectBackup, type SavedAppState } from './lib/projectRestore';
 import { buildChannelMetadataSnapshot, isChannelMetadataSnapshotFresh } from './lib/channelMetadata';
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
@@ -1093,86 +1094,14 @@ export default function App() {
         return;
       }
 
-      const persistedState = (getLatestPersistedState() ?? persisted) as typeof persisted;
-      const mergedAnnotations = mergeAnnotationsWithUserTags(
-        (persistedState?.annotations || {}) as Record<string, Annotation>,
-        (persistedState?.userTagsByVideoId || {}) as Record<string, string[]>,
-      );
-
-      const sourceStateBase = buildDefaultProjectSourceState({
-        rows: autosavedSnapshot.rows,
-        schema: autosavedSnapshot.sourceSchema,
-        fileName: autosavedSnapshot.fileName,
-      });
-      const nextRowLineage = persistedState?.rowLineage ?? sourceStateBase.rowLineage;
-      const nextSourceRegistry = withSourceRegistryCounts({
-        sourceRegistry: persistedState?.sourceRegistry ?? sourceStateBase.sourceRegistry,
-        rowLineage: nextRowLineage,
-        defaultRowCount: autosavedSnapshot.rows.length,
-      });
-      const nextSourceVisibility = reconcileSourceVisibility(
-        persistedState?.sourceVisibility ?? sourceStateBase.sourceVisibility,
-        nextSourceRegistry,
-      );
-      const preferredInclusion = persistedState?.inclusionView === 'excluded' ? 'excluded' : 'included';
-      const counts = computeSourceVisibilityInclusionCounts({
-        rows: autosavedSnapshot.rows,
-        rowLineage: nextRowLineage,
-        sourceVisibility: nextSourceVisibility,
-        excludedVideoIds: persistedState?.excludedVideoIds ?? [],
-      });
-      const recoveredInclusion = resolveRecoverableInclusionView({
-        preferred: preferredInclusion,
-        ...counts,
-      });
-      if (recoveredInclusion !== preferredInclusion) {
+      const plan = planAutosaveRestore(autosavedSnapshot, (getLatestPersistedState() ?? persisted) as SavedAppState);
+      if (plan.recoveredInclusion !== plan.preferredInclusion) {
         console.warn(
-          `[autosave] Restore (${trigger}) switched inclusion view to "${recoveredInclusion}" because ` +
-          `${preferredInclusion} had no visible rows.`,
+          `[autosave] Restore (${trigger}) switched inclusion view to "${plan.recoveredInclusion}" because ` +
+          `${plan.preferredInclusion} had no visible rows.`,
         );
       }
-
-      hydrateProject({
-        rows: autosavedSnapshot.rows,
-        schema: autosavedSnapshot.sourceSchema,
-        fileName: autosavedSnapshot.fileName || undefined,
-        visible: persistedState?.visibleColumns,
-        channelVisible: persistedState?.channelVisibleColumns,
-        videoColumnWidths: persistedState?.videoColumnWidths,
-        channelColumnWidths: persistedState?.channelColumnWidths,
-        annotations: mergedAnnotations,
-        notesByVideoId: persistedState?.notesByVideoId,
-        channelNotesById: persistedState?.channelNotesById,
-        channelTagsById: persistedState?.channelTagsById,
-        savedViews: persistedState?.savedViews,
-        activeViewId: persistedState?.activeViewId,
-        projectOverview: persistedState?.projectOverview,
-        projectNotes: persistedState?.projectNotes,
-        researchLogSectionComments: persistedState?.researchLogSectionComments,
-        researchHistory: persistedState?.researchHistory,
-        watchHistoryByVideoId: persistedState?.watchHistoryByVideoId,
-        theme: persistedState?.theme,
-        isRightPanelCollapsed: persistedState?.isRightPanelCollapsed,
-        deletedColumns: persistedState?.deletedColumns,
-        specialMappings: persistedState?.specialMappings,
-        excludedVideoIds: persistedState?.excludedVideoIds,
-        excludedVideoMetaById: persistedState?.excludedVideoMetaById,
-        inclusionView: recoveredInclusion,
-        dashboardSnapshots: persistedState?.dashboardSnapshots,
-        savedViewDashboardSnapshots: persistedState?.savedViewDashboardSnapshots,
-        savedViewsVersion: persistedState?.savedViewsVersion ?? 0,
-        channelMetadataSnapshot: persistedState?.channelMetadataSnapshot ?? null,
-        importedChannelMetadata: persistedState?.importedChannelMetadata ?? null,
-        viewScope: persistedState?.viewScope === 'channels' ? 'channels' : 'videos',
-        channelFilterModel: persistedState?.channelFilterModel ?? {},
-        sourceRegistry: nextSourceRegistry,
-        sourceVisibility: nextSourceVisibility,
-        rowLineage: nextRowLineage,
-        columnLineage: persistedState?.columnLineage ?? sourceStateBase.columnLineage,
-        generatedMetadata: persistedState?.generatedMetadata ?? createEmptyGeneratedMetadata(),
-        linkingState: persistedState?.linkingState ?? createEmptyLinkingState(),
-        channelLinkingState: persistedState?.channelLinkingState ?? createEmptyChannelLinkingState(),
-      });
+      hydrateProject(plan.project);
       console.warn(`[autosave] Restore completed (${trigger}) from snapshot saved at ${autosavedSnapshot.savedAt}.`);
     } catch (error) {
       console.warn(`[autosave] Restore failed (${trigger}).`, error);
@@ -1196,76 +1125,6 @@ export default function App() {
       window.removeEventListener('pageshow', handlePageShow);
     };
   }, [attemptAutoRestoreLastProject]);
-
-  const restoreThumbnailCachesFromArchive = useCallback((
-    manifest: ProjectArchiveManifest,
-    archiveFiles: Record<string, Uint8Array>,
-  ): Record<string, DashboardThumbnailCacheSnapshot> => {
-    const index = manifest.thumbnailCacheIndex;
-    if (!index?.scopes) return {};
-
-    const restored: Record<string, DashboardThumbnailCacheSnapshot> = {};
-    (Object.entries(index.scopes) as Array<[string, DashboardThumbnailCacheIndex['scopes'][string]]>).forEach(([scopeKey, scopeIndex]) => {
-      if (!isPersistentThumbnailScopeKey(scopeKey)) return;
-      const entries: DashboardThumbnailCacheSnapshot['entries'] = scopeIndex.entries.map((entry) => {
-        const sourceUrl = String(entry.sourceUrl || '').trim();
-        const candidateUrls = sourceUrl ? [sourceUrl] : [];
-        const activeCandidateIndex = sourceUrl ? 0 : -1;
-        if (entry.status !== 'loaded' || !entry.fileName) {
-          return {
-            ...entry,
-            sourceUrl,
-            candidateUrls,
-            activeUrl: sourceUrl,
-            fallbackIndex: activeCandidateIndex,
-            activeCandidateIndex,
-            status: 'failed' as const,
-          };
-        }
-        const fileBytes = getArchiveEntry(archiveFiles, entry.fileName);
-        if (!fileBytes || fileBytes.length === 0) {
-          return {
-            ...entry,
-            sourceUrl,
-            candidateUrls,
-            activeUrl: sourceUrl,
-            fallbackIndex: activeCandidateIndex,
-            activeCandidateIndex,
-            status: 'failed' as const,
-            error: entry.error || 'Binary thumbnail payload missing from archive.',
-          };
-        }
-        const bytes = new Uint8Array(fileBytes);
-        return {
-          ...entry,
-          sourceUrl,
-          candidateUrls,
-          activeUrl: sourceUrl,
-          fallbackIndex: activeCandidateIndex,
-          activeCandidateIndex,
-          status: 'loaded' as const,
-          bytes,
-          byteLength: bytes.length,
-          objectUrl: createObjectUrl(bytes, entry.mimeType || 'image/jpeg'),
-        };
-      });
-
-      restored[scopeKey] = {
-        scopeKey,
-        label: scopeIndex.label || resolveThumbnailCacheLabel(scopeKey),
-        sessionId: 0,
-        rowCount: scopeIndex.rowCount ?? entries.length,
-        totalCandidates: scopeIndex.totalCandidates ?? entries.length,
-        calculatedAt: scopeIndex.calculatedAt || new Date().toISOString(),
-        datasetVersionAtCalculation: scopeIndex.datasetVersionAtCalculation ?? 0,
-        savedViewsVersionAtCalculation: scopeIndex.savedViewsVersionAtCalculation,
-        sortSignature: scopeIndex.sortSignature,
-        entries,
-      };
-    });
-
-    return restored;
-  }, []);
 
   const restoreProjectBackup = useCallback(async (file: File) => {
     try {
@@ -1292,15 +1151,7 @@ export default function App() {
       });
       await waitForNextPaint();
       const archiveFiles = readStoredZip(archiveBuffer);
-      const manifestBytes = getArchiveEntry(archiveFiles, 'project.json');
-      const dataBytes = getArchiveEntry(archiveFiles, 'data.csv');
-      if (!manifestBytes || !dataBytes) throw new Error('This backup is missing project.json or data.csv.');
-
-      const manifest = JSON.parse(decodeTextFile(manifestBytes)) as ProjectArchiveManifest;
-      if (manifest.version !== 10) {
-        throw new Error(`Unsupported project archive version ${manifest.version}. This build only imports version 10 archives.`);
-      }
-      const noteFiles = extractNotesFromArchive(archiveFiles);
+      const { manifest, dataBytes, noteFiles } = unpackProjectBackup(archiveFiles);
       const restoredThumbnailCaches = restoreThumbnailCachesFromArchive(manifest, archiveFiles);
       updateLongTaskProgress({
         title: 'Restoring project backup',
@@ -1319,55 +1170,14 @@ export default function App() {
         total: 100,
       });
       await waitForNextPaint();
-      hydrateProject({
-        rows: parsed.rows,
-        schema: manifest.sourceSchema || parsed.schema,
-        fileName: manifest.originalFileName || 'restored_project.csv',
-        visible: manifest.visibleColumns,
-        channelVisible: manifest.channelVisibleColumns,
-        videoColumnWidths: manifest.videoColumnWidths,
-        channelColumnWidths: manifest.channelColumnWidths,
-        annotations: manifest.annotations,
-        notesByVideoId: Object.keys(noteFiles).length > 0 ? noteFiles : buildLegacyNotesFromAnnotations(manifest.annotations),
-        channelNotesById: manifest.channelNotesById ?? {},
-        channelTagsById: manifest.channelTagsById ?? {},
-        savedViews: manifest.savedViews,
-        activeViewId: manifest.activeViewId,
-        projectOverview: manifest.projectOverview,
-        projectNotes: manifest.projectNotes,
-        researchLogSectionComments: manifest.researchLogSectionComments,
-        researchHistory: manifest.researchHistory,
-        watchHistoryByVideoId: manifest.watchHistoryByVideoId,
-        theme: manifest.uiState?.theme,
-        isRightPanelCollapsed: manifest.uiState?.isRightPanelCollapsed,
-        deletedColumns: manifest.deletedColumns,
-        specialMappings: manifest.specialMappings,
-        excludedVideoIds: manifest.excluded_videos,
-        excludedVideoMetaById: manifest.excludedVideoMetaById,
-        inclusionView: 'included',
-        dashboardSnapshots: manifest.dashboardSnapshots,
-        savedViewDashboardSnapshots: manifest.savedViewDashboardSnapshots,
-        savedViewsVersion: manifest.savedViewsVersion ?? 0,
-        channelMetadataSnapshot: manifest.channelMetadataSnapshot ?? null,
-        importedChannelMetadata: manifest.importedChannelMetadata ?? null,
-        thumbnailCaches: restoredThumbnailCaches,
-        viewScope: manifest.viewScope === 'channels' ? 'channels' : 'videos',
-        channelSnapshotShouldBeFresh: true,
-        sourceRegistry: manifest.sourceRegistry ?? createEmptySourceRegistry(),
-        sourceVisibility: manifest.sourceVisibility ?? createEmptySourceVisibility(),
-        rowLineage: manifest.rowLineage ?? createEmptyRowLineage(),
-        columnLineage: manifest.columnLineage ?? createEmptyColumnLineage(),
-        generatedMetadata: manifest.generatedMetadata ?? createEmptyGeneratedMetadata(),
-        linkingState: manifest.linkingState ?? createEmptyLinkingState(),
-        channelLinkingState: manifest.channelLinkingState ?? createEmptyChannelLinkingState(),
-      });
+      hydrateProject(planBackupRestore({ manifest, noteFiles, parsed, restoredThumbnailCaches }));
     } catch (error) {
       console.error('Failed to restore backup:', error);
     } finally {
       updateLongTaskProgress(null);
       setIsLoadingRows(false);
     }
-  }, [hydrateProject, readCSVBuffer, restoreThumbnailCachesFromArchive, updateLongTaskProgress]);
+  }, [hydrateProject, readCSVBuffer, updateLongTaskProgress]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     if (file.name.toLowerCase().endsWith('.zip')) {
