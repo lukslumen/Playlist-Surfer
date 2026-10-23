@@ -136,7 +136,14 @@ import {
   sanitizeThumbnailPathSegment,
   selectThumbnailCandidates,
 } from './lib/dashboardThumbnails';
-import { cn } from './lib/utils';
+import { cn, isDeleteKey } from './lib/utils';
+import {
+  applyInclusionChange,
+  invertInclusionActionKind,
+  pruneInclusionState,
+  resolveInclusionActionKind,
+  type InclusionState,
+} from './lib/inclusion';
 
 const STORAGE_KEY = 'tubedata_explorer_state';
 const FILTERED_TEMP_THUMBNAIL_SCOPE = 'filtered-temp';
@@ -1217,8 +1224,17 @@ export default function App() {
   const [thumbnailLoadProgress, setThumbnailLoadProgress] = useState<DashboardThumbnailLoadProgress | null>(null);
   const [thumbnailZoomIndex, setThumbnailZoomIndex] = useState(2);
   const [inclusionView, setInclusionView] = useState<InclusionView>(() => persisted.inclusionView === 'excluded' ? 'excluded' : 'included');
-  const [excludedVideoIds, setExcludedVideoIds] = useState<string[]>(() => persisted.excludedVideoIds ?? []);
-  const [excludedVideoMetaById, setExcludedVideoMetaById] = useState<Record<string, ExcludedVideoMeta>>(() => persisted.excludedVideoMetaById ?? {});
+  const [inclusionState, setInclusionStateValue] = useState<InclusionState>(() => ({
+    excludedVideoIds: persisted.excludedVideoIds ?? [],
+    excludedVideoMetaById: persisted.excludedVideoMetaById ?? {},
+  }));
+  // Mirrors the latest requested inclusion state so back-to-back actions never compute from a stale render.
+  const inclusionStateRef = useRef(inclusionState);
+  const setInclusionState = useCallback((next: InclusionState) => {
+    inclusionStateRef.current = next;
+    setInclusionStateValue(next);
+  }, []);
+  const { excludedVideoIds, excludedVideoMetaById } = inclusionState;
   const [selectionState, dispatchSelection] = useReducer(selectionReducer, EMPTY_EXPLORER_SELECTION, () => {
     const legacySelectedRow = (persisted as any)?.selectedRow;
     const legacyVideoId = String((persisted as any)?.selectedVideoId || resolveVideoId(legacySelectedRow) || '').trim();
@@ -2318,8 +2334,10 @@ export default function App() {
     setChannelVisibleColumns(nextChannelVisibleColumns);
     setVideoColumnWidths(args.videoColumnWidths ?? {});
     setChannelColumnWidths(args.channelColumnWidths ?? {});
-    setExcludedVideoIds(nextExcludedVideoIds);
-    setExcludedVideoMetaById(args.excludedVideoMetaById ?? {});
+    setInclusionState({
+      excludedVideoIds: nextExcludedVideoIds,
+      excludedVideoMetaById: args.excludedVideoMetaById ?? {},
+    });
     setInclusionView(nextInclusionView);
     clearScopeSelection('videos', false);
     clearScopeSelection('channels', false);
@@ -3149,16 +3167,30 @@ export default function App() {
     filterSummary?: string;
     selectedRows?: any[];
   }) => {
-    const normalizedVideoIds = normalizeVideoIds(videoIds, sourceVideoIdSet);
-    if (normalizedVideoIds.length === 0) return;
-
-    const nextActionKind = targetKind ?? (inclusionView === 'included' ? 'exclude' : 'restore');
+    const nextActionKind = targetKind ?? resolveInclusionActionKind(inclusionView);
     const actionScope = options?.scope || viewScope;
     const selectionMode = options?.selectionMode || 'manual';
     const normalizedFilterSummary = String(options?.filterSummary || '').trim();
+    const previousInclusionState = inclusionStateRef.current;
+    const result = applyInclusionChange(previousInclusionState, {
+      kind: nextActionKind,
+      videoIds,
+      validVideoIds: sourceVideoIdSet,
+      now: new Date().toISOString(),
+      scope: actionScope,
+      selectionMode,
+      reason: options?.reason,
+      filterSummary: normalizedFilterSummary,
+    });
+    const changedVideoIds = result.changedVideoIds;
+    if (changedVideoIds.length === 0) return;
+
+    const changedVideoIdSet = new Set(changedVideoIds);
     const selectedRows = (() => {
-      if (Array.isArray(options?.selectedRows) && options.selectedRows.length) return options.selectedRows;
-      return normalizedVideoIds
+      if (Array.isArray(options?.selectedRows) && options.selectedRows.length) {
+        return options.selectedRows.filter((row) => changedVideoIdSet.has(resolveVideoId(row) || ''));
+      }
+      return changedVideoIds
         .map((videoId) => sourceMaskedRowByVideoId.get(videoId))
         .filter((row): row is any => Boolean(row));
     })();
@@ -3166,8 +3198,8 @@ export default function App() {
       ? buildAlphabetizedVideoTitleChannelList(selectedRows)
       : [];
     const restoredFilteredBulkMeta = nextActionKind === 'restore'
-      ? normalizedVideoIds
-          .map((videoId) => excludedVideoMetaById[videoId])
+      ? changedVideoIds
+          .map((videoId) => previousInclusionState.excludedVideoMetaById[videoId])
           .filter((meta): meta is ExcludedVideoMeta => Boolean(meta?.exclusionMode === 'filtered_bulk'))
       : [];
     const eventId = !options?.skipUndo ? createHistoryId('exclusion') : undefined;
@@ -3179,43 +3211,12 @@ export default function App() {
     });
 
     startFilterTransition(() => {
-      setExcludedVideoIds((current) => {
-        const currentSet = new Set(current);
-        normalizedVideoIds.forEach((videoId) => {
-          if (nextActionKind === 'exclude') currentSet.add(videoId);
-          else currentSet.delete(videoId);
-        });
-        return Array.from(currentSet);
-      });
-
-      setExcludedVideoMetaById((current) => {
-        const next = { ...current };
-        const now = new Date().toISOString();
-        normalizedVideoIds.forEach((videoId) => {
-          if (nextActionKind === 'exclude') {
-            next[videoId] = {
-              videoId,
-              reason: options?.reason,
-              excludedAt: now,
-              restoredAt: null,
-              exclusionMode: selectionMode,
-              exclusionScope: actionScope,
-              exclusionFilterSummary: selectionMode === 'filtered_bulk' ? normalizedFilterSummary : undefined,
-            };
-          } else if (next[videoId]) {
-            next[videoId] = {
-              ...next[videoId],
-              restoredAt: now,
-            };
-          }
-        });
-        return next;
-      });
+      setInclusionState(result.state);
 
       if (!options?.skipUndo) {
         setIncludeExcludeUndoStack((current) => [...current, {
           kind: nextActionKind,
-          videoIds: normalizedVideoIds,
+          videoIds: changedVideoIds,
           scope: actionScope,
           selectionMode,
           filterSummary: normalizedFilterSummary || undefined,
@@ -3248,14 +3249,14 @@ export default function App() {
           id: eventId,
           type: nextActionKind === 'exclude' ? 'videos_excluded' : 'videos_restored',
           createdAt: new Date().toISOString(),
-          summary: `${nextActionKind === 'exclude' ? 'Excluded' : 'Restored'} ${normalizedVideoIds.length.toLocaleString()} video(s).`,
-          affectedIds: normalizedVideoIds,
+          summary: `${nextActionKind === 'exclude' ? 'Excluded' : 'Restored'} ${changedVideoIds.length.toLocaleString()} video(s).`,
+          affectedIds: changedVideoIds,
           details: details.length ? details.join('\n') : undefined,
           meta: {
             scope: actionScope,
             selectionMode,
             filterSummary: normalizedFilterSummary || undefined,
-            count: normalizedVideoIds.length,
+            count: changedVideoIds.length,
           },
         });
       }
@@ -3263,7 +3264,7 @@ export default function App() {
       setDatasetVersion((version) => version + 1);
       setFilteredViewVersion((version) => version + 1);
     });
-  }, [appendResearchHistory, clearAllThumbnailCaches, excludedVideoMetaById, inclusionView, sourceMaskedRowByVideoId, sourceVideoIdSet, startFilterTransition, viewScope]);
+  }, [appendResearchHistory, clearAllThumbnailCaches, inclusionView, setInclusionState, sourceMaskedRowByVideoId, sourceVideoIdSet, startFilterTransition, viewScope]);
 
   const handleMoveVideos = useCallback((videoIds: string[]) => {
     applyIncludeExcludeAction(videoIds);
@@ -3272,7 +3273,7 @@ export default function App() {
   const handleMoveSelectedVideos = useCallback(() => {
     const nextVideoIds = selectedVideoIdsForActions;
     if (nextVideoIds.length === 0) return;
-    const targetKind: IncludeExcludeAction['kind'] = inclusionView === 'included' ? 'exclude' : 'restore';
+    const targetKind = resolveInclusionActionKind(inclusionView);
     applyIncludeExcludeAction(nextVideoIds, targetKind, {
       scope: 'videos',
       selectionMode: targetKind === 'exclude' && areAllFilteredVideosSelectedForAction ? 'filtered_bulk' : 'manual',
@@ -3281,16 +3282,8 @@ export default function App() {
     });
   }, [applyIncludeExcludeAction, areAllFilteredVideosSelectedForAction, filterModel, inclusionView, selectedRowsForBatchCopy, selectedVideoIdsForActions]);
 
-  const handleExcludeSelectedVideos = useCallback(() => {
-    const nextVideoIds = selectedVideoIdsForActions;
-    if (nextVideoIds.length === 0) return;
-    applyIncludeExcludeAction(nextVideoIds, 'exclude', {
-      scope: 'videos',
-      selectionMode: areAllFilteredVideosSelectedForAction ? 'filtered_bulk' : 'manual',
-      filterSummary: summarizeFilterModel(filterModel),
-      selectedRows: selectedRowsForBatchCopy,
-    });
-  }, [applyIncludeExcludeAction, areAllFilteredVideosSelectedForAction, filterModel, selectedRowsForBatchCopy, selectedVideoIdsForActions]);
+  // The batch button and Ctrl/Cmd+Delete used to always exclude, which did nothing in the Excluded view.
+  const handleExcludeSelectedVideos = handleMoveSelectedVideos;
 
   const handleUndoIncludeExclude = useCallback(() => {
     const lastAction = includeExcludeUndoStack[includeExcludeUndoStack.length - 1];
@@ -3299,7 +3292,7 @@ export default function App() {
     setIncludeExcludeUndoStack((current) => current.slice(0, -1));
     setIncludeExcludeRedoStack((current) => [...current, lastAction]);
     markResearchHistoryEventReverted(lastAction.historyEventId);
-    applyIncludeExcludeAction(lastAction.videoIds, lastAction.kind === 'exclude' ? 'restore' : 'exclude', {
+    applyIncludeExcludeAction(lastAction.videoIds, invertInclusionActionKind(lastAction.kind), {
       skipUndo: true,
       scope: lastAction.scope,
       selectionMode: lastAction.selectionMode,
@@ -3604,9 +3597,10 @@ export default function App() {
       if (
         viewScope === 'videos'
         && !isGridTarget
+        && !isTyping
         && !hasBlockingOverlay
         && (event.ctrlKey || event.metaKey)
-        && event.key === 'Delete'
+        && isDeleteKey(event.key)
         && selectedVideoIdsForActions.length > 0
       ) {
         event.preventDefault();
@@ -3616,7 +3610,7 @@ export default function App() {
 
       if (viewScope !== 'videos' || isTyping || hasBlockingOverlay || isGridTarget) return;
 
-      if (event.key === 'Delete' && selectedVideoIdsForActions.length > 0) {
+      if (isDeleteKey(event.key) && selectedVideoIdsForActions.length > 0) {
         event.preventDefault();
         handleMoveSelectedVideos();
       }
@@ -4253,8 +4247,7 @@ export default function App() {
       setGeneratedMetadata((previous) => ({
         byVideoId: Object.fromEntries(Object.entries(previous.byVideoId).filter(([videoId]) => survivingVideoIds.has(videoId))),
       }));
-      setExcludedVideoIds((current) => current.filter((videoId) => survivingVideoIds.has(videoId)));
-      setExcludedVideoMetaById((previous) => Object.fromEntries(Object.entries(previous).filter(([videoId]) => survivingVideoIds.has(videoId))));
+      setInclusionState(pruneInclusionState(inclusionStateRef.current, survivingVideoIds));
       setSourceRegistry(nextSourceRegistry);
       setSourceVisibility(nextSourceVisibility);
       setRowLineage(nextRowLineage);
@@ -7022,6 +7015,7 @@ ${heading}
                     onBatchRemoveTag={handleBatchRemoveTagFromSelection}
                     onBatchApplyNotes={handleBatchApplyNotesToSelection}
                     onBatchExclude={handleExcludeSelectedVideos}
+                    inclusionView={inclusionView}
                     onBatchCopySelection={handleBatchCopySelection}
                     isBatchTagging={isTagWritePending}
                     onWatchSession={handleWatchSession}

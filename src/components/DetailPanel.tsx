@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Youtube, Tag, X, Search, Plus, Pencil, Save, Ban, Copy, ChevronDown, Clock3, Trash2 } from 'lucide-react';
-import { Annotation, QuoteRef, TimestampRef } from '../types';
+import { Annotation, InclusionView, QuoteRef, TimestampRef } from '../types';
 import {
   BatchCopyExportMode,
   resolvePublishedAt,
@@ -49,6 +49,8 @@ interface DetailPanelProps {
     message: string;
   }>;
   onBatchExclude?: () => void;
+  /** In the Excluded view the batch action restores instead of excluding. */
+  inclusionView?: InclusionView;
   onBatchCopySelection?: (mode: BatchCopyExportMode) => Promise<{
     status: 'success' | 'empty' | 'error';
     copiedCount: number;
@@ -504,6 +506,7 @@ export default function DetailPanel({
   onBatchRemoveTag,
   onBatchApplyNotes,
   onBatchExclude,
+  inclusionView = 'included',
   onBatchCopySelection,
   isBatchTagging = false,
   onWatchSession,
@@ -516,6 +519,7 @@ export default function DetailPanel({
   };
 
   const hasMultiSelection = selectedCount > 1;
+  const isExcludedView = inclusionView === 'excluded';
   const effectiveRow = hasMultiSelection ? null : row;
   const videoId = effectiveRow ? resolveVideoId(effectiveRow) : null;
   const [tagInput, setTagInput] = useState('');
@@ -1100,7 +1104,7 @@ export default function DetailPanel({
               <div>
                 <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Batch actions</div>
                 <div className="mt-1 text-sm font-medium text-[var(--text-main)]">{selectedCount.toLocaleString()} videos selected</div>
-                <p className="mt-2 text-xs text-[var(--text-muted)]">Tag selected videos, copy video or channel IDs/URLs, or exclude the current selection (Ctrl/Cmd + Delete).</p>
+                <p className="mt-2 text-xs text-[var(--text-muted)]">Tag selected videos, copy video or channel IDs/URLs, or {isExcludedView ? 'restore' : 'exclude'} the current selection (Ctrl/Cmd + Delete).</p>
               </div>
               <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_auto_auto]">
                 <InputRow
@@ -1125,11 +1129,11 @@ export default function DetailPanel({
                   onClick={submitBatchExclude}
                   disabled={selectedCount === 0 || !onBatchExclude}
                   className="shrink-0 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[12px] font-medium text-[var(--text-main)] transition-colors hover:border-red-500 hover:text-red-600 disabled:opacity-50"
-                  title="Exclude selected videos"
+                  title={isExcludedView ? 'Restore selected videos to Included' : 'Exclude selected videos'}
                 >
                   <span className="inline-flex items-center gap-1.5">
                     <Ban size={13} />
-                    Exclude
+                    {isExcludedView ? 'Restore' : 'Exclude'}
                   </span>
                 </button>
                 <div className="relative shrink-0">

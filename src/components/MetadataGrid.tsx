@@ -24,6 +24,7 @@ import { BooleanMapSchema, ExplorerFilterModel, parseBooleanMapValue } from '../
 import { formatDateDisplay, formatDurationDisplay, getColumnDisplayName, getColumnHeaderTooltip, getDefaultGridColumnSizing, isDateLikeColumn, isDurationColumn, resolveVideoId, TRANSCRIPT_COLUMN } from '../lib/data';
 import { extractSortRulesFromColumnState } from '../lib/dashboardThumbnails';
 import { ScopeSelectionState, ScopeSelectionUpdate } from '../lib/selectionState';
+import { isDeleteKey } from '../lib/utils';
 
 interface MetadataGridProps {
   rows: any[];
@@ -504,7 +505,7 @@ export default function MetadataGrid({
     const api = gridApiRef.current;
     const current = selectionRef.current;
 
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Delete' && selectedRowCount > 0) {
+    if ((event.ctrlKey || event.metaKey) && isDeleteKey(event.key) && selectedRowCount > 0) {
       event.preventDefault();
       onExcludeSelection?.();
       return;
@@ -545,7 +546,7 @@ export default function MetadataGrid({
       return;
     }
 
-    if (event.key === 'Delete' && selectedRowCount > 0) {
+    if (isDeleteKey(event.key) && selectedRowCount > 0) {
       event.preventDefault();
       if (isChannelScope) onExcludeSelection?.();
       else onMoveSelection?.();
