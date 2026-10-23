@@ -2102,7 +2102,7 @@ export default function App() {
   }, []);
 
   const clearAllThumbnailCaches = useCallback(() => {
-    thumbnailLoadTokenRef.current = Math.max(thumbnailLoadTokenRef.current + 1, hydratedSessionCounter);
+    thumbnailLoadTokenRef.current += 1;
     setThumbnailLoadProgress(null);
     setThumbnailCaches((current) => {
       (Object.values(current as Record<string, DashboardThumbnailCacheSnapshot>) as DashboardThumbnailCacheSnapshot[]).forEach((snapshot) => revokeThumbnailUrls(snapshot));
@@ -2300,7 +2300,12 @@ export default function App() {
       nextSourceRegistry,
     );
 
-    thumbnailLoadTokenRef.current += 1;
+    // Keep new thumbnail sessions ahead of any session id restored from the project.
+    const maxRestoredSessionId = Math.max(
+      hydratedSessionCounter,
+      ...Object.values(nextThumbnailCaches).map((snapshot) => Number(snapshot.sessionId) || 0),
+    );
+    thumbnailLoadTokenRef.current = Math.max(thumbnailLoadTokenRef.current + 1, maxRestoredSessionId + 1);
     setSourceRows(nextSourceRows);
     setSourceSchema(nextSourceSchema);
     setDeletedColumns(nextDeletedColumns);
