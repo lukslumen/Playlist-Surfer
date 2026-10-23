@@ -16,10 +16,10 @@ import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTags
 import { buildDatasetDashboardStats } from './lib/datasetDashboard';
 import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
 import { aggregateChannelLinkingFromVideoRows, applyLinkingDomainOverride, buildChannelLinkingSnapshot, buildLinkingStageAAsync, buildLinkingStageB, buildLinkingStageBAsync, profileLinkingColumnCandidates, revertLinkingDomainOverride, type LinkingStageAResult } from './lib/linkingDashboard';
-import { LAST_PROJECT_AUTOSAVE_VERSION, loadLastProjectAutosaveSnapshot, saveLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
+import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
 import { THUMBNAIL_LIMIT, buildSavedViewThumbnailScopeKey, buildThumbnailSortSignature, inferFileExtensionFromMimeType, isPersistentThumbnailScopeKey, isSavedViewThumbnailScopeKey, resolveThumbnailCacheLabel, sanitizeThumbnailPathSegment, selectThumbnailCandidates } from './lib/dashboardThumbnails';
 import { cn } from './lib/utils';
-import { getBootPersistedStateJson, savePersistedState } from './lib/persistedState';
+import { getBootPersistedStateJson } from './lib/persistedState';
 import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
 import { applySupportMappings, buildDefaultProjectSourceState, computeSourceVisibilityInclusionCounts, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
 import { CHANNEL_BASE_SCHEMA, CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
@@ -37,6 +37,7 @@ import { useImportFlow } from './state/useImportFlow';
 import { addEnrichmentSource, importProgressTitle, planMergeImport, planReplaceImport } from './lib/importPlan';
 import { useResearchHistory } from './state/useResearchHistory';
 import { useInclusionActions, useInclusionState } from './state/useInclusion';
+import { usePersistence } from './state/usePersistence';
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
 import { ResearchLogDialog } from './components/dialogs/ResearchLogDialog';
@@ -208,7 +209,6 @@ export default function App() {
   const thumbnailCachesRef = useRef<Record<string, DashboardThumbnailCacheSnapshot>>({});
   const drilldownPreviousVideoFilterRef = useRef<ExplorerFilterModel | null>(null);
   const selectionScrollModeRef = useRef<'none' | 'middle'>('none');
-  const latestPersistedStateRef = useRef<Record<string, any> | null>(persisted);
   const sourceRowsRef = useRef<any[]>([]);
   const sourceSchemaRef = useRef<any[]>([]);
   const isAutoRestoreInFlightRef = useRef(false);
@@ -754,103 +754,16 @@ export default function App() {
     (Object.values(thumbnailCachesRef.current) as DashboardThumbnailCacheSnapshot[]).forEach((snapshot) => revokeThumbnailUrls(snapshot));
   }, []);
 
-  const flushAutosaveSnapshotNow = useCallback(async (reason: string) => {
-    if (!sourceRows.length || !sourceSchema.length) {
-      return;
-    }
-    const snapshot = {
-      version: LAST_PROJECT_AUTOSAVE_VERSION,
-      savedAt: new Date().toISOString(),
-      fileName: state.fileName ?? null,
-      sourceSchema,
-      rows: sourceRows,
-    };
-    try {
-      await saveLastProjectAutosaveSnapshot(snapshot);
-    } catch (error) {
-      console.warn(`[autosave] Failed to persist snapshot (${reason}).`, error);
-    }
-  }, [sourceRows, sourceSchema, state.fileName]);
-
-  useEffect(() => {
-    const nextPersistedState = {
-      isRightPanelCollapsed: state.isRightPanelCollapsed,
-      savedViews: state.savedViews,
-      activeViewId: state.activeViewId,
-      annotations: state.annotations,
-      userTagsByVideoId,
-      projectOverview: state.projectOverview,
-      projectNotes: state.projectNotes,
-      researchLogSectionComments: state.researchLogSectionComments,
-      researchHistory,
-      watchHistoryByVideoId,
-      savedViewsVersion,
-      inclusionView,
-      excludedVideoIds,
-      excludedVideoMetaById,
-      visibleColumns,
-      channelVisibleColumns,
-      theme: state.theme,
-      deletedColumns,
-      specialMappings,
-      dashboardSnapshots,
-      savedViewDashboardSnapshots,
-      channelMetadataSnapshot,
-      importedChannelMetadata,
-      viewScope,
-      channelFilterModel,
-      selectedVideoId: videoSelection.detailKey || videoSelection.focusKey || videoSelection.anchorKey || videoSelection.selectedKeys[0] || null,
-      selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
-      videoColumnWidths,
-      channelColumnWidths,
-      sourceRegistry,
-      sourceVisibility,
-      rowLineage,
-      columnLineage,
-      generatedMetadata,
-      linkingState,
-      channelLinkingState,
-      researchLogMarkdownOptions,
-      notesByVideoId,
-      channelNotesById,
-      channelTagsById,
-    };
-    latestPersistedStateRef.current = nextPersistedState;
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let idleId: number | null = null;
-    const persist = () => {
-      savePersistedState(nextPersistedState).catch((error) => {
-        console.warn('[state] Failed to save app state.', error);
-      });
-    };
-
-    if ('requestIdleCallback' in window) {
-      idleId = (window as Window & { requestIdleCallback: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number }).requestIdleCallback(
-        () => persist(),
-        { timeout: 1200 },
-      );
-    } else {
-      timeoutId = globalThis.setTimeout(persist, 120);
-    }
-
-    return () => {
-      if (idleId !== null && 'cancelIdleCallback' in window) {
-        (window as Window & { cancelIdleCallback: (handle: number) => void }).cancelIdleCallback(idleId);
-      }
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [
-    state.isRightPanelCollapsed,
-    state.savedViews,
-    state.activeViewId,
-    state.annotations,
-    state.projectOverview,
-    state.projectNotes,
-    state.researchLogSectionComments,
-    state.theme,
+  // Everything that survives a reload. usePersistence saves it whenever a field changes.
+  const persistedAppState = {
+    isRightPanelCollapsed: state.isRightPanelCollapsed,
+    savedViews: state.savedViews,
+    activeViewId: state.activeViewId,
+    annotations: state.annotations,
+    userTagsByVideoId,
+    projectOverview: state.projectOverview,
+    projectNotes: state.projectNotes,
+    researchLogSectionComments: state.researchLogSectionComments,
     researchHistory,
     watchHistoryByVideoId,
     savedViewsVersion,
@@ -859,6 +772,7 @@ export default function App() {
     excludedVideoMetaById,
     visibleColumns,
     channelVisibleColumns,
+    theme: state.theme,
     deletedColumns,
     specialMappings,
     dashboardSnapshots,
@@ -867,14 +781,8 @@ export default function App() {
     importedChannelMetadata,
     viewScope,
     channelFilterModel,
-    videoSelection.anchorKey,
-    videoSelection.detailKey,
-    videoSelection.focusKey,
-    videoSelection.selectedKeys,
-    channelSelection.anchorKey,
-    channelSelection.detailKey,
-    channelSelection.focusKey,
-    channelSelection.selectedKeys,
+    selectedVideoId: videoSelection.detailKey || videoSelection.focusKey || videoSelection.anchorKey || videoSelection.selectedKeys[0] || null,
+    selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
     videoColumnWidths,
     channelColumnWidths,
     sourceRegistry,
@@ -888,38 +796,13 @@ export default function App() {
     notesByVideoId,
     channelNotesById,
     channelTagsById,
-    userTagsByVideoId,
-  ]);
-
-  useEffect(() => {
-    const flushLatestPersistedState = () => {
-      const snapshot = latestPersistedStateRef.current;
-      void flushAutosaveSnapshotNow('page-lifecycle');
-      if (!snapshot) return;
-      // Best effort: an IndexedDB write started while the page unloads may not finish, so we also
-      // flush whenever the tab is hidden, which usually happens first.
-      savePersistedState(snapshot).catch((error) => {
-        console.warn('[state] Failed to save app state on page lifecycle event.', error);
-      });
-    };
-    const flushWhenHidden = () => {
-      if (document.visibilityState === 'hidden') flushLatestPersistedState();
-    };
-
-    window.addEventListener('pagehide', flushLatestPersistedState);
-    window.addEventListener('beforeunload', flushLatestPersistedState);
-    document.addEventListener('visibilitychange', flushWhenHidden);
-    return () => {
-      window.removeEventListener('pagehide', flushLatestPersistedState);
-      window.removeEventListener('beforeunload', flushLatestPersistedState);
-      document.removeEventListener('visibilitychange', flushWhenHidden);
-    };
-  }, [flushAutosaveSnapshotNow]);
-
-  useEffect(() => {
-    if (!sourceRows.length || !sourceSchema.length) return;
-    void flushAutosaveSnapshotNow('dataset-change');
-  }, [flushAutosaveSnapshotNow, sourceRows.length, sourceSchema.length]);
+  };
+  const { getLatestPersistedState } = usePersistence({
+    state: persistedAppState,
+    rows: sourceRows,
+    schema: sourceSchema,
+    fileName: state.fileName ?? null,
+  });
 
   useEffect(() => {
     document.documentElement.dataset.theme = state.theme;
@@ -1310,7 +1193,7 @@ export default function App() {
         return;
       }
 
-      const persistedState = latestPersistedStateRef.current ?? persisted;
+      const persistedState = (getLatestPersistedState() ?? persisted) as typeof persisted;
       const mergedAnnotations = mergeAnnotationsWithUserTags(
         (persistedState?.annotations || {}) as Record<string, Annotation>,
         (persistedState?.userTagsByVideoId || {}) as Record<string, string[]>,
