@@ -93,3 +93,15 @@ test('Delete works on a multi-row selection (focus stays on the grid)', async ({
   await page.keyboard.press('Delete');
   await expectExcludedCount(page, 3);
 });
+
+test('exclusions survive a page reload', async ({ page }) => {
+  await row(page, 0).click();
+  await row(page, 1).click({ modifiers: ['Shift'] });
+  await page.getByRole('button', { name: 'Exclude', exact: true }).click();
+  await expectExcludedCount(page, 2);
+  // Hiding the tab flushes state immediately; also give the idle-time save a moment.
+  await page.waitForTimeout(1500);
+
+  await page.reload();
+  await expectExcludedCount(page, 2);
+});

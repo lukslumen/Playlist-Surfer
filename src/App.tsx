@@ -137,6 +137,7 @@ import {
   selectThumbnailCandidates,
 } from './lib/dashboardThumbnails';
 import { cn, isDeleteKey } from './lib/utils';
+import { getBootPersistedStateJson, savePersistedState } from './lib/persistedState';
 import {
   applyInclusionChange,
   invertInclusionActionKind,
@@ -145,7 +146,6 @@ import {
   type InclusionState,
 } from './lib/inclusion';
 
-const STORAGE_KEY = 'tubedata_explorer_state';
 const FILTERED_TEMP_THUMBNAIL_SCOPE = 'filtered-temp';
 const THUMBNAIL_ZOOM_STEPS = [88, 104, 128, 156, 192, 240, 320, 440, 620, 860, 1120];
 const GENERATED_SOURCE_ID = 'generated:metadata';
@@ -1142,8 +1142,13 @@ function LongTaskOverlay({ progress }: { progress: LongTaskProgress | null }) {
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
   const persisted = useMemo(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const initial = saved ? JSON.parse(saved) : {};
+    const saved = getBootPersistedStateJson();
+    let initial: any = {};
+    try {
+      initial = saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.warn('[state] Saved state is not valid JSON; starting fresh.', error);
+    }
     return {
       ...initial,
       annotations: stripTagsFromAnnotations(stripNotesFromAnnotations(initial.annotations ?? {})),
@@ -1897,7 +1902,9 @@ export default function App() {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let idleId: number | null = null;
     const persist = () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextPersistedState));
+      savePersistedState(nextPersistedState).catch((error) => {
+        console.warn('[state] Failed to save app state.', error);
+      });
     };
 
     if ('requestIdleCallback' in window) {
@@ -1971,18 +1978,23 @@ export default function App() {
       const snapshot = latestPersistedStateRef.current;
       void flushAutosaveSnapshotNow('page-lifecycle');
       if (!snapshot) return;
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-      } catch (error) {
-        console.warn('Failed to flush local storage on page lifecycle event:', error);
-      }
+      // Best effort: an IndexedDB write started while the page unloads may not finish, so we also
+      // flush whenever the tab is hidden, which usually happens first.
+      savePersistedState(snapshot).catch((error) => {
+        console.warn('[state] Failed to save app state on page lifecycle event.', error);
+      });
+    };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flushLatestPersistedState();
     };
 
     window.addEventListener('pagehide', flushLatestPersistedState);
     window.addEventListener('beforeunload', flushLatestPersistedState);
+    document.addEventListener('visibilitychange', flushWhenHidden);
     return () => {
       window.removeEventListener('pagehide', flushLatestPersistedState);
       window.removeEventListener('beforeunload', flushLatestPersistedState);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
     };
   }, [flushAutosaveSnapshotNow]);
 
