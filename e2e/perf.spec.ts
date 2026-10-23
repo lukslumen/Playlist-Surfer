@@ -13,6 +13,8 @@ async function timed(label: string, results: Record<string, number>, action: () 
   const start = Date.now();
   await action();
   results[label] = Date.now() - start;
+  // Logged per step so a crash part-way through still leaves the earlier numbers.
+  console.log(`PERF step ${label}: ${results[label]} ms`);
 }
 
 function footer(page: Page) {

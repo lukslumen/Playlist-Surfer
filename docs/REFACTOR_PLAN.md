@@ -1,6 +1,42 @@
 # Playlist Surfer: analysis and refactor plan
 
-Status: draft v3 for review. Exclude fails through both the shortcut and the multi-select button. Target size: **optimize for up to 100k rows** (usually fewer); 1M is an edge case that should degrade gracefully, not crash. The project is on GitHub (`lukslumen/Playlist-Surfer`) and deployed on Vercel. Nothing in `src/` has been changed yet.
+Status: draft v3 for review. Exclude fails through both the shortcut and the multi-select button. Target size: **optimize for up to 100k rows** (usually fewer); 1M is an edge case that should degrade gracefully, not crash. The project is on GitHub (`lukslumen/Playlist-Surfer`) and deployed on Vercel.
+
+## Progress (branch `refactor/phase0-safety-net`)
+
+**Root cause of "exclude does nothing":** the last commit ("fixed thumbnails") left `clearAllThumbnailCaches` referring to `hydratedSessionCounter`, a variable that only exists inside project hydration. Every include/exclude action threw a `ReferenceError` before changing any state. `tsc` reported it, but nothing ran `tsc`. Fixed, and confirmed in the browser with the 61-row sample: the bug reproduces with the old code and is gone with the fix.
+
+Done:
+- **Phase 0:**
+  - Vitest, with the 7 existing tests converted.
+  - ESLint (`react-hooks`), with 0 errors and 57 warnings left to work through.
+  - `npm run check`.
+  - Playwright e2e suite on the sample CSV.
+  - GitHub Actions CI.
+  - Perf fixture generator and an opt-in perf spec.
+- **Phase 1:**
+  - Pure `src/lib/inclusion.ts` with 9 unit tests.
+  - Undo only reverses the videos that actually changed.
+  - Exclude/restore follows the current view.
+  - Backspace works as Delete.
+  - Cmd+Delete no longer fires while typing.
+  - The grid passes its current selection to shortcuts.
+  - The batch tag input no longer steals focus on multi-select. This was a second reason shortcuts failed with several rows selected.
+
+Still open from phase 1:
+- Defect C: rows without a recognised video ID. This needs stable row IDs (phase 2).
+- On-screen feedback when nothing moved. There's no toast system yet (phase 3).
+- A Shift-click right after switching to the Excluded view was ignored once. Seen manually, not reproduced since.
+
+### Baseline performance (before phase 2)
+| Rows | CSV | Import (parse + to grid) | Exclude 1 row | Undo | Select all | JS heap |
+|---|---|---|---|---|---|---|
+| 10k | 30 MB | 0.9 s + 0.8 s | **1.1 s** | 1.2 s | 0.3 s | **1.28 GB** |
+| 100k | 301 MB | 3.4 s + 4.7 s | **tab crashes** | (crashed here in run 1) | – | – |
+
+Exclude-one-row is about 20× over the 50 ms target at 10k rows, and the heap is about 40× the CSV size. At 100k, import completes but the tab runs out of memory on the first exclude or undo. That's the row-copy chain and per-action recomputation described in 2.3. **Phase 2 is required before 100k is usable**, and the 10k numbers say it pays off well below that size too.
+
+Rerun with `node scripts/generate-perf-fixture.mjs 100000` followed by `PERF=1 PERF_ROWS=10000,100000 npx playwright test e2e/perf.spec.ts`.
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
