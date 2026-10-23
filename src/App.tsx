@@ -8,7 +8,7 @@ import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, mergeChannelMetadataRows, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
+import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
 import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
 import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
@@ -21,7 +21,7 @@ import { cn } from './lib/utils';
 import { getBootPersistedStateJson } from './lib/persistedState';
 import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
 import { applySupportMappings, buildDefaultProjectSourceState, computeSourceVisibilityInclusionCounts, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
-import { CHANNEL_BASE_SCHEMA, CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
+import { CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
 import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
 import { buildThumbnailEntriesFromCacheSeed, createObjectUrl, FILTERED_TEMP_THUMBNAIL_SCOPE, normalizeRestoredThumbnailCaches } from './lib/thumbnailCache';
 import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, buildTagUsageSummary, extractAnnotationsFromRows, extractNotesFromArchive, getArchiveEntry, stripNotesFromAnnotations } from './lib/projectNotes';
@@ -42,6 +42,9 @@ import { useInclusionActions, useInclusionState } from './state/useInclusion';
 import { usePersistence } from './state/usePersistence';
 import { useNavigationHistory } from './state/useNavigationHistory';
 import { useThumbnailCaches } from './state/useThumbnailCaches';
+import { useChannelAnnotations } from './state/useChannelAnnotations';
+import { useChannelRows } from './state/useChannelRows';
+import { buildChannelMetadataSnapshot, isChannelMetadataSnapshotFresh } from './lib/channelMetadata';
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
 import { ResearchLogDialog } from './components/dialogs/ResearchLogDialog';
@@ -109,8 +112,17 @@ export default function App() {
   const [sourceRows, setSourceRows] = useState<any[]>([]);
   const [sourceSchema, setSourceSchema] = useState<any[]>([]);
   const [notesByVideoId, setNotesByVideoId] = useState<Record<string, string>>(persisted.notesByVideoId ?? {});
-  const [channelNotesById, setChannelNotesById] = useState<Record<string, string>>(persisted.channelNotesById ?? {});
-  const [channelTagsById, setChannelTagsById] = useState<Record<string, string[]>>(persisted.channelTagsById ?? {});
+  const {
+    channelNotesById,
+    setChannelNotesById,
+    channelTagsById,
+    setChannelTagsById,
+    handleUpdateChannelNotes,
+    handleReplaceChannelTags,
+    addTagToChannelKeys,
+    removeTagFromChannelKeys,
+    appendNotesToChannelKeys,
+  } = useChannelAnnotations({ notes: persisted.channelNotesById, tags: persisted.channelTagsById });
   const [userTagsByVideoId, dispatchUserTags] = useReducer(userTagsReducer, persisted.userTagsByVideoId ?? {});
   const [deletedColumns, setDeletedColumns] = useState<string[]>(() => {
     return persisted.deletedColumns ?? [];
@@ -417,91 +429,28 @@ export default function App() {
     exclusionMembershipFingerprint,
     inclusionView,
   }), [exclusionMembershipFingerprint, inclusionView, videoCorpusFingerprint]);
-  const isChannelMetadataFresh = useMemo(() => Boolean(
-    channelMetadataSnapshot
-    && (
-      (channelMetadataSnapshot.cacheKeyAtCalculation
-        ? channelMetadataSnapshot.cacheKeyAtCalculation === currentChannelMetadataCacheKey
-        : (
-          channelMetadataSnapshot.datasetVersionAtCalculation === datasetVersion
-          && channelMetadataSnapshot.inclusionViewAtCalculation === inclusionView
-        ))
-    ),
-  ), [channelMetadataSnapshot, currentChannelMetadataCacheKey, datasetVersion, inclusionView]);
-  const channelRows = useMemo(() => {
-    if (!channelMetadataSnapshot?.rows?.length) return [];
-    return mergeChannelMetadataRows(channelMetadataSnapshot.rows, importedChannelMetadata);
-  }, [channelMetadataSnapshot, importedChannelMetadata]);
-  const hasChannelUserTags = useMemo(
-    () => Object.values(channelTagsById).some((tags) => Array.isArray(tags) && tags.length > 0),
-    [channelTagsById],
-  );
-  const scopedChannelRows = useMemo(() => {
-    if (!channelRows.length || !activeBaseRows.length) return [];
-    const scopedChannelKeys = new Set<string>();
-    activeBaseRows.forEach((row) => {
-      const channelId = resolveChannelId(row);
-      const channelName = resolveChannelName(row);
-      const channelKey = channelId ? `id:${channelId}` : `name:${channelName.toLowerCase()}`;
-      if (channelKey) scopedChannelKeys.add(channelKey);
-    });
-    if (!scopedChannelKeys.size) return [];
-
-    const scopedCachedRows = channelRows.filter((row) => scopedChannelKeys.has(resolveChannelRowKey(row)));
-    const coveredKeys = new Set(scopedCachedRows.map((row) => resolveChannelRowKey(row)).filter(Boolean));
-    const missingSourceRows = activeBaseRows.filter((row) => {
-      const channelId = resolveChannelId(row);
-      const channelName = resolveChannelName(row);
-      const channelKey = channelId ? `id:${channelId}` : `name:${channelName.toLowerCase()}`;
-      return Boolean(channelKey) && !coveredKeys.has(channelKey);
-    });
-    if (!missingSourceRows.length) return scopedCachedRows;
-
-    const scopedFallbackRows = buildChannelMetadataRows(missingSourceRows, importedChannelMetadata)
-      .filter((row) => {
-        const channelKey = resolveChannelRowKey(row);
-        return Boolean(channelKey) && !coveredKeys.has(channelKey);
-      });
-    return [...scopedCachedRows, ...scopedFallbackRows];
-  }, [activeBaseRows, channelRows, importedChannelMetadata]);
-  const channelRowsWithTags = useMemo(() => {
-    if (!scopedChannelRows.length) return scopedChannelRows;
-    if (!hasChannelUserTags) return scopedChannelRows;
-    return scopedChannelRows.map((row) => {
-      const channelKey = resolveChannelRowKey(row);
-      const tags = channelKey ? (channelTagsById[channelKey] || []) : [];
-      return {
-        ...row,
-        [CHANNEL_USER_TAGS_COLUMN]: tags,
-      };
-    });
-  }, [channelTagsById, hasChannelUserTags, scopedChannelRows]);
-  const channelRowsWithLinking = useMemo(() => {
-    if (!channelRowsWithTags.length) return channelRowsWithTags;
-    if (!channelLinkingState.snapshot?.byChannelKey || channelLinkingState.stale) return channelRowsWithTags;
-    const byChannelKey = channelLinkingState.snapshot.byChannelKey;
-    return channelRowsWithTags.map((row) => {
-      const key = String(row?.channel_key || '');
-      const linking = byChannelKey[key];
-      if (!linking) return row;
-      return { ...row, ...linking };
-    });
-  }, [channelLinkingState.snapshot?.byChannelKey, channelLinkingState.stale, channelRowsWithTags]);
-  const channelSchema = useMemo(() => {
-    const rawSchema = deriveSchemaFromRows(channelRowsWithLinking, CHANNEL_BASE_SCHEMA);
-    const hasCanonicalChannelName = rawSchema.some((column) => column.column_name === 'channel_name');
-    return rawSchema.filter((column) => !(hasCanonicalChannelName && column.column_name === 'title'));
-  }, [channelRowsWithLinking]);
-  const channelBooleanMapColumns = useMemo(() => detectBooleanMapColumns(channelRowsWithLinking, channelSchema), [channelRowsWithLinking, channelSchema]);
-  const channelListLikeColumns = useMemo(() => detectListLikeColumns(channelRowsWithLinking, channelSchema, channelBooleanMapColumns), [channelBooleanMapColumns, channelRowsWithLinking, channelSchema]);
-  const unifiedChannelFilterState = useMemo(() => buildUnifiedFilterState({
-    rows: channelRowsWithLinking,
-    schema: channelSchema,
-    filterModel: channelFilterModel,
-    listLikeColumns: channelListLikeColumns,
-    booleanMapColumns: channelBooleanMapColumns,
-  }), [channelBooleanMapColumns, channelFilterModel, channelListLikeColumns, channelRowsWithLinking, channelSchema]);
-  const filteredChannelRows = unifiedChannelFilterState.filteredRows;
+  const isChannelMetadataFresh = useMemo(() => isChannelMetadataSnapshotFresh(channelMetadataSnapshot, {
+    cacheKey: currentChannelMetadataCacheKey,
+    datasetVersion,
+    inclusionView,
+  }), [channelMetadataSnapshot, currentChannelMetadataCacheKey, datasetVersion, inclusionView]);
+  const {
+    channelRows,
+    hasChannelUserTags,
+    channelRowsWithLinking,
+    channelSchema,
+    channelBooleanMapColumns,
+    channelListLikeColumns,
+    filteredChannelRows,
+    channelFilteredColumns,
+  } = useChannelRows({
+    snapshot: channelMetadataSnapshot,
+    importedChannelMetadata,
+    videoRows: activeBaseRows,
+    channelTagsById,
+    channelLinkingState,
+    channelFilterModel,
+  });
   const selectedChannelRows = useMemo(
     () => filteredChannelRows.filter((row) => selectedChannelKeys.includes(resolveChannelRowKey(row))),
     [filteredChannelRows, selectedChannelKeys],
@@ -529,7 +478,6 @@ export default function App() {
     const selectedSet = new Set(selectedChannelKeys);
     return filteredKeys.every((key) => selectedSet.has(key));
   }, [filteredChannelRows, selectedChannelKeys]);
-  const channelFilteredColumns = unifiedChannelFilterState.filteredColumns;
   const displayedRowCount = viewScope === 'channels' ? filteredChannelRows.length : rows.length;
   const totalScopeRowCount = viewScope === 'channels' ? channelRowsWithLinking.length : displayRows.length;
   const activeGridRows = viewScope === 'channels' ? filteredChannelRows : rows;
@@ -1449,15 +1397,13 @@ export default function App() {
         const nextImportedState = mergeResult.state;
         await progress('Rebuilding the channel table', 3, { indeterminate: true });
         setImportedChannelMetadata(nextImportedState);
-        setChannelMetadataSnapshot({
-          rows: buildChannelMetadataRows(activeBaseRows, nextImportedState),
-          calculatedAt: new Date().toISOString(),
-          datasetVersionAtCalculation: datasetVersion,
-          inclusionViewAtCalculation: inclusionView,
-          videoCorpusFingerprintAtCalculation: videoCorpusFingerprint,
-          exclusionMembershipFingerprintAtCalculation: exclusionMembershipFingerprint,
-          cacheKeyAtCalculation: currentChannelMetadataCacheKey,
-        });
+        setChannelMetadataSnapshot(buildChannelMetadataSnapshot(buildChannelMetadataRows(activeBaseRows, nextImportedState), {
+          datasetVersion,
+          inclusionView,
+          videoCorpusFingerprint,
+          exclusionMembershipFingerprint,
+          cacheKey: currentChannelMetadataCacheKey,
+        }));
         setChannelFilterModel({});
         setSourceRegistry((current) => addEnrichmentSource(current, {
           fileName,
@@ -1878,100 +1824,9 @@ export default function App() {
     };
   }, [selectedVideoIdsForActions]);
 
-  const handleUpdateChannelNotes = useCallback((channelKey: string, notes: string) => {
-    const normalizedKey = String(channelKey || '').trim();
-    if (!normalizedKey) return;
-    setChannelNotesById((previous) => {
-      const normalized = notes;
-      if (!normalized.trim()) {
-        if (!(normalizedKey in previous)) return previous;
-        const next = { ...previous };
-        delete next[normalizedKey];
-        return next;
-      }
-      if (previous[normalizedKey] === normalized) return previous;
-      return { ...previous, [normalizedKey]: normalized };
-    });
-  }, []);
-
-  const handleReplaceChannelTags = useCallback((channelKey: string, tags: string[]) => {
-    const normalizedKey = String(channelKey || '').trim();
-    if (!normalizedKey) return;
-    const normalizedTags = Array.from(new Set((tags || []).map((tag) => String(tag || '').trim()).filter(Boolean)));
-    setChannelTagsById((previous) => {
-      if (!normalizedTags.length) {
-        if (!(normalizedKey in previous)) return previous;
-        const next = { ...previous };
-        delete next[normalizedKey];
-        return next;
-      }
-      const current = previous[normalizedKey] || [];
-      if (current.length === normalizedTags.length && current.every((tag, index) => tag === normalizedTags[index])) {
-        return previous;
-      }
-      return { ...previous, [normalizedKey]: normalizedTags };
-    });
-  }, []);
-
-  const handleBatchAddChannelTag = useCallback((tag: string) => {
-    const trimmed = String(tag || '').trim();
-    if (!trimmed || !selectedChannelKeys.length) return;
-    setChannelTagsById((previous) => {
-      const next = { ...previous };
-      selectedChannelKeys.forEach((channelKey) => {
-        const current = next[channelKey] || [];
-        if (!current.includes(trimmed)) next[channelKey] = [...current, trimmed];
-      });
-      return next;
-    });
-  }, [selectedChannelKeys]);
-
-  const handleBatchRemoveChannelTag = useCallback((tag: string) => {
-    const trimmed = String(tag || '').trim();
-    if (!trimmed || !selectedChannelKeys.length) return;
-    setChannelTagsById((previous) => {
-      const next = { ...previous };
-      selectedChannelKeys.forEach((channelKey) => {
-        const current = next[channelKey] || [];
-        const filtered = current.filter((item) => item !== trimmed);
-        if (filtered.length) next[channelKey] = filtered;
-        else delete next[channelKey];
-      });
-      return next;
-    });
-  }, [selectedChannelKeys]);
-
-  const handleBatchApplyChannelNotes = useCallback((notes: string) => {
-    const noteBlock = String(notes || '').trim();
-    if (!noteBlock) {
-      return {
-        status: 'empty' as const,
-        appliedCount: 0,
-        message: 'Enter a note before applying.',
-      };
-    }
-    if (!selectedChannelKeys.length) {
-      return {
-        status: 'empty' as const,
-        appliedCount: 0,
-        message: 'No selected channels to update.',
-      };
-    }
-    setChannelNotesById((previous) => {
-      const next = { ...previous };
-      selectedChannelKeys.forEach((channelKey) => {
-        const merged = appendNotesBlock(next[channelKey], noteBlock);
-        if (merged.trim()) next[channelKey] = merged;
-        else delete next[channelKey];
-      });
-      return next;
-    });
-    return {
-      status: 'success' as const,
-      appliedCount: selectedChannelKeys.length,
-      message: `Applied notes to ${selectedChannelKeys.length.toLocaleString()} channel(s).`,
-    };
-  }, [selectedChannelKeys]);
+  const handleBatchAddChannelTag = useCallback((tag: string) => addTagToChannelKeys(selectedChannelKeys, tag), [addTagToChannelKeys, selectedChannelKeys]);
+  const handleBatchRemoveChannelTag = useCallback((tag: string) => removeTagFromChannelKeys(selectedChannelKeys, tag), [removeTagFromChannelKeys, selectedChannelKeys]);
+  const handleBatchApplyChannelNotes = useCallback((notes: string) => appendNotesToChannelKeys(selectedChannelKeys, notes), [appendNotesToChannelKeys, selectedChannelKeys]);
 
   const handleBatchExcludeChannels = useCallback(() => {
     const nextVideoIds = Array.from(new Set(selectedChannelVideoRowsForActions.map((row) => resolveVideoId(row)).filter(Boolean) as string[]));
@@ -2069,15 +1924,13 @@ export default function App() {
     try {
       await waitForNextPaint();
       const nextRows = buildChannelMetadataRows(activeBaseRows, importedChannelMetadata);
-      setChannelMetadataSnapshot({
-        rows: nextRows,
-        calculatedAt: new Date().toISOString(),
-        datasetVersionAtCalculation: datasetVersion,
-        inclusionViewAtCalculation: inclusionView,
-        videoCorpusFingerprintAtCalculation: videoCorpusFingerprint,
-        exclusionMembershipFingerprintAtCalculation: exclusionMembershipFingerprint,
-        cacheKeyAtCalculation: currentChannelMetadataCacheKey,
-      });
+      setChannelMetadataSnapshot(buildChannelMetadataSnapshot(nextRows, {
+        datasetVersion,
+        inclusionView,
+        videoCorpusFingerprint,
+        exclusionMembershipFingerprint,
+        cacheKey: currentChannelMetadataCacheKey,
+      }));
 
       updateLongTaskProgress({
         title: metadataActionLabel,
