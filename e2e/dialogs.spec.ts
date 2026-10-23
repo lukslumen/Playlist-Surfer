@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'playlist61.csv');
 

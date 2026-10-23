@@ -1,5 +1,6 @@
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './test';
 
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'playlist61.csv');
 const row = (page: Page, index: number) => page.locator(`.ag-center-cols-container .ag-row[row-index="${index}"] .ag-cell`).first();

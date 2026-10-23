@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './test';
 
 test('keyboard help opens with Alt+Shift+K, lists the shortcuts and closes with Esc', async ({ page }) => {
   await page.goto('/');

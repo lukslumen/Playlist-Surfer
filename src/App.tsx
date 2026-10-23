@@ -14,7 +14,7 @@ import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColum
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
 import { buildDatasetDashboardStats } from './lib/datasetDashboard';
 import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
-import { aggregateChannelLinkingFromVideoRows, applyLinkingDomainOverride, buildChannelLinkingSnapshot, buildLinkingStageAAsync, buildLinkingStageB, buildLinkingStageBAsync, profileLinkingColumnCandidates, revertLinkingDomainOverride, type LinkingStageAResult } from './lib/linkingDashboard';
+import { aggregateChannelLinkingFromVideoRows } from './lib/linkingDashboard';
 import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
 import { THUMBNAIL_LIMIT, buildSavedViewThumbnailScopeKey, buildThumbnailSortSignature, inferFileExtensionFromMimeType, isPersistentThumbnailScopeKey, isSavedViewThumbnailScopeKey, resolveThumbnailCacheLabel, sanitizeThumbnailPathSegment, selectThumbnailCandidates } from './lib/dashboardThumbnails';
 import { cn } from './lib/utils';
@@ -44,6 +44,7 @@ import { useNavigationHistory } from './state/useNavigationHistory';
 import { useThumbnailCaches } from './state/useThumbnailCaches';
 import { useChannelAnnotations } from './state/useChannelAnnotations';
 import { useChannelRows } from './state/useChannelRows';
+import { useLinkingActions } from './state/useLinkingActions';
 import { buildChannelMetadataSnapshot, isChannelMetadataSnapshotFresh } from './lib/channelMetadata';
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
@@ -3629,480 +3630,39 @@ ${heading}
     [sourceVisibility],
   );
   const currentLinkingVideoIds = useMemo(() => new Set(collectVideoIds(currentLinkingRows)), [currentLinkingRows]);
-  useEffect(() => {
-    setLinkingState((current) => {
-      if (!current.snapshot) return current;
-      if (current.snapshot.datasetFingerprint === currentLinkingDatasetFingerprint && !current.stale) return current;
-      if (current.snapshot.datasetFingerprint === currentLinkingDatasetFingerprint && current.stale) return current;
-      if (
-        current.stale
-        && current.snapshot.datasetFingerprint !== currentLinkingDatasetFingerprint
-        && current.staleReason === 'Dataset changed. Refresh linking summary.'
-      ) {
-        return current;
-      }
-      if (current.stale && current.snapshot.datasetFingerprint !== currentLinkingDatasetFingerprint) {
-        return {
-          ...current,
-          staleReason: 'Dataset changed. Refresh linking summary.',
-        };
-      }
-      return {
-        ...current,
-        stale: true,
-        staleReason: 'Dataset changed. Refresh linking summary.',
-      };
-    });
-  }, [currentLinkingDatasetFingerprint]);
-  useEffect(() => {
-    setChannelLinkingState((current) => {
-      if (!current.snapshot) return current;
-      const channelDatasetFingerprint = buildDatasetFingerprint({
-        datasetVersion,
-        inclusionView,
-        rowCount: includedBaseRows.length,
-        sourceVisibility,
-      });
-      if (current.snapshot.datasetFingerprint === channelDatasetFingerprint && !current.stale) return current;
-      if (current.snapshot.datasetFingerprint === channelDatasetFingerprint && current.stale) return current;
-      if (current.stale && current.staleReason === 'Dataset changed. Refresh channel metadata to rebuild link aggregates.') {
-        return current;
-      }
-      return {
-        ...current,
-        stale: true,
-        staleReason: 'Dataset changed. Refresh channel metadata to rebuild link aggregates.',
-      };
-    });
-  }, [datasetVersion, includedBaseRows.length, inclusionView, sourceVisibility]);
-  const handleSelectLinkingSource = useCallback((sourceColumn: string) => {
-    if (!sourceColumn) return;
-    setLinkingState((current) => ({
-      ...current,
-      selectedSourceColumn: sourceColumn,
-      selectedSourceUpdatedAt: new Date().toISOString(),
-      sourceCandidateProfiles: profileLinkingColumnCandidates(currentLinkingRows),
-    }));
-    appendResearchHistory({
-      type: 'linking_source_selected',
-      summary: `Selected linking source column "${sourceColumn}".`,
-      meta: { sourceColumn },
-    });
-  }, [appendResearchHistory, currentLinkingRows]);
-  const handleGenerateLinkingSummary = useCallback(async (sourceColumn: string) => {
-    const selectedColumn = String(sourceColumn || linkingState.selectedSourceColumn || '').trim();
-    if (!selectedColumn) return;
-
-    updateLongTaskProgress({
-      title: 'Generating linking summary',
-      detail: `Preparing ${currentLinkingRows.length.toLocaleString()} row(s) from ${selectedColumn}`,
-      completed: 1,
-      total: 100,
-    });
-
-    const cacheKey = `${currentLinkingDatasetFingerprint}::${selectedColumn}`;
-    try {
-      await waitForNextPaint();
-      const cachedStageA = linkingState.parseCacheByKey[cacheKey] as LinkingStageAResult | undefined;
-      const stageA = cachedStageA && cachedStageA.sourceColumn === selectedColumn
-        ? cachedStageA
-        : await buildLinkingStageAAsync(currentLinkingRows, { linkColumn: selectedColumn }, (progress) => {
-            updateLongTaskProgress({
-              title: 'Generating linking summary',
-              detail: progress.detail,
-              completed: Math.min(45, Math.max(1, Math.round((progress.completed / Math.max(progress.total, 1)) * 45))),
-              total: 100,
-            });
-          });
-      const nextParseCache = cachedStageA
-        ? linkingState.parseCacheByKey
-        : { ...linkingState.parseCacheByKey, [cacheKey]: stageA };
-
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: 'Classifying domains and building bucket summaries',
-        completed: cachedStageA ? 45 : 46,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      const stageB = await buildLinkingStageBAsync(stageA, {
-        sourceColumn: selectedColumn,
-        overridesByDomain: linkingState.overridesByDomain,
-      }, (progress) => {
-        updateLongTaskProgress({
-          title: 'Generating linking summary',
-          detail: progress.detail,
-          completed: Math.min(80, 46 + Math.round((progress.completed / Math.max(progress.total, 1)) * 34)),
-          total: 100,
-        });
-      });
-
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: 'Writing linking metadata back into the explorer',
-        completed: 86,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      setGeneratedMetadata((current) => {
-        const nextByVideoId: GeneratedMetadataState['byVideoId'] = { ...current.byVideoId };
-        currentLinkingVideoIds.forEach((videoId) => {
-          const previous = nextByVideoId[videoId];
-          const linking = stageB.generatedMetadataByVideoId[videoId];
-          nextByVideoId[videoId] = {
-            content_intent: computedContentIntentByVideoId[videoId] || previous?.content_intent || 'other',
-            linking,
-          };
-        });
-        return { byVideoId: nextByVideoId };
-      });
-      setColumnLineage((current) => ensureGeneratedColumnLineage(current));
-      setLinkingState((current) => ({
-        ...current,
-        selectedSourceColumn: selectedColumn,
-        selectedSourceUpdatedAt: new Date().toISOString(),
-        stale: false,
-        staleReason: undefined,
-        datasetFingerprint: currentLinkingDatasetFingerprint,
-        sourceVisibilityFingerprint: currentSourceVisibilityFingerprint,
-        parseCacheByKey: nextParseCache,
-        sourceCandidateProfiles: profileLinkingColumnCandidates(currentLinkingRows),
-        snapshot: {
-          sourceColumn: selectedColumn,
-          generatedAt: new Date().toISOString(),
-          datasetFingerprint: currentLinkingDatasetFingerprint,
-          stageAFingerprint: stageA.stageAFingerprint,
-          overrideVersion: current.overrideVersion,
-          hasLinkedRows: stageB.model.hasLinkedRows,
-          model: stageB.model,
-          mentionAudit: stageB.mentionAudit,
-          domainAudit: stageB.domainAudit,
-          rowAudit: stageB.rowAudit,
-        },
-      }));
-
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: channelMetadataSnapshot?.rows?.length
-          ? 'Refreshing channel-level link aggregates from the new linking metadata'
-          : 'Finishing linking summary',
-        completed: 92,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      if (channelMetadataSnapshot?.rows?.length) {
-        setChannelLinkingState({
-          stale: false,
-          staleReason: undefined,
-          snapshot: buildChannelLinkingSnapshot({
-            rows: includedBaseRows,
-            generatedMetadataByVideoId: stageB.generatedMetadataByVideoId,
-          }),
-        });
-      } else {
-        setChannelLinkingState((current) => ({
-          ...current,
-          stale: true,
-          staleReason: 'Linking summary changed. Refresh channel metadata to rebuild channel-level link aggregates.',
-        }));
-      }
-      appendResearchHistory({
-        type: linkingState.snapshot ? 'linking_summary_refreshed' : 'linking_summary_generated',
-        summary: `${linkingState.snapshot ? 'Refreshed' : 'Generated'} linking summary from "${selectedColumn}" (${currentLinkingRows.length.toLocaleString()} rows).`,
-        details: `Visible sources: ${linkingSourceItems.filter((item) => item.visible).map((item) => item.label).join(', ') || 'none'}.`,
-        meta: { sourceColumn: selectedColumn, rowCount: currentLinkingRows.length },
-      });
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: 'Done',
-        completed: 100,
-        total: 100,
-      });
-      await waitForNextPaint();
-    } finally {
-      updateLongTaskProgress(null);
-    }
-  }, [
+  const channelLinkingDatasetFingerprint = useMemo(() => buildDatasetFingerprint({
+    datasetVersion,
+    inclusionView,
+    rowCount: includedBaseRows.length,
+    sourceVisibility,
+  }), [datasetVersion, includedBaseRows.length, inclusionView, sourceVisibility]);
+  const visibleLinkingSourceLabels = useMemo(
+    () => linkingSourceItems.filter((item) => item.visible).map((item) => item.label),
+    [linkingSourceItems],
+  );
+  const {
+    handleSelectLinkingSource,
+    handleGenerateLinkingSummary,
+    handleApplyLinkingOverride,
+    handleApplyLinkingOverrideBatch,
+  } = useLinkingActions({
+    linkingState,
+    setLinkingState,
+    setChannelLinkingState,
+    setGeneratedMetadata,
+    setColumnLineage,
+    linkingRows: currentLinkingRows,
+    linkingVideoIds: currentLinkingVideoIds,
+    linkingDatasetFingerprint: currentLinkingDatasetFingerprint,
+    sourceVisibilityFingerprint: currentSourceVisibilityFingerprint,
+    channelVideoRows: includedBaseRows,
+    channelDatasetFingerprint: channelLinkingDatasetFingerprint,
+    hasChannelMetadata: Boolean(channelMetadataSnapshot?.rows?.length),
+    contentIntentByVideoId: computedContentIntentByVideoId,
+    visibleSourceLabels: visibleLinkingSourceLabels,
     appendResearchHistory,
-    channelMetadataSnapshot?.rows,
-    computedContentIntentByVideoId,
-    currentLinkingDatasetFingerprint,
-    currentLinkingRows,
-    currentLinkingVideoIds,
-    currentSourceVisibilityFingerprint,
-    includedBaseRows,
-    linkingSourceItems,
-    linkingState.overridesByDomain,
-    linkingState.parseCacheByKey,
-    linkingState.selectedSourceColumn,
-    linkingState.snapshot,
     updateLongTaskProgress,
-  ]);
-  const handleApplyLinkingOverride = useCallback((args: { domain: string; baseBucket?: string; note?: string; revert?: boolean }) => {
-    const domain = String(args.domain || '').trim().toLowerCase();
-    if (!domain) return;
-
-    const mutation = args.revert
-      ? revertLinkingDomainOverride({ overridesByDomain: linkingState.overridesByDomain, domain })
-      : applyLinkingDomainOverride({
-          overridesByDomain: linkingState.overridesByDomain,
-          domain,
-          baseBucket: args.baseBucket as any,
-          note: args.note,
-        });
-    const nextOverrides = mutation.overridesByDomain;
-    const nextOverrideVersion = linkingState.overrideVersion + 1;
-
-    const currentSnapshot = linkingState.snapshot;
-    if (!currentSnapshot) {
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: true,
-        staleReason: 'Override saved. Generate linking summary to apply changes.',
-      }));
-    } else {
-      const cacheKey = `${currentSnapshot.datasetFingerprint}::${currentSnapshot.sourceColumn}`;
-      const stageA = linkingState.parseCacheByKey[cacheKey] as LinkingStageAResult | undefined;
-      if (!stageA) {
-        setLinkingState((current) => ({
-          ...current,
-          overridesByDomain: nextOverrides,
-          overrideVersion: nextOverrideVersion,
-          stale: true,
-          staleReason: 'Override saved, but parse cache is missing. Refresh linking summary.',
-        }));
-      } else {
-        const stageB = buildLinkingStageB(stageA, {
-          sourceColumn: currentSnapshot.sourceColumn,
-          overridesByDomain: nextOverrides,
-        });
-        setGeneratedMetadata((previous) => {
-          const nextByVideoId: GeneratedMetadataState['byVideoId'] = { ...previous.byVideoId };
-          currentLinkingVideoIds.forEach((videoId) => {
-            const previousEntry = nextByVideoId[videoId];
-            nextByVideoId[videoId] = {
-              content_intent: computedContentIntentByVideoId[videoId] || previousEntry?.content_intent || 'other',
-              linking: stageB.generatedMetadataByVideoId[videoId],
-            };
-          });
-          return { byVideoId: nextByVideoId };
-        });
-        if (channelMetadataSnapshot?.rows?.length) {
-          setChannelLinkingState({
-            stale: false,
-            staleReason: undefined,
-            snapshot: buildChannelLinkingSnapshot({
-              rows: includedBaseRows,
-              generatedMetadataByVideoId: stageB.generatedMetadataByVideoId,
-            }),
-          });
-        } else {
-          setChannelLinkingState((previous) => ({
-            ...previous,
-            stale: true,
-            staleReason: 'Linking bucket overrides changed. Refresh channel metadata to rebuild channel-level link aggregates.',
-          }));
-        }
-        setLinkingState((current) => ({
-          ...current,
-          overridesByDomain: nextOverrides,
-          overrideVersion: nextOverrideVersion,
-          stale: false,
-          staleReason: undefined,
-          snapshot: {
-            ...currentSnapshot,
-            generatedAt: new Date().toISOString(),
-            overrideVersion: nextOverrideVersion,
-            hasLinkedRows: stageB.model.hasLinkedRows,
-            model: stageB.model,
-            mentionAudit: stageB.mentionAudit,
-            domainAudit: stageB.domainAudit,
-            rowAudit: stageB.rowAudit,
-          },
-        }));
-      }
-    }
-
-    const oldAssignment = currentSnapshot?.domainAudit?.find((entry: any) => entry.domain === domain);
-    const stageAForEvent = currentSnapshot
-      ? (linkingState.parseCacheByKey[`${currentSnapshot.datasetFingerprint}::${currentSnapshot.sourceColumn}`] as LinkingStageAResult | undefined)
-      : undefined;
-    const nextSnapshotDomain = currentSnapshot && stageAForEvent
-      ? buildLinkingStageB(stageAForEvent, {
-          sourceColumn: currentSnapshot.sourceColumn,
-          overridesByDomain: nextOverrides,
-        }).domainAudit.find((entry) => entry.domain === domain)
-      : undefined;
-    const previouslyUnmapped = Boolean(oldAssignment?.unmapped);
-    const eventType = args.revert
-      ? 'linking_bucket_override_reverted'
-      : mutation.previous
-        ? 'linking_bucket_override_changed'
-        : 'linking_bucket_override_created';
-    appendResearchHistory({
-      type: eventType as any,
-      summary: args.revert
-        ? `Reverted linking override for ${domain}.`
-        : mutation.previous
-          ? `Changed linking bucket override for ${domain}.`
-          : `Assigned linking buckets for ${domain}.`,
-      details: `Ecology bucket: ${oldAssignment?.currentBaseBucket || oldAssignment?.baseBucket || 'auto'} -> ${nextSnapshotDomain?.currentBaseBucket || nextSnapshotDomain?.baseBucket || 'auto'}.`,
-      meta: {
-        domain,
-        oldBaseBucket: oldAssignment?.currentBaseBucket || oldAssignment?.baseBucket || null,
-        newBaseBucket: nextSnapshotDomain?.currentBaseBucket || nextSnapshotDomain?.baseBucket || null,
-        previouslyUnmapped,
-      },
-    });
-  }, [appendResearchHistory, channelMetadataSnapshot?.rows, computedContentIntentByVideoId, currentLinkingVideoIds, includedBaseRows, linkingState]);
-  const handleApplyLinkingOverrideBatch = useCallback(async (assignments: Array<{ domain: string; baseBucket: string }>) => {
-    const cleaned = assignments
-      .map((entry) => ({
-        domain: String(entry.domain || '').trim().toLowerCase(),
-        baseBucket: String(entry.baseBucket || '').trim() || 'other',
-      }))
-      .filter((entry) => entry.domain);
-    if (!cleaned.length) return;
-
-    let nextOverrides = linkingState.overridesByDomain;
-    cleaned.forEach((entry) => {
-      nextOverrides = applyLinkingDomainOverride({
-        overridesByDomain: nextOverrides,
-        domain: entry.domain,
-        baseBucket: entry.baseBucket as any,
-      }).overridesByDomain;
-    });
-    const nextOverrideVersion = linkingState.overrideVersion + cleaned.length;
-
-    const currentSnapshot = linkingState.snapshot;
-    if (!currentSnapshot) {
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: true,
-        staleReason: 'Override saved. Generate linking summary to apply changes.',
-      }));
-      appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
-        summary: `Updated ecology buckets for ${cleaned.length} domains.`,
-        meta: { domainCount: cleaned.length },
-      });
-      return;
-    }
-
-    const cacheKey = `${currentSnapshot.datasetFingerprint}::${currentSnapshot.sourceColumn}`;
-    const stageA = linkingState.parseCacheByKey[cacheKey] as LinkingStageAResult | undefined;
-    if (!stageA) {
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: true,
-        staleReason: 'Override saved, but parse cache is missing. Refresh linking summary.',
-      }));
-      appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
-        summary: `Updated ecology buckets for ${cleaned.length} domains.`,
-        meta: { domainCount: cleaned.length },
-      });
-      return;
-    }
-
-    updateLongTaskProgress({
-      title: 'Saving ecology buckets',
-      detail: `Applying ${cleaned.length.toLocaleString()} domain reassignment(s)`,
-      completed: 1,
-      total: 100,
-    });
-    try {
-      await waitForNextPaint();
-      const stageB = await buildLinkingStageBAsync(stageA, {
-        sourceColumn: currentSnapshot.sourceColumn,
-        overridesByDomain: nextOverrides,
-      }, (progress) => {
-        updateLongTaskProgress({
-          title: 'Saving ecology buckets',
-          detail: progress.detail,
-          completed: Math.min(88, 8 + Math.round((progress.completed / Math.max(progress.total, 1)) * 80)),
-          total: 100,
-        });
-      });
-
-      updateLongTaskProgress({
-        title: 'Saving ecology buckets',
-        detail: 'Writing updated ecology labels back into the explorer',
-        completed: 92,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      setGeneratedMetadata((previous) => {
-        const nextByVideoId: GeneratedMetadataState['byVideoId'] = { ...previous.byVideoId };
-        currentLinkingVideoIds.forEach((videoId) => {
-          const previousEntry = nextByVideoId[videoId];
-          nextByVideoId[videoId] = {
-            content_intent: computedContentIntentByVideoId[videoId] || previousEntry?.content_intent || 'other',
-            linking: stageB.generatedMetadataByVideoId[videoId],
-          };
-        });
-        return { byVideoId: nextByVideoId };
-      });
-      if (channelMetadataSnapshot?.rows?.length) {
-        setChannelLinkingState({
-          stale: false,
-          staleReason: undefined,
-          snapshot: buildChannelLinkingSnapshot({
-            rows: includedBaseRows,
-            generatedMetadataByVideoId: stageB.generatedMetadataByVideoId,
-          }),
-        });
-      } else {
-        setChannelLinkingState((previous) => ({
-          ...previous,
-          stale: true,
-          staleReason: 'Linking bucket overrides changed. Refresh channel metadata to rebuild channel-level link aggregates.',
-        }));
-      }
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: false,
-        staleReason: undefined,
-        snapshot: {
-          ...currentSnapshot,
-          generatedAt: new Date().toISOString(),
-          overrideVersion: nextOverrideVersion,
-          hasLinkedRows: stageB.model.hasLinkedRows,
-          model: stageB.model,
-          mentionAudit: stageB.mentionAudit,
-          domainAudit: stageB.domainAudit,
-          rowAudit: stageB.rowAudit,
-        },
-      }));
-      appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
-        summary: `Updated ecology buckets for ${cleaned.length} domains.`,
-        details: `Selected source: ${currentSnapshot.sourceColumn}.`,
-        meta: { domainCount: cleaned.length, sourceColumn: currentSnapshot.sourceColumn },
-      });
-      updateLongTaskProgress({
-        title: 'Saving ecology buckets',
-        detail: 'Done',
-        completed: 100,
-        total: 100,
-      });
-      await waitForNextPaint();
-    } finally {
-      updateLongTaskProgress(null);
-    }
-  }, [appendResearchHistory, channelMetadataSnapshot?.rows, computedContentIntentByVideoId, currentLinkingVideoIds, includedBaseRows, linkingState, updateLongTaskProgress]);
+  });
   const currentDashboardSnapshot = dashboardSnapshots[dashboardScope];
   const isDashboardSnapshotStale = useMemo(() => {
     if (!currentDashboardSnapshot) return false;
