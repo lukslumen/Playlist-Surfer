@@ -453,7 +453,6 @@ function InputRow({
         onPointerDownCapture={(event) => event.stopPropagation()}
         onClickCapture={(event) => event.stopPropagation()}
         placeholder={placeholder}
-        autoFocus={Boolean(inputRef)}
         className="w-full bg-transparent text-[13px] leading-5 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
       />
     </form>

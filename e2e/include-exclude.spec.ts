@@ -85,3 +85,11 @@ test('undo only reverses videos the action actually changed', async ({ page }) =
   await page.keyboard.press('ControlOrMeta+z');
   await expectExcludedCount(page, 1);
 });
+
+test('Delete works on a multi-row selection (focus stays on the grid)', async ({ page }) => {
+  await row(page, 0).click();
+  await row(page, 2).click({ modifiers: ['Shift'] });
+  await expect(page.getByText('3 videos selected')).toBeVisible();
+  await page.keyboard.press('Delete');
+  await expectExcludedCount(page, 3);
+});
