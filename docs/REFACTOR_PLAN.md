@@ -73,13 +73,18 @@ Done:
 
 **Why hooks, not Zustand (yet):** the include/exclude update runs in a React transition so the grid stays responsive, and external stores can't be updated inside a transition. Hooks keep React's semantics while grouping the state by domain. Switching a slice to a store later is a small step if prop drilling becomes the main pain.
 
-Next in phase 3 (App's remaining state, by size of the win):
-- **Import flow:** pending file, schema, rows, errors, submit and progress. This is the largest remaining handler set.
-- **Persistence:** build and save the persisted state, and hydrate it. This includes the 40-field `nextPersistedState`.
-- **Thumbnails, navigation history, channel metadata and linking state.**
-- **App's JSX:** split it into layout components (`Workspace`, `RightPanel`, `DialogHost`).
+Continued (same branch):
+5. **Import flow.** The import decisions are pure functions in `lib/importPlan.ts`: `planReplaceImport`, `planMergeImport`, and `buildMergedSourceState` for row/column lineage. `state/useImportFlow.ts` owns the import dialog, the pending file, errors, progress and cleanup. `handleImportConfirm` went from about 380 to about 150 lines. A new e2e test merges a second CSV.
+6. **Persistence.** `state/usePersistence.ts` saves one `persistedAppState` object whenever any of its fields changes. That replaces a 45-entry dependency list. It also stopped re-serializing all rows on every tab hide (about 600 MB at 100k rows) and now re-saves rows after a special-field mapping change, which used to be missed.
+7. **Layout.** `components/layout/` holds `StatusFooter`, `RightPanelShell` and `ChannelMetadataEmptyState`.
+
+App.tsx is now **5,377 lines** (from 7,256). Speed is unchanged (exclude 43 / 64 ms at 10k / 100k).
+
+Still open:
+- **App's remaining state:** thumbnails, navigation history, channel metadata, linking, dashboards, and hydrate/restore. These are mostly large handlers that read many state values. The import-plan pattern (pure plan plus a thin hook) fits them well.
 - **Large components:** `DetailPanel` (1,703 lines), `TemplateDashboard` (1,274) and `ChannelSummaryPanel` (1,172) into container and view parts.
-- **Lint warnings:** work through the remaining 48, mostly `exhaustive-deps` in App.
+- **Lint warnings:** 47 left, mostly `exhaustive-deps` in App.
+- **Startup:** restoring the last project waits for DuckDB-WASM to initialise (several seconds), although reading rows from IndexedDB doesn't need it.
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
