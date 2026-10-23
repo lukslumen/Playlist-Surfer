@@ -9,10 +9,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test:linking-pipeline": "node --import tsx src/lib/__tests__/linkingPipeline.test.ts",
-    "test:manifest-v10": "node --import tsx src/lib/__tests__/manifestV10.test.ts",
-    "test:project-autosave": "node --import tsx src/lib/__tests__/projectAutosave.test.ts",
-    "test:refactor": "npm run test:linking-pipeline && npm run test:manifest-v10 && npm run test:project-autosave"
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.33.1-dev45.0",
@@ -35,6 +33,7 @@
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.0"
+    "vite": "^6.2.0",
+    "vitest": "^3.2.7"
   }
 }
