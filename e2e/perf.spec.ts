@@ -3,7 +3,7 @@ import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 
 // Opt-in: generate fixtures with `node scripts/generate-perf-fixture.mjs <rows>`, then
-// PERF=1 PERF_ROWS=10000,100000 npx playwright test e2e/perf.spec.ts
+// PERF=1 PERF_ROWS=10000,100000 npx playwright test --config playwright.perf.config.ts e2e/perf.spec.ts
 const SIZES = String(process.env.PERF_ROWS || '10000,100000').split(',').map(Number);
 
 test.skip(!process.env.PERF, 'Set PERF=1 to run performance measurements.');
@@ -14,6 +14,29 @@ async function timed(label: string, results: Record<string, number>, action: () 
   await action();
   results[label] = Date.now() - start;
   // Logged per step so a crash part-way through still leaves the earlier numbers.
+  console.log(`PERF step ${label}: ${results[label]} ms`);
+}
+
+/**
+ * Presses `key` and measures, inside the page, from the keydown to the first frame painted after the
+ * footer shows `expectedText`. Playwright's own polling is too coarse for sub-200 ms interactions.
+ */
+async function timedKey(page: Page, label: string, results: Record<string, number>, key: string, expectedText: string) {
+  await page.evaluate((expected) => {
+    const state = { start: 0, end: 0 };
+    (window as any).__perf = state;
+    window.addEventListener('keydown', () => { state.start = performance.now(); }, { capture: true, once: true });
+    const target = document.querySelector('[role=contentinfo], footer') || document.body;
+    const observer = new MutationObserver(() => {
+      if (!state.start || state.end || !(target.textContent || '').includes(expected)) return;
+      observer.disconnect();
+      requestAnimationFrame(() => { state.end = performance.now(); });
+    });
+    observer.observe(target, { subtree: true, childList: true, characterData: true });
+  }, expectedText);
+  await page.keyboard.press(key);
+  await page.waitForFunction(() => (window as any).__perf.end > 0, undefined, { timeout: 5 * 60_000, polling: 50 });
+  results[label] = Math.round(await page.evaluate(() => (window as any).__perf.end - (window as any).__perf.start));
   console.log(`PERF step ${label}: ${results[label]} ms`);
 }
 
@@ -47,26 +70,13 @@ for (const size of SIZES) {
     const firstCell = page.locator('.ag-center-cols-container .ag-row[row-index="0"] .ag-cell').first();
     await firstCell.click();
     await expect(footer(page)).toContainText('1 selected');
-    await timed('exclude 1 row', results, async () => {
-      await page.keyboard.press('Delete');
-      await expect(footer(page)).toContainText(rowsText(size - 1), { timeout: 5 * 60_000 });
-    });
-    await timed('undo exclude', results, async () => {
-      await page.keyboard.press('ControlOrMeta+z');
-      await expect(footer(page)).toContainText(rowsText(size), { timeout: 5 * 60_000 });
-    });
+    await timedKey(page, 'exclude 1 row', results, 'Delete', rowsText(size - 1));
+    await timedKey(page, 'undo exclude', results, 'ControlOrMeta+z', rowsText(size));
 
     await firstCell.click();
     await expect(footer(page)).toContainText('1 selected');
-    await timed('select all', results, async () => {
-      await page.keyboard.press('ControlOrMeta+a');
-      await expect(footer(page)).toContainText(`${size.toLocaleString('en-US')} selected`, { timeout: 5 * 60_000 });
-    });
-    await timed('exclude all rows', results, async () => {
-      await page.keyboard.press('Delete');
-      await expect(page.getByRole('button', { name: new RegExp(`^Show excluded videos\\. ${size.toLocaleString('en-US')} videos`) }))
-        .toBeVisible({ timeout: 5 * 60_000 });
-    });
+    await timedKey(page, 'select all', results, 'ControlOrMeta+a', `${size.toLocaleString('en-US')} selected`);
+    await timedKey(page, 'exclude all rows', results, 'Delete', rowsText(0));
 
     const heapMb = await page.evaluate(() => {
       const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;

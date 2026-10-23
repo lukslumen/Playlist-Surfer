@@ -4,6 +4,7 @@ const PORT = 3100;
 
 export default defineConfig({
   testDir: 'e2e',
+  testIgnore: ['**/profile/**'],
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,
