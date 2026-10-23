@@ -429,13 +429,15 @@ export function sanitizeFilterModel(rawModel: Record<string, any> | null | undef
   return Object.fromEntries(nextEntries) as ExplorerFilterModel;
 }
 
-export function buildUnifiedFilterState(args: {
+interface FilterStateArgs {
   rows: any[];
   schema: ColumnSchema[];
   filterModel: Record<string, any> | null | undefined;
   listLikeColumns: Set<string>;
   booleanMapColumns?: Record<string, BooleanMapSchema>;
-}) {
+}
+
+function compileFilterPredicates(args: FilterStateArgs) {
   const sanitizedFilterModel = sanitizeFilterModel(args.filterModel);
   const schemaByColumn = new Map(args.schema.map((column) => [column.column_name, column]));
   const booleanMapColumns = args.booleanMapColumns || {};
@@ -447,28 +449,39 @@ export function buildUnifiedFilterState(args: {
       return predicate ? ([columnName, predicate] as const) : null;
     })
     .filter((entry): entry is readonly [string, CompiledPredicate] => !!entry);
+  return { sanitizedFilterModel, predicateEntries };
+}
 
+export function buildUnifiedFilterState(args: FilterStateArgs) {
+  const { sanitizedFilterModel, predicateEntries } = compileFilterPredicates(args);
   const filteredRows = predicateEntries.length === 0
     ? args.rows
     : args.rows.filter((row) => predicateEntries.every(([, predicate]) => predicate(row)));
-
-  const tagValueIndexByColumn: Record<string, string[]> = {};
-  const tagColumns = args.schema.filter((column) => !booleanMapColumns[column.column_name] && isTagLikeColumn(column.column_name, column.column_type, args.listLikeColumns));
-
-  tagColumns.forEach((column) => {
-    const otherPredicates = predicateEntries.filter(([columnName]) => columnName !== column.column_name);
-    const values = new Set<string>();
-    const candidateRows = otherPredicates.length === predicateEntries.length ? filteredRows : args.rows.filter((row) => otherPredicates.every(([, predicate]) => predicate(row)));
-    candidateRows.forEach((row) => {
-      parseListString(row?.[column.column_name]).forEach((value) => values.add(value));
-    });
-    tagValueIndexByColumn[column.column_name] = Array.from(values).sort((a, b) => a.localeCompare(b));
-  });
 
   return {
     filterModel: sanitizedFilterModel,
     filteredRows,
     filteredColumns: Object.keys(sanitizedFilterModel),
-    tagValueIndexByColumn,
   };
+}
+
+/**
+ * Distinct values of one tag-like column across the rows that pass every *other* active filter, so
+ * the column's own filter can still offer values it currently hides. Built on demand when a tag
+ * filter opens: doing it for every column on every change dominated include/exclude at 100k rows.
+ */
+export function buildTagValuesForColumn(args: FilterStateArgs & { column: string }): string[] {
+  const booleanMapColumns = args.booleanMapColumns || {};
+  const column = args.schema.find((entry) => entry.column_name === args.column);
+  if (!column || booleanMapColumns[column.column_name]) return [];
+  if (!isTagLikeColumn(column.column_name, column.column_type, args.listLikeColumns)) return [];
+
+  const { predicateEntries } = compileFilterPredicates(args);
+  const otherPredicates = predicateEntries.filter(([columnName]) => columnName !== column.column_name);
+  const values = new Set<string>();
+  args.rows.forEach((row) => {
+    if (otherPredicates.length && !otherPredicates.every(([, predicate]) => predicate(row))) return;
+    parseListString(row?.[column.column_name]).forEach((value) => values.add(value));
+  });
+  return Array.from(values).sort((a, b) => a.localeCompare(b));
 }

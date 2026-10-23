@@ -103,7 +103,7 @@ import {
 } from './lib/data';
 import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
 import { parseListString } from './components/CustomFilters';
-import { BooleanMapSchema, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel, isTagLikeColumn } from './lib/filterCoordinator';
+import { BooleanMapSchema, buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel, isTagLikeColumn } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
 import { buildDatasetDashboardStats } from './lib/datasetDashboard';
 import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
@@ -1586,9 +1586,27 @@ export default function App() {
   const activeGridSchema = viewScope === 'channels' ? channelSchema : displaySchema;
   const activeGridListLikeColumns = viewScope === 'channels' ? channelListLikeColumns : listLikeColumns;
   const activeGridBooleanMapColumns = viewScope === 'channels' ? channelBooleanMapColumns : booleanMapColumns;
-  const activeGridTagValuesByColumn = viewScope === 'channels'
-    ? unifiedChannelFilterState.tagValueIndexByColumn
-    : unifiedFilterState.tagValueIndexByColumn;
+  // Tag filter options are built when a tag filter opens, from whatever the grid shows at that moment.
+  const tagValueSourceRef = useRef<Omit<Parameters<typeof buildTagValuesForColumn>[0], 'column'> | null>(null);
+  tagValueSourceRef.current = viewScope === 'channels'
+    ? {
+        rows: channelRowsWithLinking,
+        schema: channelSchema,
+        filterModel: channelFilterModel,
+        listLikeColumns: channelListLikeColumns,
+        booleanMapColumns: channelBooleanMapColumns,
+      }
+    : {
+        rows: channelScopedDisplayRows,
+        schema: displaySchema,
+        filterModel,
+        listLikeColumns,
+        booleanMapColumns,
+      };
+  const getActiveGridTagValues = useCallback((column: string) => {
+    const source = tagValueSourceRef.current;
+    return source ? buildTagValuesForColumn({ ...source, column }) : [];
+  }, []);
   const activeGridFilterModel = viewScope === 'channels' ? channelFilterModel : filterModel;
   const selectedVideoIdsForActions = viewScope === 'videos' ? videoSelection.selectedKeys : [];
   const selectedVideoCount = selectedVideoIdsForActions.length;
@@ -6940,7 +6958,7 @@ ${heading}
                     activeView={viewScope === 'videos' ? state.savedViews.find((view) => view.id === state.activeViewId) : undefined}
                     filterModel={activeGridFilterModel}
                     listLikeColumns={activeGridListLikeColumns}
-                    tagValueIndexByColumn={activeGridTagValuesByColumn}
+                    getTagValues={getActiveGridTagValues}
                     booleanMapSchemas={activeGridBooleanMapColumns}
                     onGridReady={handleGridReady}
                     onFilterModelChange={viewScope === 'channels' ? updateChannelFilterModel : updateExternalFilterModel}

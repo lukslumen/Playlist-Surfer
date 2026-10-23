@@ -7,6 +7,7 @@ import {
   CellContextMenuEvent,
   FilterChangedEvent,
   GridApi,
+  IRowNode,
   SortChangedEvent,
   ColumnResizedEvent,
   themeQuartz,
@@ -25,6 +26,9 @@ import { formatDateDisplay, formatDurationDisplay, getColumnDisplayName, getColu
 import { extractSortRulesFromColumnState } from '../lib/dashboardThumbnails';
 import { ScopeSelectionState, ScopeSelectionUpdate } from '../lib/selectionState';
 import { isDeleteKey } from '../lib/utils';
+import { useStableValue } from '../hooks/useStableValue';
+
+const EMPTY_BOOLEAN_MAP_SCHEMAS: Record<string, BooleanMapSchema> = {};
 
 interface MetadataGridProps {
   rows: any[];
@@ -35,7 +39,8 @@ interface MetadataGridProps {
   activeView?: SavedView;
   filterModel: ExplorerFilterModel;
   listLikeColumns: Set<string>;
-  tagValueIndexByColumn: Record<string, string[]>;
+  /** Distinct values for a tag column's filter, computed when the filter opens. */
+  getTagValues: (column: string) => string[];
   booleanMapSchemas?: Record<string, BooleanMapSchema>;
   onGridReady: (api: GridApi) => void;
   onFilterModelChange?: (filterModel: ExplorerFilterModel) => void;
@@ -79,9 +84,9 @@ export default function MetadataGrid({
   isLoading,
   activeView,
   filterModel,
-  listLikeColumns,
-  tagValueIndexByColumn,
-  booleanMapSchemas = {},
+  listLikeColumns: listLikeColumnsProp,
+  getTagValues,
+  booleanMapSchemas: booleanMapSchemasProp = EMPTY_BOOLEAN_MAP_SCHEMAS,
   onGridReady,
   onFilterModelChange,
   onSortModelChange,
@@ -102,6 +107,10 @@ export default function MetadataGrid({
   onColumnWidthsChange,
 }: MetadataGridProps) {
   const isChannelScope = viewScope === 'channels';
+  // These are re-derived from the rows on every include/exclude; keep their identity while the
+  // content is unchanged so the column definitions below are not rebuilt.
+  const listLikeColumns = useStableValue(listLikeColumnsProp);
+  const booleanMapSchemas = useStableValue(booleanMapSchemasProp);
   const selectedRowCount = selection.selectedKeys.length;
   const gridApiRef = useRef<GridApi | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -117,14 +126,20 @@ export default function MetadataGrid({
   const contextActionLabel = inclusionView === 'included' ? 'Move selected videos to Excluded' : 'Restore selected videos to Included';
   const resolveChannelKey = useCallback((row: any) => String(row?.channel_key || row?.channel_id || row?.channel_name || '').trim(), []);
   const showNoRowsRecovery = schema.length > 0 && !isLoading && rows.length === 0;
+  // Samples only feed default column widths, so take them once per schema (and when rows first arrive)
+  // instead of on every row change.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const hasRows = rows.length > 0;
   const sampleValuesByColumn = useMemo(() => {
     const next: Record<string, any[]> = {};
-    const sampleRows = rows.slice(0, Math.min(rows.length, 60));
+    const currentRows = rowsRef.current;
+    const sampleRows = hasRows ? currentRows.slice(0, Math.min(currentRows.length, 60)) : [];
     schema.forEach((column) => {
       next[column.column_name] = sampleRows.map((row) => row?.[column.column_name]).filter((value) => value !== undefined).slice(0, 24);
     });
     return next;
-  }, [rows, schema]);
+  }, [hasRows, schema]);
 
   const channelNameOptionItems = useMemo(() => {
     if (!isChannelScope) return [];
@@ -209,7 +224,7 @@ export default function MetadataGrid({
                   values: channelNameOptionItems.map((item) => item.value),
                   optionItems: channelNameOptionItems,
                 }
-              : { values: tagValueIndexByColumn[col.column_name] ?? [] })
+              : { getValues: () => getTagValues(col.column_name) })
             : { filterKind }),
         resizable: true,
         initialWidth: columnWidths[col.column_name] || sizing.initialWidth,
@@ -306,16 +321,22 @@ export default function MetadataGrid({
       if (indexB !== -1) return 1;
       return nameA.localeCompare(nameB);
     });
-  }, [booleanMapSchemas, isChannelScope, listLikeColumns, sampleValuesByColumn, schema, tagValueIndexByColumn, visibleColumns]);
+  }, [booleanMapSchemas, isChannelScope, listLikeColumns, sampleValuesByColumn, schema, getTagValues, visibleColumns]);
 
   const syncSelectedRows = useCallback((rowIds: string[]) => {
     const api = gridApiRef.current;
     if (!api) return;
-    const uniqueIds = Array.from(new Set(rowIds.filter(Boolean)));
-    api.deselectAll();
-    uniqueIds.forEach((rowId) => {
-      api.getRowNode(rowId)?.setSelected(true, false);
+    // Only touch nodes whose state changes, in two batched calls: selecting nodes one by one fires an
+    // event per node, which locked up the tab on select-all with 100k rows.
+    const wanted = new Set(rowIds.filter(Boolean));
+    const toDeselect = api.getSelectedNodes().filter((node) => !node.id || !wanted.has(node.id));
+    const toSelect: IRowNode[] = [];
+    wanted.forEach((rowId) => {
+      const node = api.getRowNode(rowId);
+      if (node && !node.isSelected()) toSelect.push(node);
     });
+    if (toDeselect.length) api.setNodesSelected({ nodes: toDeselect, newValue: false });
+    if (toSelect.length) api.setNodesSelected({ nodes: toSelect, newValue: true });
   }, []);
 
   const clearGridSelection = useCallback(() => {
@@ -757,8 +778,8 @@ export default function MetadataGrid({
             tooltipShowDelay={1000}
             rowBuffer={100}
             valueCache={true}
-            alwaysShowVerticalScrollbar={true}
-            alwaysShowHorizontalScrollbar={true}
+            alwaysShowVerticalScroll={true}
+            alwaysShowHorizontalScroll={true}
             suppressColumnVirtualisation={false}
           />
           {showNoRowsRecovery ? (

@@ -326,10 +326,20 @@ export function TagFilter(props: CustomFilterProps<any, any, TagFilterModel>) {
     setDraftMatchMode(props.model?.matchMode ?? 'any');
   }, [props.model]);
 
+  const getValues = (props.colDef.filterParams as any)?.getValues as (() => string[]) | undefined;
+  const [lazyValues, setLazyValues] = useState<string[] | null>(() => (getValues ? getValues() : null));
+
   const doesFilterPass = useCallback(() => true, []);
-  useGridFilter({ doesFilterPass });
+  // Values are computed on demand; refresh them every time the popup opens so they match the grid.
+  const afterGuiAttached = useCallback(() => {
+    if (getValues) setLazyValues(getValues());
+  }, [getValues]);
+  useGridFilter({ doesFilterPass, afterGuiAttached });
 
   const optionItems = useMemo(() => {
+    if (lazyValues) {
+      return lazyValues.map((value) => ({ value: String(value), count: 0 })).filter((item) => item.value);
+    }
     const rawOptionItems = (props.colDef.filterParams as any)?.optionItems;
     if (Array.isArray(rawOptionItems) && rawOptionItems.length) {
       return rawOptionItems
@@ -343,7 +353,7 @@ export function TagFilter(props: CustomFilterProps<any, any, TagFilterModel>) {
     return Array.isArray(options)
       ? options.map((value: any) => ({ value: String(value), count: 0 })).filter((item: { value: string; count: number }) => item.value)
       : [];
-  }, [props.colDef.filterParams]);
+  }, [lazyValues, props.colDef.filterParams]);
 
   const uniqueValues = useMemo(() => optionItems.map((item: { value: string; count: number }) => item.value), [optionItems]);
 
