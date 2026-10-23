@@ -1,6 +1,7 @@
 import type { ExcludedVideoMeta, IncludeExcludeAction, InclusionView, ViewScope } from '../types';
 
 export type InclusionActionKind = IncludeExcludeAction['kind'];
+
 export type InclusionSelectionMode = NonNullable<IncludeExcludeAction['selectionMode']>;
 
 export interface InclusionState {
@@ -102,3 +103,9 @@ export function pruneInclusionState(state: InclusionState, survivingVideoIds: Se
     ),
   };
 }
+
+export function normalizeVideoIds(videoIds: string[], validIds: Set<string>) {
+  return Array.from(new Set(videoIds.filter((videoId) => validIds.has(videoId))));
+}
+
+export type IncludeExcludeUndoEntry = IncludeExcludeAction & { historyEventId?: string; };

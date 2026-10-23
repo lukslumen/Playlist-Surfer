@@ -6,7 +6,6 @@ import { useDuckDB } from './hooks/useDuckDB';
 import {
   AppState,
   ChannelLinkingState,
-  ColumnSchema,
   ColumnLineageState,
   SavedView,
   Annotation,
@@ -45,21 +44,25 @@ import {
   SourceKind,
 } from './types';
 import {
-  EMPTY_EXPLORER_SELECTION,
-  EMPTY_SCOPE_SELECTION,
-  clearScopeSelectionAction,
+  EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction,
   getScopeSelection,
   pruneScopeSelectionAction,
   selectionReducer,
-  setScopeSelectionAction,
-  type ScopeSelectionState,
-  type ScopeSelectionUpdate,
+  setScopeSelectionAction, type ScopeSelectionUpdate
 } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import { ExportDialog, ColumnVisibilitySelector, ResearchLogDialog, ImportDialog, DatasetDashboardDialog, KeyboardShortcutsDialog, CommandPaletteDialog } from './components/Dialogs';
+import {
+  ExportDialog,
+  ColumnVisibilitySelector,
+  ResearchLogDialog,
+  ImportDialog,
+  DatasetDashboardDialog,
+  KeyboardShortcutsDialog,
+  CommandPaletteDialog,
+} from './components/Dialogs';
 import {
   applyFriendlyColumnMappings,
   applyMerge,
@@ -81,7 +84,6 @@ import {
   detectImportKind,
   NOTES_COLUMN,
   formatDateDisplay,
-  isDurationColumn,
   resolveTagFilterColumn,
   resolveChannelId,
   resolveChannelName,
@@ -102,9 +104,19 @@ import {
   type BatchCopyExportMode,
 } from './lib/data';
 import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
-import { parseListString } from './components/CustomFilters';
-import { BooleanMapSchema, buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel, isTagLikeColumn } from './lib/filterCoordinator';
-import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
+import {
+  buildTagValuesForColumn,
+  buildUnifiedFilterState,
+  detectBooleanMapColumns,
+  detectListLikeColumns,
+  ExplorerFilterModel,
+} from './lib/filterCoordinator';
+import {
+  extractUserTagsFromAnnotations,
+  mergeAnnotationsWithUserTags,
+  stripTagsFromAnnotations,
+  userTagsReducer,
+} from './lib/userTags';
 import { buildDatasetDashboardStats } from './lib/datasetDashboard';
 import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
 import {
@@ -140,1004 +152,96 @@ import { cn, isDeleteKey } from './lib/utils';
 import { getBootPersistedStateJson, savePersistedState } from './lib/persistedState';
 import {
   applyInclusionChange,
+  IncludeExcludeUndoEntry,
   invertInclusionActionKind,
+  normalizeVideoIds,
   pruneInclusionState,
   resolveInclusionActionKind,
   type InclusionState,
 } from './lib/inclusion';
-
-const FILTERED_TEMP_THUMBNAIL_SCOPE = 'filtered-temp';
-const THUMBNAIL_ZOOM_STEPS = [88, 104, 128, 156, 192, 240, 320, 440, 620, 860, 1120];
-const GENERATED_SOURCE_ID = 'generated:metadata';
-const LINKING_GENERATED_COLUMNS = [
-  'linking_linked',
-  'linking_url_count',
-  'linking_domain_count',
-  'linking_base_labels',
-  'linking_recipe',
-  'linking_top_domains',
-  'linking_malformed_count',
-  'linking_shortener_count',
-  'linking_raw_links',
-  'linking_raw_domains',
-];
-const LINKING_FILTER_COLUMNS = new Set<string>([
-  ...LINKING_GENERATED_COLUMNS,
-]);
-
-function buildSourceId(prefix: string, label: string) {
-  const slug = sanitizeFileName(label || 'source', 'source')
-    .replace(/\.csv$/i, '')
-    .replace(/[^a-z0-9_-]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-  return `${prefix}:${slug || 'source'}:${Date.now().toString(36)}`;
-}
-
-function createEmptySourceRegistry(): SourceRegistryState {
-  return {
-    byId: {},
-    orderedIds: [],
-    primarySourceId: null,
-  };
-}
-
-function createEmptySourceVisibility(): SourceVisibilityState {
-  return {
-    hiddenSourceIds: [],
-    hiddenColumnSourceIdsByScope: {
-      videos: [],
-      channels: [],
-    },
-  };
-}
-
-function createEmptyRowLineage(): RowLineageState {
-  return { byRowId: {} };
-}
-
-function createEmptyColumnLineage(): ColumnLineageState {
-  return { byColumn: {} };
-}
-
-function createEmptyGeneratedMetadata(): GeneratedMetadataState {
-  return { byVideoId: {} };
-}
-
-function createEmptyLinkingState(): LinkingState {
-  return {
-    selectedSourceColumn: null,
-    stale: false,
-    staleReason: undefined,
-    datasetFingerprint: undefined,
-    sourceVisibilityFingerprint: undefined,
-    overrideVersion: 0,
-    sourceCandidateProfiles: [],
-    parseCacheByKey: {},
-    overridesByDomain: {},
-    snapshot: null,
-  };
-}
-
-function createEmptyChannelLinkingState(): ChannelLinkingState {
-  return {
-    stale: false,
-    staleReason: undefined,
-    snapshot: null,
-  };
-}
-
-function resolveRowLineageKey(row: any, index: number) {
-  return resolveVideoId(row) || `row:${index}`;
-}
-
-function resolveChannelRowKey(row: any) {
-  return String(row?.channel_key || row?.channel_id || row?.channel_name || '').trim();
-}
-
-function getDefaultChannelVisibleColumns(columnNames: string[]) {
-  const preferred = [
-    'channel_name',
-    'channel_id',
-    'video_count_in_dataset',
-    'total_views_in_dataset',
-    'total_likes_in_dataset',
-    'total_comments_in_dataset',
-    'earliest_publish_date',
-    'latest_publish_date',
-    'channel_linked_video_count',
-    'channel_unique_domains',
-    'channel_top_domains',
-    'channel_linking_recipe_mix',
-    CHANNEL_USER_TAGS_COLUMN,
-  ];
-  const ordered = preferred.filter((column) => columnNames.includes(column));
-  return ordered.length ? ordered : columnNames.slice(0, Math.min(8, columnNames.length));
-}
-
-function shouldHideRedundantChannelIdentityColumn(column: ColumnSchema, schema: ColumnSchema[]) {
-  const columnName = column.column_name;
-  const rawName = column.source_column_name || columnName;
-  const displayName = (column.display_column_name || '').toLowerCase();
-  const semanticType = column.semantic_type || '';
-  const hasCanonicalChannelName = schema.some((entry) => entry.column_name === 'channel_name');
-  const hasCanonicalChannelId = schema.some((entry) => entry.column_name === 'channel_id');
-
-  if (columnName === 'channel_name' || columnName === 'channel_id') return false;
-
-  if (hasCanonicalChannelName) {
-    const isDuplicateChannelName = semanticType === 'channel-name'
-      || displayName.startsWith('channel name')
-      || ['channelTitle', 'channel_title'].includes(columnName)
-      || (rawName === 'title' && displayName.startsWith('channel name'));
-    if (isDuplicateChannelName) return true;
-  }
-
-  if (hasCanonicalChannelId) {
-    const isDuplicateChannelId = semanticType === 'channel-id'
-      || displayName.startsWith('channel id')
-      || ['channelId', 'Channel_ID', 'channelID', 'id'].includes(columnName);
-    if (isDuplicateChannelId) return true;
-  }
-
-  return false;
-}
-
-function getDefaultVideoVisibleColumns(schema: ColumnSchema[]) {
-  return schema
-    .filter((column) => !shouldHideRedundantChannelIdentityColumn(column, schema))
-    .map((column) => column.column_name);
-}
-
-function joinUnique(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function buildSourceVisibilityFingerprint(sourceVisibility: SourceVisibilityState) {
-  const hiddenRows = [...(sourceVisibility.hiddenSourceIds || [])].sort().join('|');
-  const hiddenVideoCols = [...(sourceVisibility.hiddenColumnSourceIdsByScope?.videos || [])].sort().join('|');
-  const hiddenChannelCols = [...(sourceVisibility.hiddenColumnSourceIdsByScope?.channels || [])].sort().join('|');
-  return `rows:${hiddenRows};videos:${hiddenVideoCols};channels:${hiddenChannelCols}`;
-}
-
-function buildDatasetFingerprint(args: {
-  datasetVersion: number;
-  inclusionView: InclusionView;
-  rowCount: number;
-  sourceVisibility: SourceVisibilityState;
-}) {
-  return [
-    `v${args.datasetVersion}`,
-    `inc:${args.inclusionView}`,
-    `rows:${args.rowCount}`,
-    buildSourceVisibilityFingerprint(args.sourceVisibility),
-  ].join(';');
-}
-
-function resolveRecoverableInclusionView(args: {
-  preferred: InclusionView;
-  includedRowCount: number;
-  excludedRowCount: number;
-}): InclusionView {
-  const { preferred, includedRowCount, excludedRowCount } = args;
-  if (preferred === 'included' && includedRowCount === 0 && excludedRowCount > 0) return 'excluded';
-  if (preferred === 'excluded' && excludedRowCount === 0 && includedRowCount > 0) return 'included';
-  return preferred;
-}
-
-function computeSourceVisibilityInclusionCounts(args: {
-  rows: any[];
-  rowLineage: RowLineageState;
-  sourceVisibility: SourceVisibilityState;
-  excludedVideoIds: string[];
-}) {
-  const hiddenSourceIdSet = new Set(args.sourceVisibility.hiddenSourceIds || []);
-  const sourceMaskedRows = hiddenSourceIdSet.size
-    ? args.rows.filter((row, index) => {
-        const rowId = resolveRowLineageKey(row, index);
-        const lineage = args.rowLineage.byRowId[rowId];
-        if (!lineage?.baseSourceId) return true;
-        return !hiddenSourceIdSet.has(lineage.baseSourceId);
-      })
-    : args.rows;
-
-  const partition = partitionRowsByInclusion(sourceMaskedRows, new Set(args.excludedVideoIds || []));
-  return {
-    includedRowCount: partition.included.length,
-    excludedRowCount: partition.excluded.length,
-  };
-}
-
-function flattenGeneratedMetadataForOverlay(entry: GeneratedMetadataState['byVideoId'][string] | undefined) {
-  if (!entry) return null;
-  const linking = entry.linking;
-  return {
-    content_intent: entry.content_intent || 'other',
-    linking_linked: linking?.linking_linked || 'no',
-    linking_url_count: linking?.linking_url_count ?? 0,
-    linking_domain_count: linking?.linking_domain_count ?? 0,
-    linking_base_labels: linking?.linking_base_labels ?? [],
-    linking_recipe: linking?.linking_recipe || 'none',
-    linking_top_domains: linking?.linking_top_domains ?? [],
-    linking_malformed_count: linking?.linking_malformed_count ?? 0,
-    linking_shortener_count: linking?.linking_shortener_count ?? 0,
-    linking_raw_links: linking?.linking_raw_links ?? [],
-    linking_raw_domains: linking?.linking_raw_domains ?? [],
-  };
-}
-
-function normalizeJoinKey(value: unknown) {
-  const text = String(value ?? '').trim();
-  return text ? text.toLowerCase() : '';
-}
-
-function ensureGeneratedColumnLineage(lineage: ColumnLineageState): ColumnLineageState {
-  const next = { ...lineage.byColumn };
-  if (!next.content_intent) {
-    next.content_intent = { column: 'content_intent', sourceId: GENERATED_SOURCE_ID, generated: true, scope: 'videos' };
-  }
-  LINKING_GENERATED_COLUMNS.forEach((column) => {
-    if (!next[column]) {
-      next[column] = { column, sourceId: GENERATED_SOURCE_ID, generated: true, scope: 'videos' };
-    }
-  });
-  const channelColumns = [
-    'channel_linked_video_count',
-    'channel_total_urls',
-    'channel_unique_domains',
-    'channel_top_domains',
-    'channel_linking_recipe_mix',
-    'channel_base_share_cross_platform',
-    'channel_base_share_intra_platform',
-    'channel_base_share_marketplace',
-    'channel_base_share_crowdfunding',
-    'channel_base_share_routing',
-    'channel_base_share_other',
-  ];
-  channelColumns.forEach((column) => {
-    if (!next[column]) {
-      next[column] = { column, sourceId: GENERATED_SOURCE_ID, generated: true, scope: 'channels' };
-    }
-  });
-  return { byColumn: next };
-}
-
-function withSourceRegistryCounts(args: {
-  sourceRegistry: SourceRegistryState;
-  rowLineage: RowLineageState;
-  defaultRowCount?: number;
-}) {
-  const counts = new Map<string, number>();
-  Object.values(args.rowLineage.byRowId).forEach((entry) => {
-    if (!entry.baseSourceId) return;
-    counts.set(entry.baseSourceId, (counts.get(entry.baseSourceId) || 0) + 1);
-  });
-  const byId: SourceRegistryState['byId'] = {};
-  Object.entries(args.sourceRegistry.byId).forEach(([sourceId, source]) => {
-    byId[sourceId] = {
-      ...source,
-      rowCount: counts.has(sourceId)
-        ? (counts.get(sourceId) || 0)
-        : (source.kind === 'base' ? (args.defaultRowCount ?? source.rowCount) : source.rowCount),
-    };
-  });
-  return {
-    ...args.sourceRegistry,
-    byId,
-  };
-}
-
-function buildDefaultProjectSourceState(args: {
-  rows: any[];
-  schema: Array<{ column_name: string }>;
-  fileName: string | null;
-}) {
-  const now = new Date().toISOString();
-  const baseSourceId = buildSourceId('source/base', args.fileName || 'dataset');
-  const sourceRegistry: SourceRegistryState = {
-    byId: {
-      [baseSourceId]: {
-        id: baseSourceId,
-        label: args.fileName || 'dataset.csv',
-        kind: 'base',
-        rowCount: args.rows.length,
-        contributedColumns: args.schema.map((column) => column.column_name),
-        createdAt: now,
-      },
-      [GENERATED_SOURCE_ID]: {
-        id: GENERATED_SOURCE_ID,
-        label: 'Generated metadata',
-        kind: 'generated',
-        rowCount: 0,
-        contributedColumns: ['content_intent', ...LINKING_GENERATED_COLUMNS],
-        createdAt: now,
-      },
-    },
-    orderedIds: [baseSourceId, GENERATED_SOURCE_ID],
-    primarySourceId: baseSourceId,
-  };
-  const rowLineage: RowLineageState = {
-    byRowId: Object.fromEntries(
-      args.rows.map((row, index) => {
-        const rowId = resolveRowLineageKey(row, index);
-        return [rowId, { rowId, baseSourceId, contributorSourceIds: [baseSourceId] }];
-      }),
-    ),
-  };
-  const columnLineage: ColumnLineageState = ensureGeneratedColumnLineage({
-    byColumn: Object.fromEntries(
-      args.schema.map((column) => ([
-        column.column_name,
-        {
-          column: column.column_name,
-          sourceId: baseSourceId,
-          generated: false,
-          scope: 'videos',
-        },
-      ])),
-    ),
-  });
-  return {
-    sourceRegistry,
-    sourceVisibility: createEmptySourceVisibility(),
-    rowLineage,
-    columnLineage,
-  };
-}
-
-function reconcileSourceVisibility(sourceVisibility: SourceVisibilityState, sourceRegistry: SourceRegistryState): SourceVisibilityState {
-  const validIds = new Set(sourceRegistry.orderedIds);
-  return {
-    hiddenSourceIds: (sourceVisibility.hiddenSourceIds || []).filter((id) => validIds.has(id)),
-    hiddenColumnSourceIdsByScope: {
-      videos: (sourceVisibility.hiddenColumnSourceIdsByScope?.videos || []).filter((id) => validIds.has(id)),
-      channels: (sourceVisibility.hiddenColumnSourceIdsByScope?.channels || []).filter((id) => validIds.has(id)),
-    },
-  };
-}
-
-function createObjectUrl(bytes: Uint8Array, mimeType = 'image/jpeg') {
-  return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
-}
-
-function hashFingerprint(seed: number, value: string) {
-  let next = seed >>> 0;
-  for (let index = 0; index < value.length; index += 1) {
-    next ^= value.charCodeAt(index);
-    next = Math.imul(next, 16777619) >>> 0;
-  }
-  return next >>> 0;
-}
-
-function buildStableFingerprint(values: string[]) {
-  let hash = 2166136261;
-  values.forEach((value) => {
-    hash = hashFingerprint(hash, value);
-    hash = hashFingerprint(hash, '\n');
-  });
-  return `${values.length}:${(hash >>> 0).toString(36)}`;
-}
-
-function buildVideoCorpusFingerprint(rows: any[], schema: Array<{ column_name: string }>) {
-  const rowKeys = rows.map((row) => {
-    const videoId = resolveVideoId(row) || '';
-    const channelId = resolveChannelId(row) || '';
-    const views = row?.viewCount ?? row?.view_count ?? row?.views ?? row?.Views ?? '';
-    const likes = row?.likeCount ?? row?.like_count ?? row?.likes ?? row?.Likes ?? '';
-    const comments = row?.commentCount ?? row?.comment_count ?? row?.comments ?? row?.Comments ?? '';
-    const publishedAt = row?.publishedAt ?? row?.published_at ?? row?.publishDate ?? row?.publish_date ?? row?.upload_date ?? row?.date ?? '';
-    return `${videoId}|${channelId}|${views}|${likes}|${comments}|${publishedAt}`;
-  });
-  const schemaKey = schema.map((column) => column.column_name).join('|');
-  return `rows:${rows.length};schema:${schema.length}:${buildStableFingerprint([schemaKey, ...rowKeys])}`;
-}
-
-function buildExcludedMembershipFingerprint(videoIds: string[]) {
-  const uniqueSorted = Array.from(new Set(videoIds.filter(Boolean))).sort();
-  return `excluded:${uniqueSorted.length}:${buildStableFingerprint(uniqueSorted)}`;
-}
-
-function buildChannelMetadataCacheKey(args: {
-  videoCorpusFingerprint: string;
-  exclusionMembershipFingerprint: string;
-  inclusionView: InclusionView;
-}) {
-  return [
-    args.videoCorpusFingerprint,
-    args.exclusionMembershipFingerprint,
-    `inc:${args.inclusionView}`,
-  ].join(';');
-}
-
-function buildThumbnailEntriesFromCacheSeed(args: {
-  candidates: Array<{
-    videoId: string;
-    dedupeKey: string;
-    title: string;
-    rank: number;
-    sourceUrl: string;
-    candidateUrls?: string[];
-  }>;
-  seedSnapshot?: DashboardThumbnailCacheSnapshot;
-}): DashboardThumbnailCacheSnapshot['entries'] {
-  const seedByDedupe = new Map<string, DashboardThumbnailCacheSnapshot['entries'][number]>();
-  (args.seedSnapshot?.entries || []).forEach((entry) => {
-    if (!entry?.dedupeKey) return;
-    if (!seedByDedupe.has(entry.dedupeKey)) seedByDedupe.set(entry.dedupeKey, entry);
-  });
-  return args.candidates.map((candidate) => {
-    const candidateUrls = Array.from(new Set(
-      (candidate.candidateUrls || [])
-        .map((url) => String(url || '').trim())
-        .filter(Boolean),
-    ));
-    const initialUrl = candidateUrls[0] || candidate.sourceUrl || '';
-    const initialCandidateIndex = initialUrl ? 0 : -1;
-    const initialStatus: DashboardThumbnailCacheSnapshot['entries'][number]['status'] = initialUrl ? 'pending' : 'failed';
-    const baseEntry = {
-      videoId: candidate.videoId,
-      dedupeKey: candidate.dedupeKey,
-      title: candidate.title,
-      rank: candidate.rank,
-      sourceUrl: initialUrl,
-      candidateUrls,
-      activeUrl: initialUrl,
-      fallbackIndex: 0,
-      activeCandidateIndex: initialCandidateIndex,
-      status: initialStatus,
-      error: initialUrl ? undefined : 'No valid thumbnail URL',
-    };
-    const seededEntry = seedByDedupe.get(candidate.dedupeKey);
-    if (!seededEntry) return baseEntry;
-    const seededActiveUrl = String(seededEntry.activeUrl || seededEntry.sourceUrl || '').trim();
-    const seededActiveIndexFromUrl = seededActiveUrl ? candidateUrls.findIndex((url) => url === seededActiveUrl) : -1;
-    const seededFallbackIndex = seededEntry.fallbackIndex ?? (seededActiveIndexFromUrl >= 0 ? seededActiveIndexFromUrl : 0);
-    const seededIndex = Number.isFinite(seededEntry.activeCandidateIndex)
-      ? Number(seededEntry.activeCandidateIndex)
-      : Number(seededFallbackIndex);
-    const normalizedSeededIndex = Number.isFinite(seededIndex)
-      ? Math.max(0, Math.min(Math.floor(seededIndex), Math.max(candidateUrls.length - 1, 0)))
-      : 0;
-    if (seededEntry.status === 'loaded' && seededEntry.bytes?.length) {
-      const mimeType = seededEntry.mimeType || 'image/jpeg';
-      const bytes = new Uint8Array(seededEntry.bytes);
-      const seededUrl = seededActiveUrl || candidateUrls[normalizedSeededIndex] || initialUrl;
-      return {
-        ...baseEntry,
-        status: 'loaded' as const,
-        sourceUrl: seededUrl || baseEntry.sourceUrl,
-        activeUrl: seededUrl || baseEntry.activeUrl,
-        fallbackIndex: normalizedSeededIndex,
-        activeCandidateIndex: normalizedSeededIndex,
-        mimeType,
-        byteLength: seededEntry.byteLength ?? bytes.length,
-        bytes,
-        objectUrl: createObjectUrl(bytes, mimeType),
-      };
-    }
-    if (seededEntry.status === 'loaded' && seededActiveUrl) {
-      return {
-        ...baseEntry,
-        status: 'loaded' as const,
-        sourceUrl: seededActiveUrl,
-        activeUrl: seededActiveUrl,
-        fallbackIndex: normalizedSeededIndex,
-        activeCandidateIndex: normalizedSeededIndex,
-      };
-    }
-    if (seededEntry.status === 'failed' && candidateUrls.length > 0) {
-      return {
-        ...baseEntry,
-        status: 'failed' as const,
-        activeUrl: '',
-        fallbackIndex: Math.max(0, candidateUrls.length - 1),
-        activeCandidateIndex: Math.max(0, candidateUrls.length - 1),
-        error: seededEntry.error || 'Failed to load thumbnail',
-      };
-    }
-    return baseEntry;
-  });
-}
-
-function summarizeThumbnailProgress(entries: DashboardThumbnailCacheSnapshot['entries']) {
-  const total = entries.length;
-  const failed = entries.filter((entry) => entry.status === 'failed').length;
-  const completed = entries.filter((entry) => entry.status !== 'pending').length;
-  return {
-    total,
-    completed,
-    failed,
-    loading: completed < total,
-  };
-}
-
-function revokeThumbnailUrls(snapshot?: DashboardThumbnailCacheSnapshot) {
-  if (!snapshot) return;
-  snapshot.entries.forEach((entry) => {
-    if (entry.objectUrl) URL.revokeObjectURL(entry.objectUrl);
-  });
-}
-
-function revokeDroppedThumbnailUrls(previous?: DashboardThumbnailCacheSnapshot, next?: DashboardThumbnailCacheSnapshot) {
-  if (!previous) return;
-  const nextUrls = new Set((next?.entries || []).map((entry) => entry.objectUrl).filter((value): value is string => Boolean(value)));
-  previous.entries.forEach((entry) => {
-    if (entry.objectUrl && !nextUrls.has(entry.objectUrl)) {
-      URL.revokeObjectURL(entry.objectUrl);
-    }
-  });
-}
-
-function getArchiveEntry(files: Record<string, Uint8Array>, targetName: string) {
-  return files[targetName] || Object.entries(files).find(([name]) => name === targetName || name.endsWith(`/${targetName}`))?.[1];
-}
-
-function stripNotesFromAnnotations(annotations: Record<string, Annotation>) {
-  return Object.fromEntries(
-    Object.entries(annotations).map(([videoId, annotation]) => {
-      const { notes, ...rest } = annotation;
-      return [videoId, rest];
-    }),
-  ) as Record<string, Annotation>;
-}
-
-function buildLegacyNotesFromAnnotations(annotations: Record<string, Annotation>) {
-  const notesByVideoId: Record<string, string> = {};
-  Object.entries(annotations).forEach(([videoId, annotation]) => {
-    const notes = annotation?.notes;
-    if (typeof notes === 'string' && notes.trim().length > 0) {
-      notesByVideoId[videoId] = notes;
-    }
-  });
-  return notesByVideoId;
-}
-
-function buildNoteArchiveFiles(notesByVideoId: Record<string, string>, folder: string) {
-  return Object.entries(notesByVideoId)
-    .filter(([, notes]) => notes.trim().length > 0)
-    .map(([videoId, notes]) => ({
-      name: `${folder}/video_notes/${videoId}.txt`,
-      data: notes,
-    }));
-}
-
-function extractNotesFromArchive(files: Record<string, Uint8Array>) {
-  const notes: Record<string, string> = {};
-  Object.entries(files).forEach(([name, data]) => {
-    const match = name.match(/(?:^|\/)video_notes\/([^/]+)\.txt$/i);
-    if (!match) return;
-    notes[match[1]] = decodeTextFile(data);
-  });
-  return notes;
-}
-
-function extractAnnotationsFromRows(rows: any[], seed: Record<string, Annotation> = {}) {
-  const nextAnnotations: Record<string, Annotation> = { ...seed };
-
-  rows.forEach((row) => {
-    const videoId = resolveVideoId(row);
-    if (!videoId) return;
-
-    const tags = row[USER_TAGS_COLUMN] || row.User_Tags;
-
-    if (tags) {
-      nextAnnotations[videoId] = {
-        ...nextAnnotations[videoId],
-        tags: parseListString(tags),
-        transcriptOverride: nextAnnotations[videoId]?.transcriptOverride,
-        quoteRefs: nextAnnotations[videoId]?.quoteRefs || [],
-        timestampRefs: nextAnnotations[videoId]?.timestampRefs || [],
-      };
-    }
-  });
-
-  return nextAnnotations;
-}
-
-function applySupportMappings(
-  rows: any[],
-  mappings: Partial<SpecialMappings> = {},
-  options: {
-    previousMappings?: Partial<SpecialMappings>;
-    sourceSchemaColumns?: Set<string>;
-  } = {},
-) {
-  const previousMappings = options.previousMappings || {};
-  const sourceSchemaColumns = options.sourceSchemaColumns;
-  return rows.map((row) => {
-    const next = { ...row };
-    if (mappings.transcriptColumn && mappings.transcriptColumn in row) {
-      next[TRANSCRIPT_COLUMN] = row[mappings.transcriptColumn];
-    } else if (
-      previousMappings.transcriptColumn
-      && previousMappings.transcriptColumn !== TRANSCRIPT_COLUMN
-      && !sourceSchemaColumns?.has(TRANSCRIPT_COLUMN)
-    ) {
-      delete next[TRANSCRIPT_COLUMN];
-    }
-    if (mappings.descriptionColumn && mappings.descriptionColumn in row) {
-      next[VIDEO_DESCRIPTION_COLUMN] = row[mappings.descriptionColumn];
-    } else if (
-      previousMappings.descriptionColumn
-      && previousMappings.descriptionColumn !== VIDEO_DESCRIPTION_COLUMN
-      && !sourceSchemaColumns?.has(VIDEO_DESCRIPTION_COLUMN)
-    ) {
-      delete next[VIDEO_DESCRIPTION_COLUMN];
-    }
-    if (mappings.tagColumn && mappings.tagColumn in row) {
-      next.videoTags = parseListString(row[mappings.tagColumn]);
-    } else if (
-      previousMappings.tagColumn
-      && previousMappings.tagColumn !== 'videoTags'
-      && !sourceSchemaColumns?.has('videoTags')
-    ) {
-      delete next.videoTags;
-    }
-    return next;
-  });
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element) return false;
-  return !!element.closest([
-    'input',
-    'textarea',
-    'select',
-    '[contenteditable]',
-    '.ag-popup',
-    '.ag-popup-editor',
-    '.ag-cell-inline-editing',
-    '.ag-rich-select',
-    '.ag-large-text',
-    '.ag-menu',
-    '.ag-input-field-input',
-    '.ag-text-field-input',
-    '[data-markdown-editor]',
-  ].join(','));
-}
-
-function isGridShortcutTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element) return false;
-  return Boolean(element.closest('[data-metadata-grid-root="true"]'));
-}
-
-function hasShortcutModifier(event: KeyboardEvent) {
-  return event.ctrlKey || event.metaKey;
-}
-
-function matchesAltShiftShortcut(event: KeyboardEvent, key: string) {
-  return !hasShortcutModifier(event) && event.altKey && event.shiftKey && event.code === `Key${key.toUpperCase()}`;
-}
-
-function matchesStandardShortcut(event: KeyboardEvent, key: string) {
-  return hasShortcutModifier(event) && !event.shiftKey && !event.altKey && event.code === `Key${key.toUpperCase()}`;
-}
-
-function matchesStandardShiftShortcut(event: KeyboardEvent, key: string) {
-  return hasShortcutModifier(event) && event.shiftKey && !event.altKey && event.code === `Key${key.toUpperCase()}`;
-}
-
-function normalizeVideoIds(videoIds: string[], validIds: Set<string>) {
-  return Array.from(new Set(videoIds.filter((videoId) => validIds.has(videoId))));
-}
-
-async function copyTextToClipboard(text: string) {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  if (typeof document === 'undefined') {
-    throw new Error('Clipboard is not available in this environment.');
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.top = '-9999px';
-  textarea.style.left = '-9999px';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  const copied = document.execCommand('copy');
-  document.body.removeChild(textarea);
-  if (!copied) {
-    throw new Error('Fallback clipboard copy failed.');
-  }
-}
-
-function buildScopeSelectionFromKeys(keys: string[], detailKey?: string | null): ScopeSelectionState {
-  const selectedKeys = Array.from(new Set((keys || []).map((key) => String(key || '').trim()).filter(Boolean)));
-  if (!selectedKeys.length) {
-    return {
-      ...EMPTY_SCOPE_SELECTION,
-      detailKey: detailKey ?? null,
-    };
-  }
-  const resolvedDetail = detailKey && selectedKeys.includes(detailKey)
-    ? detailKey
-    : selectedKeys[selectedKeys.length - 1];
-  return {
-    selectedKeys,
-    anchorKey: selectedKeys[0],
-    focusKey: selectedKeys[selectedKeys.length - 1],
-    detailKey: resolvedDetail,
-  };
-}
-
-type IncludeExcludeUndoEntry = IncludeExcludeAction & { historyEventId?: string };
-
-type AppNavigationEntry = {
-  viewScope: ViewScope;
-  inclusionView: InclusionView;
-  activeViewId: string | null;
-  filterModel: ExplorerFilterModel;
-  channelFilterModel: ExplorerFilterModel;
-  selectedVideoId: string | null;
-  channelId: string | null;
-  channelName: string | null;
-  videoScopeChannelKeys: string[] | null;
-  isChannelDrilldownFilterActive: boolean;
-  drilldownPreviousVideoFilter: ExplorerFilterModel | null;
-};
-
-function createHistoryId(prefix = 'event') {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-}
-
-function formatDurationLabel(totalSeconds: number) {
-  const seconds = Math.max(0, Math.round(totalSeconds));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainder = seconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${remainder}s`;
-  if (minutes > 0) return `${minutes}m ${remainder}s`;
-  return `${remainder}s`;
-}
-
-function summarizeFilterModel(filterModel: ExplorerFilterModel) {
-  const entries = Object.entries(filterModel || {});
-  if (!entries.length) return 'No active filters';
-  return entries.map(([column, model]) => {
-    const anyModel = model as any;
-    if (anyModel?.selections && typeof anyModel.selections === 'object') {
-      const parts = Object.entries(anyModel.selections).map(([key, state]) => `${key}:${state === 'true' ? 'yes' : 'no'}`).slice(0, 4);
-      const total = Object.keys(anyModel.selections).length;
-      const suffix = total > 4 ? ` (+${total - 4} more)` : '';
-      return `${column}: ${parts.join(', ')}${suffix}`;
-    }
-    if (Array.isArray(anyModel?.values)) {
-      const values = anyModel.values.map((value: any) => String(value)).slice(0, 4);
-      const suffix = anyModel.values.length > 4 ? ` (+${anyModel.values.length - 4} more)` : '';
-      return `${column}: [${values.join(', ')}]${suffix}`;
-    }
-    const operator = anyModel?.operator || anyModel?.type || 'contains';
-    const value = anyModel?.value ?? anyModel?.filter ?? '';
-    return `${column}: ${operator} ${String(value)}`;
-  }).join(' | ');
-}
-
-function formatVideoTitleChannelLabel(row: any) {
-  const title = resolveVideoTitle(row).trim() || 'Untitled video';
-  const channel = resolveChannelName(row).trim() || 'Unknown channel';
-  return `${title} — ${channel}`;
-}
-
-function buildAlphabetizedVideoTitleChannelList(rows: any[]) {
-  const byVideoId = new Map<string, string>();
-  rows.forEach((row) => {
-    const videoId = resolveVideoId(row);
-    if (!videoId || byVideoId.has(videoId)) return;
-    byVideoId.set(videoId, formatVideoTitleChannelLabel(row));
-  });
-  return Array.from(byVideoId.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-}
-
-
-function describeFilterModelEntry(column: string, model: any) {
-  if (model?.selections && typeof model.selections === 'object') {
-    const parts = Object.entries(model.selections).map(([key, state]) => `${key}: ${state === 'true' ? 'Yes' : 'No'}`).slice(0, 4);
-    const total = Object.keys(model.selections).length;
-    const suffix = total > 4 ? ` (+${total - 4} more)` : '';
-    return `${parts.join(', ')}${suffix}`;
-  }
-  if (Array.isArray(model?.values)) {
-    const values = model.values.map((value: any) => String(value)).slice(0, 4);
-    const suffix = model.values.length > 4 ? ` (+${model.values.length - 4} more)` : '';
-    return `${values.join(', ')}${suffix}`;
-  }
-  const operator = model?.operator || model?.type || 'contains';
-  const value = model?.value ?? model?.filter ?? '';
-  return `${operator} ${String(value)}`.trim();
-}
-
-function resolveEditViewFilterKind(columnName: string, columnType: string, listLikeColumns: Set<string>, booleanMapColumns: Record<string, BooleanMapSchema> = {}) {
-  if (booleanMapColumns[columnName]) return 'booleanMap' as const;
-  if (isTagLikeColumn(columnName, columnType, listLikeColumns)) return 'tag' as const;
-  if (isDurationColumn(columnName)) return 'duration' as const;
-  const type = columnType.toLowerCase();
-  const isNumeric = type.includes('int') || type.includes('double') || type.includes('float') || type.includes('decimal') || type.includes('numeric');
-  return isNumeric ? 'number' as const : 'text' as const;
-}
-
-function summarizeDashboardSnapshot(snapshot: DatasetDashboardSnapshot | SavedViewDashboardSnapshot | undefined) {
-  if (!snapshot) return 'No entries recorded';
-  const views = snapshot.stats.attention.medianViews ?? 0;
-  const comments = snapshot.stats.comments.totalVideoComments ?? 0;
-  const warnings = snapshot.stats.warnings.slice(0, 2);
-  return [
-    `Median views: ${Math.round(views).toLocaleString()}`,
-    `Comments: ${Math.round(comments).toLocaleString()}`,
-    warnings.length ? `Warnings: ${warnings.join(', ')}` : 'Warnings: none',
-  ].join('\n');
-}
-
-function parseDateLabel(timestamp: string | number | null | undefined) {
-  if (!timestamp) return 'n/a';
-  return formatDateDisplay(new Date(timestamp).toISOString());
-}
-
-function buildTagUsageSummary(userTagsByVideoId: Record<string, string[]>) {
-  const counts = new Map<string, number>();
-  Object.values(userTagsByVideoId).forEach((tags) => {
-    const unique = new Set(tags || []);
-    unique.forEach((tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1));
-  });
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 12);
-}
-
-function appendNotesBlock(existingNotes: string | null | undefined, nextBlock: string | null | undefined) {
-  const incoming = String(nextBlock ?? '').trim();
-  const current = String(existingNotes ?? '').trimEnd();
-  if (!incoming) return current;
-  return current ? `${current}\n\n${incoming}` : incoming;
-}
-
-const CHANNEL_USER_TAGS_COLUMN = 'channel_user_tags';
-
-const CHANNEL_BASE_SCHEMA = [
-  { column_name: 'channel_name', column_type: 'VARCHAR' },
-  { column_name: 'channel_id', column_type: 'VARCHAR' },
-  { column_name: CHANNEL_USER_TAGS_COLUMN, column_type: 'VARCHAR[]' },
-  { column_name: 'video_count_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'total_views_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'total_likes_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'total_comments_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'earliest_publish_date', column_type: 'TIMESTAMP' },
-  { column_name: 'latest_publish_date', column_type: 'TIMESTAMP' },
-];
-
-function findVideoChannelColumn(schema: { column_name: string }[]) {
-  const preferred = ['channel_name', 'channelTitle', 'channel', 'ChannelTitle'];
-  for (const candidate of preferred) {
-    if (schema.some((column) => column.column_name === candidate)) return candidate;
-  }
-  const fallback = schema.find((column) => column.column_name.toLowerCase().includes('channel'));
-  return fallback?.column_name ?? null;
-}
-
-function findVideoChannelIdColumn(schema: { column_name: string }[]) {
-  const preferred = ['channelId', 'channel_id', 'Channel_ID', 'channelID'];
-  for (const candidate of preferred) {
-    if (schema.some((column) => column.column_name === candidate)) return candidate;
-  }
-  const fallback = schema.find((column) => {
-    const normalized = column.column_name.toLowerCase();
-    return normalized.includes('channel') && normalized.includes('id');
-  });
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardCategoryColumn(schema: { column_name: string }[]) {
-  const preferred = ['video_category', 'video_category_label', 'category', 'categories'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() == candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => {
-    const normalized = column.column_name.toLowerCase();
-    return normalized.includes('category') && !normalized.includes('topic');
-  });
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardTopicColumn(schema: { column_name: string }[]) {
-  const preferred = ['topic_categories', 'topics', 'topic', 'topicCategories'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() == candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => column.column_name.toLowerCase().includes('topic'));
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardDurationColumn(schema: { column_name: string }[]) {
-  const preferred = ['duration', 'duration_seconds', 'length', 'runtime'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() === candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => isDurationColumn(column.column_name));
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardIntentColumn(schema: { column_name: string }[]) {
-  const preferred = ['content_intent', 'intent'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() === candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => column.column_name.toLowerCase().includes('intent'));
-  return fallback?.column_name ?? null;
-}
-
-function waitForNextPaint() {
-  return new Promise<void>((resolve) => {
-    if (typeof window === 'undefined') {
-      setTimeout(resolve, 0);
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve());
-    });
-  });
-}
-
-function readFileBufferWithProgress(file: File, onProgress?: (completed: number, total: number) => void) {
-  return new Promise<ArrayBuffer>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error(`Failed to read ${file.name}.`));
-    reader.onabort = () => reject(new Error(`Reading ${file.name} was cancelled.`));
-    reader.onprogress = (event) => {
-      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
-    };
-    reader.onload = () => {
-      const result = reader.result;
-      if (!(result instanceof ArrayBuffer)) {
-        reject(new Error(`Failed to read ${file.name}.`));
-        return;
-      }
-      onProgress?.(file.size || result.byteLength, file.size || result.byteLength || 1);
-      resolve(result);
-    };
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function LongTaskOverlay({ progress }: { progress: LongTaskProgress | null }) {
-  if (!progress) return null;
-  const total = Math.max(progress.total, 1);
-  const completed = Math.min(Math.max(progress.completed, 0), total);
-  const ratio = completed / total;
-  const percent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-
-  return (
-    <div className="pointer-events-none fixed inset-0 z-[140] flex items-center justify-center bg-black/18 px-4">
-      <div className="pointer-events-auto w-full max-w-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5 shadow-2xl">
-        <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--text-muted)]">Working</div>
-        <div className="mt-2 text-lg font-semibold text-[var(--text-main)]">{progress.title}</div>
-        {progress.detail ? <div className="mt-1 text-sm text-[var(--text-muted)]">{progress.detail}</div> : null}
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--bg-primary)]">
-          <div
-            className={cn('h-full rounded-full bg-[var(--accent)] transition-all duration-200', progress.indeterminate && 'animate-pulse')}
-            style={{ width: `${Math.max(ratio * 100, completed > 0 ? 6 : 2)}%` }}
-          />
-        </div>
-        <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-          <span>{completed.toLocaleString()} / {total.toLocaleString()} steps</span>
-          <span>{percent}%</span>
-        </div>
-      </div>
-    </div>
-  );
-}
+import {
+  applySupportMappings,
+  buildDefaultProjectSourceState,
+  buildSourceId,
+  computeSourceVisibilityInclusionCounts,
+  createEmptyChannelLinkingState,
+  createEmptyColumnLineage,
+  createEmptyGeneratedMetadata,
+  createEmptyLinkingState,
+  createEmptyRowLineage,
+  createEmptySourceRegistry,
+  createEmptySourceVisibility,
+  ensureGeneratedColumnLineage,
+  flattenGeneratedMetadataForOverlay,
+  GENERATED_SOURCE_ID,
+  joinUnique,
+  LINKING_FILTER_COLUMNS,
+  LINKING_GENERATED_COLUMNS,
+  normalizeJoinKey,
+  reconcileSourceVisibility,
+  resolveChannelRowKey,
+  resolveRecoverableInclusionView,
+  resolveRowLineageKey,
+  withSourceRegistryCounts,
+} from './lib/projectSourceState';
+import {
+  CHANNEL_BASE_SCHEMA,
+  CHANNEL_USER_TAGS_COLUMN,
+  findDashboardCategoryColumn,
+  findDashboardDurationColumn,
+  findDashboardIntentColumn,
+  findDashboardTopicColumn,
+  findVideoChannelColumn,
+  getDefaultChannelVisibleColumns,
+  getDefaultVideoVisibleColumns,
+} from './lib/columnDefaults';
+import {
+  buildChannelMetadataCacheKey,
+  buildDatasetFingerprint,
+  buildExcludedMembershipFingerprint,
+  buildSourceVisibilityFingerprint,
+  buildVideoCorpusFingerprint,
+} from './lib/fingerprints';
+import {
+  buildThumbnailEntriesFromCacheSeed,
+  createObjectUrl,
+  FILTERED_TEMP_THUMBNAIL_SCOPE,
+  revokeDroppedThumbnailUrls,
+  revokeThumbnailUrls,
+  summarizeThumbnailProgress,
+  THUMBNAIL_ZOOM_STEPS,
+} from './lib/thumbnailCache';
+import {
+  appendNotesBlock,
+  buildLegacyNotesFromAnnotations,
+  buildNoteArchiveFiles,
+  buildTagUsageSummary,
+  extractAnnotationsFromRows,
+  extractNotesFromArchive,
+  getArchiveEntry,
+  stripNotesFromAnnotations,
+} from './lib/projectNotes';
+import {
+  hasShortcutModifier,
+  isEditableShortcutTarget,
+  isGridShortcutTarget,
+  matchesAltShiftShortcut,
+  matchesStandardShiftShortcut,
+  matchesStandardShortcut,
+} from './lib/keyboard';
+import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
+import {
+  buildAlphabetizedVideoTitleChannelList,
+  createHistoryId,
+  describeFilterModelEntry,
+  formatDurationLabel,
+  parseDateLabel,
+  resolveEditViewFilterKind,
+  summarizeDashboardSnapshot,
+  summarizeFilterModel,
+} from './lib/researchHistory';
+import type { AppNavigationEntry } from './lib/navigation';
+import { LongTaskOverlay } from './components/LongTaskOverlay';
 
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
