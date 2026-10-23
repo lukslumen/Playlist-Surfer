@@ -1,4 +1,5 @@
-import { DashboardThumbnailCacheSnapshot } from '../types';
+import type { DashboardThumbnailCacheEntry, DashboardThumbnailCacheSnapshot } from '../types';
+import { isSavedViewThumbnailScopeKey } from './dashboardThumbnails';
 
 export const FILTERED_TEMP_THUMBNAIL_SCOPE = 'filtered-temp';
 
@@ -125,4 +126,159 @@ export function revokeDroppedThumbnailUrls(previous?: DashboardThumbnailCacheSna
       URL.revokeObjectURL(entry.objectUrl);
     }
   });
+}
+
+const uniqueUrls = (urls: Array<string | undefined>) => Array.from(new Set(urls.map((url) => String(url || '').trim()).filter(Boolean)));
+const clampIndex = (index: number, urls: string[]) => Math.max(0, Math.min(Math.floor(index), Math.max(urls.length - 1, 0)));
+
+/**
+ * A thumbnail finished loading from candidate `candidateIndex`. Reports from a candidate that is no
+ * longer the active one (a stale <img> event) are ignored. Returns the same entry when nothing changes.
+ */
+export function applyThumbnailEntryLoaded(entry: DashboardThumbnailCacheEntry, candidateIndex: number, loadedUrl?: string): DashboardThumbnailCacheEntry {
+  const resolvedUrl = String(loadedUrl || entry.objectUrl || entry.activeUrl || entry.sourceUrl || '').trim();
+  if (!resolvedUrl) return entry;
+  const urls = uniqueUrls(entry.candidateUrls || [entry.activeUrl, entry.sourceUrl, resolvedUrl]);
+  const index = clampIndex(candidateIndex, urls);
+  if (Number.isFinite(entry.activeCandidateIndex) && Number(entry.activeCandidateIndex) !== index) return entry;
+  if (
+    entry.status === 'loaded'
+    && entry.activeUrl === resolvedUrl
+    && (entry.fallbackIndex ?? 0) === index
+    && (entry.activeCandidateIndex ?? 0) === index
+  ) {
+    return entry;
+  }
+  return {
+    ...entry,
+    status: 'loaded',
+    sourceUrl: urls[index] || entry.sourceUrl,
+    activeUrl: resolvedUrl,
+    candidateUrls: urls,
+    fallbackIndex: index,
+    activeCandidateIndex: index,
+    error: undefined,
+  };
+}
+
+/**
+ * A thumbnail failed to load from candidate `candidateIndex`: move on to the next candidate URL, or
+ * mark the entry failed once all candidates are exhausted. Stale reports are ignored.
+ */
+export function applyThumbnailEntryFailed(entry: DashboardThumbnailCacheEntry, candidateIndex: number, failedUrl?: string): DashboardThumbnailCacheEntry {
+  const urls = uniqueUrls(entry.candidateUrls || [entry.activeUrl, entry.sourceUrl]);
+  if (!urls.length) {
+    if (entry.status === 'failed' && !entry.activeUrl) return entry;
+    return {
+      ...entry,
+      status: 'failed',
+      activeUrl: '',
+      fallbackIndex: 0,
+      activeCandidateIndex: -1,
+      candidateUrls: [],
+      error: entry.error || 'No thumbnail URL available',
+    };
+  }
+  const index = clampIndex(candidateIndex, urls);
+  if (Number.isFinite(entry.activeCandidateIndex) && Number(entry.activeCandidateIndex) !== index) return entry;
+  const currentUrl = String(failedUrl || entry.activeUrl || '').trim();
+  const currentIndex = currentUrl ? urls.findIndex((url) => url === currentUrl) : -1;
+  const fallbackIndex = Math.max(0, Math.min(
+    Number.isFinite(entry.activeCandidateIndex) ? Number(entry.activeCandidateIndex) : (entry.fallbackIndex ?? 0),
+    urls.length - 1,
+  ));
+  const nextIndex = (currentIndex >= 0 ? currentIndex : fallbackIndex) + 1;
+  if (nextIndex < urls.length) {
+    const nextUrl = urls[nextIndex];
+    if (
+      entry.status === 'pending'
+      && entry.activeUrl === nextUrl
+      && fallbackIndex === nextIndex
+      && (entry.activeCandidateIndex ?? nextIndex) === nextIndex
+    ) {
+      return entry;
+    }
+    return {
+      ...entry,
+      status: 'pending',
+      sourceUrl: nextUrl,
+      activeUrl: nextUrl,
+      candidateUrls: urls,
+      fallbackIndex: nextIndex,
+      activeCandidateIndex: nextIndex,
+      error: undefined,
+    };
+  }
+  if (
+    entry.status === 'failed'
+    && !entry.activeUrl
+    && fallbackIndex === urls.length - 1
+    && (entry.activeCandidateIndex ?? fallbackIndex) === fallbackIndex
+  ) {
+    return entry;
+  }
+  return {
+    ...entry,
+    status: 'failed',
+    activeUrl: '',
+    candidateUrls: urls,
+    fallbackIndex: urls.length - 1,
+    activeCandidateIndex: urls.length - 1,
+    error: entry.error || 'Failed to load thumbnail',
+  };
+}
+
+/** Puts failed entries back to their first candidate URL; null when there is nothing to retry. */
+export function resetFailedThumbnailEntries(entries: DashboardThumbnailCacheEntry[]): DashboardThumbnailCacheEntry[] | null {
+  let changed = false;
+  const next = entries.map((entry) => {
+    if (entry.status !== 'failed') return entry;
+    const urls = uniqueUrls(entry.candidateUrls || [entry.sourceUrl]);
+    if (!urls.length) return entry;
+    changed = true;
+    return {
+      ...entry,
+      status: 'pending' as const,
+      sourceUrl: urls[0],
+      activeUrl: urls[0],
+      candidateUrls: urls,
+      fallbackIndex: 0,
+      activeCandidateIndex: 0,
+      error: undefined,
+    };
+  });
+  return changed ? next : null;
+}
+
+/**
+ * Thumbnail caches restored from a project: give each scope a session id, normalise the active
+ * candidate index, and stamp the versions they belong to. Returns the highest session id used.
+ */
+export function normalizeRestoredThumbnailCaches(
+  caches: Record<string, DashboardThumbnailCacheSnapshot>,
+  args: { sessionStart: number; datasetVersion: number; filteredViewVersion: number; savedViewsVersion?: number },
+): { caches: Record<string, DashboardThumbnailCacheSnapshot>; maxSessionId: number } {
+  let counter = args.sessionStart;
+  const next = Object.fromEntries(Object.entries(caches).map(([scopeKey, snapshot]) => {
+    counter += 1;
+    const sessionId = Number.isFinite(snapshot.sessionId) ? Number(snapshot.sessionId) : counter;
+    const entries = (snapshot.entries || []).map((entry) => {
+      const normalizedIndex = Number.isFinite(entry.activeCandidateIndex)
+        ? Number(entry.activeCandidateIndex)
+        : Math.max(0, Number(entry.fallbackIndex ?? 0));
+      return { ...entry, activeCandidateIndex: entry.activeUrl || entry.sourceUrl ? normalizedIndex : -1 };
+    });
+    return [scopeKey, {
+      ...snapshot,
+      sessionId,
+      entries,
+      datasetVersionAtCalculation: args.datasetVersion,
+      filteredViewVersionAtCalculation: scopeKey === FILTERED_TEMP_THUMBNAIL_SCOPE ? args.filteredViewVersion : snapshot.filteredViewVersionAtCalculation,
+      savedViewsVersionAtCalculation: isSavedViewThumbnailScopeKey(scopeKey)
+        ? (args.savedViewsVersion ?? snapshot.savedViewsVersionAtCalculation ?? 0)
+        : snapshot.savedViewsVersionAtCalculation,
+    }];
+  })) as Record<string, DashboardThumbnailCacheSnapshot>;
+  const maxSessionId = Math.max(counter, ...Object.values(next).map((snapshot) => Number(snapshot.sessionId) || 0));
+  return { caches: next, maxSessionId };
 }
