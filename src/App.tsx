@@ -3,229 +3,44 @@ import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
 import { motion, AnimatePresence } from 'motion/react';
 import { useDuckDB } from './hooks/useDuckDB';
-import {
-  AppState,
-  ChannelLinkingState,
-  ColumnLineageState,
-  SavedView,
-  Annotation,
-  IncludeExcludeAction,
-  InclusionView,
-  ExportOptions,
-  ProjectArchiveManifest,
-  ImportSubmission,
-  SpecialMappings,
-  DashboardScope,
-  DashboardTemplateTab,
-  DashboardThumbnailArchiveEntry,
-  DashboardThumbnailCacheIndex,
-  DashboardThumbnailCacheSnapshot,
-  DashboardThumbnailLoadProgress,
-  DashboardThumbnailSortRule,
-  DatasetDashboardSnapshot,
-  ExcludedVideoMeta,
-  ChannelMetadataSnapshot,
-  ImportedChannelMetadataState,
-  ResearchHistoryEvent,
-  ResearchLogCommentSectionId,
-  ResearchLogMarkdownOptions,
-  SavedViewDashboardSnapshot,
-  ViewScope,
-  WatchHistoryEntry,
-  SourceRegistryState,
-  SourceVisibilityState,
-  RowLineageState,
-  GeneratedMetadataState,
-  LinkingState,
-  LinkingGeneratedRowMetadata,
-  LongTaskProgress,
-  SourceKind,
-} from './types';
-import {
-  EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction,
-  getScopeSelection,
-  pruneScopeSelectionAction,
-  selectionReducer,
-  setScopeSelectionAction, type ScopeSelectionUpdate
-} from './lib/selectionState';
+import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ProjectArchiveManifest, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailLoadProgress, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ExcludedVideoMeta, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchHistoryEvent, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
+import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import {
-  ExportDialog,
-  ColumnVisibilitySelector,
-  ResearchLogDialog,
-  ImportDialog,
-  DatasetDashboardDialog,
-  KeyboardShortcutsDialog,
-  CommandPaletteDialog,
-} from './components/Dialogs';
-import {
-  applyFriendlyColumnMappings,
-  applyMerge,
-  buildBatchCopyClipboardPayload,
-  buildChannelMetadataRows,
-  buildImportedChannelMetadataState,
-  buildDisplayRows,
-  buildDisplaySchema,
-  buildResearchLogMarkdown,
-  collectVideoIds,
-  convertRowsToCsv,
-  createProjectManifest,
-  deleteColumnFromProject,
-  deriveSchemaFromRows,
-  partitionRowsByInclusion,
-  detectSpecialMappings,
-  downloadBlob,
-  cleanupAutoSeededResearchDiary,
-  NOTES_COLUMN,
-  formatDateDisplay,
-  resolveTagFilterColumn,
-  resolveChannelId,
-  resolveChannelName,
-  detectIncomingChannelIdColumn,
-  resolveTranscript,
-  resolveVideoTitle,
-  resolveVideoId,
-  sanitizeFileName,
-  stripDeletedColumnsFromRows,
-  stripDeletedColumnsFromSchema,
-  mergeChannelMetadataRows,
-  buildGeneratedMetadataSchema,
-  overlayGeneratedMetadataRows,
-  TRANSCRIPT_COLUMN,
-  USER_TAGS_COLUMN,
-  VIDEO_DESCRIPTION_COLUMN,
-  type BatchCopyExportMode,
-} from './lib/data';
+import { applyFriendlyColumnMappings, applyMerge, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, mergeChannelMetadataRows, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
 import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
-import {
-  buildTagValuesForColumn,
-  buildUnifiedFilterState,
-  detectBooleanMapColumns,
-  detectListLikeColumns,
-  ExplorerFilterModel,
-} from './lib/filterCoordinator';
-import {
-  extractUserTagsFromAnnotations,
-  mergeAnnotationsWithUserTags,
-  stripTagsFromAnnotations,
-  userTagsReducer,
-} from './lib/userTags';
+import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
+import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
 import { buildDatasetDashboardStats } from './lib/datasetDashboard';
 import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
-import {
-  aggregateChannelLinkingFromVideoRows,
-  applyLinkingDomainOverride,
-  buildChannelLinkingSnapshot,
-  buildLinkingStageAAsync,
-  buildLinkingStageB,
-  buildLinkingStageBAsync,
-  profileLinkingColumnCandidates,
-  revertLinkingDomainOverride,
-  type LinkingStageAResult,
-} from './lib/linkingDashboard';
-import {
-  LAST_PROJECT_AUTOSAVE_VERSION,
-  loadLastProjectAutosaveSnapshot,
-  saveLastProjectAutosaveSnapshot,
-  shouldAttemptLastProjectRestore,
-} from './lib/projectAutosave';
-import {
-  THUMBNAIL_LIMIT,
-  buildSavedViewThumbnailScopeKey,
-  buildThumbnailSortSignature,
-  inferFileExtensionFromMimeType,
-  isPersistentThumbnailScopeKey,
-  isSavedViewThumbnailScopeKey,
-  resolveThumbnailCacheLabel,
-  sanitizeThumbnailPathSegment,
-  selectThumbnailCandidates,
-} from './lib/dashboardThumbnails';
+import { aggregateChannelLinkingFromVideoRows, applyLinkingDomainOverride, buildChannelLinkingSnapshot, buildLinkingStageAAsync, buildLinkingStageB, buildLinkingStageBAsync, profileLinkingColumnCandidates, revertLinkingDomainOverride, type LinkingStageAResult } from './lib/linkingDashboard';
+import { LAST_PROJECT_AUTOSAVE_VERSION, loadLastProjectAutosaveSnapshot, saveLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
+import { THUMBNAIL_LIMIT, buildSavedViewThumbnailScopeKey, buildThumbnailSortSignature, inferFileExtensionFromMimeType, isPersistentThumbnailScopeKey, isSavedViewThumbnailScopeKey, resolveThumbnailCacheLabel, sanitizeThumbnailPathSegment, selectThumbnailCandidates } from './lib/dashboardThumbnails';
 import { cn } from './lib/utils';
 import { getBootPersistedStateJson, savePersistedState } from './lib/persistedState';
-import {
-  normalizeVideoIds,
-  pruneInclusionState,
-} from './lib/inclusion';
-import {
-  applySupportMappings,
-  buildDefaultProjectSourceState,
-  buildSourceId,
-  computeSourceVisibilityInclusionCounts,
-  createEmptyChannelLinkingState,
-  createEmptyColumnLineage,
-  createEmptyGeneratedMetadata,
-  createEmptyLinkingState,
-  createEmptyRowLineage,
-  createEmptySourceRegistry,
-  createEmptySourceVisibility,
-  ensureGeneratedColumnLineage,
-  flattenGeneratedMetadataForOverlay,
-  GENERATED_SOURCE_ID,
-  joinUnique,
-  LINKING_FILTER_COLUMNS,
-  LINKING_GENERATED_COLUMNS,
-  normalizeJoinKey,
-  reconcileSourceVisibility,
-  resolveChannelRowKey,
-  resolveRecoverableInclusionView,
-  resolveRowLineageKey,
-  withSourceRegistryCounts,
-} from './lib/projectSourceState';
-import {
-  CHANNEL_BASE_SCHEMA,
-  CHANNEL_USER_TAGS_COLUMN,
-  findDashboardCategoryColumn,
-  findDashboardDurationColumn,
-  findDashboardIntentColumn,
-  findDashboardTopicColumn,
-  findVideoChannelColumn,
-  getDefaultChannelVisibleColumns,
-  getDefaultVideoVisibleColumns,
-} from './lib/columnDefaults';
-import {
-  buildChannelMetadataCacheKey,
-  buildDatasetFingerprint,
-  buildExcludedMembershipFingerprint,
-  buildSourceVisibilityFingerprint,
-  buildVideoCorpusFingerprint,
-} from './lib/fingerprints';
-import {
-  buildThumbnailEntriesFromCacheSeed,
-  createObjectUrl,
-  FILTERED_TEMP_THUMBNAIL_SCOPE,
-  revokeDroppedThumbnailUrls,
-  revokeThumbnailUrls,
-  summarizeThumbnailProgress,
-  THUMBNAIL_ZOOM_STEPS,
-} from './lib/thumbnailCache';
-import {
-  appendNotesBlock,
-  buildLegacyNotesFromAnnotations,
-  buildNoteArchiveFiles,
-  buildTagUsageSummary,
-  extractAnnotationsFromRows,
-  extractNotesFromArchive,
-  getArchiveEntry,
-  stripNotesFromAnnotations,
-} from './lib/projectNotes';
+import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
+import { applySupportMappings, buildDefaultProjectSourceState, buildSourceId, computeSourceVisibilityInclusionCounts, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, GENERATED_SOURCE_ID, joinUnique, LINKING_FILTER_COLUMNS, LINKING_GENERATED_COLUMNS, normalizeJoinKey, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
+import { CHANNEL_BASE_SCHEMA, CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
+import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
+import { buildThumbnailEntriesFromCacheSeed, createObjectUrl, FILTERED_TEMP_THUMBNAIL_SCOPE, revokeDroppedThumbnailUrls, revokeThumbnailUrls, summarizeThumbnailProgress, THUMBNAIL_ZOOM_STEPS } from './lib/thumbnailCache';
+import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, buildTagUsageSummary, extractAnnotationsFromRows, extractNotesFromArchive, getArchiveEntry, stripNotesFromAnnotations } from './lib/projectNotes';
 import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
-import {
-  describeFilterModelEntry,
-  formatDurationLabel,
-  parseDateLabel,
-  resolveEditViewFilterKind,
-  summarizeDashboardSnapshot,
-  summarizeFilterModel,
-} from './lib/researchHistory';
+import { describeFilterModelEntry, formatDurationLabel, parseDateLabel, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
 import type { AppNavigationEntry } from './lib/navigation';
 import { LongTaskOverlay } from './components/LongTaskOverlay';
 import { useShortcuts } from './hooks/useShortcuts';
 import { useDialogs } from './state/useDialogs';
 import { useResearchHistory } from './state/useResearchHistory';
 import { useInclusionActions, useInclusionState } from './state/useInclusion';
+import { ExportDialog } from './components/dialogs/ExportDialog';
+import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
+import { ResearchLogDialog } from './components/dialogs/ResearchLogDialog';
+import { ImportDialog } from './components/dialogs/ImportDialog';
+import { DatasetDashboardDialog } from './components/dialogs/DatasetDashboardDialog';
+import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog';
+import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog';
 
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
