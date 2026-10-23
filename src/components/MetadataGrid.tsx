@@ -43,8 +43,9 @@ interface MetadataGridProps {
   visibleColumns: string[];
   onFileDrop?: (file: File) => void;
   inclusionView: InclusionView;
-  onMoveSelection?: () => void;
-  onExcludeSelection?: () => void;
+  /** Receives the grid's own selected keys, which can be newer than the last render's props. */
+  onMoveSelection?: (keys: string[]) => void;
+  onExcludeSelection?: (keys: string[]) => void;
   onMoveVideos?: (videoIds: string[]) => void;
   viewScope?: ViewScope;
   onVideoChannelClick?: (args: { channelName: string; row: any }) => void;
@@ -505,9 +506,11 @@ export default function MetadataGrid({
     const api = gridApiRef.current;
     const current = selectionRef.current;
 
-    if ((event.ctrlKey || event.metaKey) && isDeleteKey(event.key) && selectedRowCount > 0) {
+    const currentKeys = current.selectedKeys;
+
+    if ((event.ctrlKey || event.metaKey) && isDeleteKey(event.key) && currentKeys.length > 0) {
       event.preventDefault();
-      onExcludeSelection?.();
+      onExcludeSelection?.(currentKeys);
       return;
     }
 
@@ -546,10 +549,10 @@ export default function MetadataGrid({
       return;
     }
 
-    if (isDeleteKey(event.key) && selectedRowCount > 0) {
+    if (isDeleteKey(event.key) && currentKeys.length > 0) {
       event.preventDefault();
-      if (isChannelScope) onExcludeSelection?.();
-      else onMoveSelection?.();
+      if (isChannelScope) onExcludeSelection?.(currentKeys);
+      else onMoveSelection?.(currentKeys);
       return;
     }
 
@@ -611,7 +614,7 @@ export default function MetadataGrid({
       detailKey: nextKey,
     });
     api.ensureIndexVisible(nextIndex, 'middle');
-  }, [applySelection, clearGridSelection, getDisplayedKeys, getRangeSelectionKeys, isChannelScope, onExcludeSelection, onMoveSelection, resolveRowKey, selectedRowCount, syncSelectedRows]);
+  }, [applySelection, clearGridSelection, getDisplayedKeys, getRangeSelectionKeys, isChannelScope, onExcludeSelection, onMoveSelection, resolveRowKey, syncSelectedRows]);
 
   const handleCellContextMenu = useCallback((event: CellContextMenuEvent) => {
     if (isChannelScope) return;

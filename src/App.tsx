@@ -3270,17 +3270,26 @@ export default function App() {
     applyIncludeExcludeAction(videoIds);
   }, [applyIncludeExcludeAction]);
 
-  const handleMoveSelectedVideos = useCallback(() => {
-    const nextVideoIds = selectedVideoIdsForActions;
+  // The grid passes its own keys: a shortcut pressed right after a click can arrive before App re-renders.
+  const handleMoveSelectedVideos = useCallback((videoIdsFromGrid?: string[]) => {
+    const fromGrid = Array.isArray(videoIdsFromGrid);
+    const nextVideoIds = fromGrid ? videoIdsFromGrid : selectedVideoIdsForActions;
     if (nextVideoIds.length === 0) return;
     const targetKind = resolveInclusionActionKind(inclusionView);
+    const areAllVisibleSelected = fromGrid
+      ? (() => {
+          if (!visibleVideoIds.length || nextVideoIds.length !== visibleVideoIds.length) return false;
+          const nextSet = new Set(nextVideoIds);
+          return visibleVideoIds.every((videoId) => nextSet.has(videoId));
+        })()
+      : areAllFilteredVideosSelectedForAction;
     applyIncludeExcludeAction(nextVideoIds, targetKind, {
       scope: 'videos',
-      selectionMode: targetKind === 'exclude' && areAllFilteredVideosSelectedForAction ? 'filtered_bulk' : 'manual',
+      selectionMode: targetKind === 'exclude' && areAllVisibleSelected ? 'filtered_bulk' : 'manual',
       filterSummary: summarizeFilterModel(filterModel),
-      selectedRows: selectedRowsForBatchCopy,
+      selectedRows: fromGrid ? undefined : selectedRowsForBatchCopy,
     });
-  }, [applyIncludeExcludeAction, areAllFilteredVideosSelectedForAction, filterModel, inclusionView, selectedRowsForBatchCopy, selectedVideoIdsForActions]);
+  }, [applyIncludeExcludeAction, areAllFilteredVideosSelectedForAction, filterModel, inclusionView, selectedRowsForBatchCopy, selectedVideoIdsForActions, visibleVideoIds]);
 
   // The batch button and Ctrl/Cmd+Delete used to always exclude, which did nothing in the Excluded view.
   const handleExcludeSelectedVideos = handleMoveSelectedVideos;
