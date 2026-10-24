@@ -46,6 +46,7 @@ export function restoreFailedToast(fileName: string, error: unknown): ToastOptio
 export function autosaveRestoreFailedToast(error: unknown): ToastOptions {
   return {
     kind: 'error',
+    key: 'autosave-restore',
     message: "Couldn't reopen your last project",
     detail: `${errorDetail(error) ? `${errorDetail(error)} ` : ''}Import the CSV or a project backup to continue.`,
   };

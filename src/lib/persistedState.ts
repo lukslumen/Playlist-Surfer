@@ -15,6 +15,7 @@ interface StoredAppState {
   json: string;
 }
 
+const PRELOAD_TIMEOUT_MS = 3000;
 let bootStateJson: string | null = null;
 
 function readLegacyState(): string | null {
@@ -38,7 +39,11 @@ async function readStoredState(): Promise<StoredAppState | null> {
 /** Loads the saved state before the first render, so App can read it synchronously. */
 export async function preloadPersistedState(): Promise<void> {
   try {
-    const stored = await readStoredState();
+    // Some browsers never answer indexedDB.open; don't leave the page blank waiting for it.
+    const stored = await Promise.race([
+      readStoredState(),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Timed out opening IndexedDB.')), PRELOAD_TIMEOUT_MS)),
+    ]);
     bootStateJson = stored?.json ?? readLegacyState();
   } catch (error) {
     console.warn('[state] Could not read saved state from IndexedDB; falling back to localStorage.', error);

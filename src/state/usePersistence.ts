@@ -37,6 +37,8 @@ export function usePersistence(args: {
   const rowsSnapshotRef = useRef({ rows, schema, fileName });
   rowsSnapshotRef.current = { rows, schema, fileName };
   const savedRowsRef = useRef<{ rows: any[]; schema: ColumnSchema[]; fileName: string | null } | null>(null);
+  // Rows that were just read back from the autosave; writing them again would only repeat the same data.
+  const restoredRowsRef = useRef<any[] | null>(null);
 
   // Keep a stable reference while nothing changed, so the effect below only runs on real changes.
   if (!shallowEqualRecords(latestStateRef.current, state)) {
@@ -58,6 +60,11 @@ export function usePersistence(args: {
   const saveRowsNow = useCallback(async (reason: string) => {
     const current = rowsSnapshotRef.current;
     if (!current.rows.length || !current.schema.length) return;
+    if (current.rows === restoredRowsRef.current) {
+      savedRowsRef.current = current;
+      return;
+    }
+    restoredRowsRef.current = null;
     const saved = savedRowsRef.current;
     if (saved && saved.rows === current.rows && saved.schema === current.schema && saved.fileName === current.fileName) return;
     savedRowsRef.current = current;
@@ -116,5 +123,10 @@ export function usePersistence(args: {
   /** The most recent state handed to the hook (used when restoring an autosaved dataset). */
   const getLatestPersistedState = useCallback(() => latestStateRef.current, []);
 
-  return { getLatestPersistedState };
+  /** Marks rows loaded from the autosave as already saved. */
+  const markRowsRestored = useCallback((restoredRows: any[]) => {
+    restoredRowsRef.current = restoredRows;
+  }, []);
+
+  return { getLatestPersistedState, markRowsRestored };
 }

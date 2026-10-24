@@ -67,6 +67,10 @@ export function openAutosaveDb(): Promise<IDBDatabase> {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error || new Error('Failed to open autosave database.'));
   });
+  // Let a later call try again instead of failing every save for the rest of the session.
+  dbPromise.catch(() => {
+    dbPromise = null;
+  });
 
   return dbPromise;
 }

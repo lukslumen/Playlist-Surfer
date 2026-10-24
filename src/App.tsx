@@ -322,6 +322,10 @@ export default function App() {
     hasBlockingOverlay,
     closeTopOverlay,
   } = useDialogs({ isImportOpen, closeImport });
+  const isImportOpenRef = useRef(isImportOpen);
+  useEffect(() => {
+    isImportOpenRef.current = isImportOpen;
+  }, [isImportOpen]);
   // Lazy dialogs mount on first open and then stay mounted, so their internal state survives closing.
   const [hasOpenedDashboard, setHasOpenedDashboard] = useState(false);
   const [hasOpenedResearchLog, setHasOpenedResearchLog] = useState(false);
@@ -774,7 +778,7 @@ export default function App() {
     channelNotesById,
     channelTagsById,
   };
-  const { getLatestPersistedState } = usePersistence({
+  const { getLatestPersistedState, markRowsRestored } = usePersistence({
     state: persistedAppState,
     rows: sourceRows,
     schema: sourceSchema,
@@ -1117,6 +1121,12 @@ export default function App() {
         console.warn(`[autosave] Restore skipped (${trigger}): no autosave snapshot found.`);
         return;
       }
+      // Reading a large snapshot takes a while; never replace a dataset the user imported meanwhile,
+      // or reset an import dialog they are filling in.
+      if (sourceRowsRef.current.length > 0 || isImportOpenRef.current) {
+        console.warn(`[autosave] Restore skipped (${trigger}): a dataset was loaded while the snapshot was being read.`);
+        return;
+      }
 
       const plan = planAutosaveRestore(autosavedSnapshot, (getLatestPersistedState() ?? persisted) as SavedAppState);
       if (plan.recoveredInclusion !== plan.preferredInclusion) {
@@ -1125,6 +1135,7 @@ export default function App() {
           `${plan.preferredInclusion} had no visible rows.`,
         );
       }
+      markRowsRestored(plan.project.rows);
       hydrateProject(plan.project);
       console.warn(`[autosave] Restore completed (${trigger}) from snapshot saved at ${autosavedSnapshot.savedAt}.`);
     } catch (error) {
@@ -1133,10 +1144,13 @@ export default function App() {
     } finally {
       isAutoRestoreInFlightRef.current = false;
     }
-  }, [getLatestPersistedState, hydrateProject, persisted, showToast]);
+  }, [getLatestPersistedState, hydrateProject, markRowsRestored, persisted, showToast]);
 
+  // The effect below re-runs when the restore callback changes; only the first run is the mount attempt.
+  const hasAttemptedMountRestoreRef = useRef(false);
   useEffect(() => {
-    const mountRaf = window.requestAnimationFrame(() => {
+    const mountRaf = hasAttemptedMountRestoreRef.current ? 0 : window.requestAnimationFrame(() => {
+      hasAttemptedMountRestoreRef.current = true;
       void attemptAutoRestoreLastProject('mount');
     });
     const handlePageShow = () => {
@@ -1678,20 +1692,34 @@ export default function App() {
   const handleBatchRemoveChannelTag = useCallback((tag: string) => removeTagFromChannelKeys(selectedChannelKeys, tag), [removeTagFromChannelKeys, selectedChannelKeys]);
   const handleBatchApplyChannelNotes = useCallback((notes: string) => appendNotesToChannelKeys(selectedChannelKeys, notes), [appendNotesToChannelKeys, selectedChannelKeys]);
 
-  const handleBatchExcludeChannels = useCallback(() => {
-    const nextVideoIds = Array.from(new Set(selectedChannelVideoRowsForActions.map((row) => resolveVideoId(row)).filter(Boolean) as string[]));
+  // The grid passes its own keys: a shortcut pressed right after a click can arrive before App re-renders.
+  const handleBatchExcludeChannels = useCallback((channelKeysFromGrid?: string[]) => {
+    const fromGrid = Array.isArray(channelKeysFromGrid);
+    const channelKeys = fromGrid ? channelKeysFromGrid : selectedChannelKeys;
+    const channelVideoRows = fromGrid
+      ? channelKeys.flatMap((channelKey) => channelVideoRowsByKey.get(channelKey) || [])
+      : selectedChannelVideoRowsForActions;
+    const nextVideoIds = Array.from(new Set(channelVideoRows.map((row) => resolveVideoId(row)).filter(Boolean) as string[]));
     if (nextVideoIds.length === 0) return;
     const targetKind: IncludeExcludeAction['kind'] = inclusionView === 'excluded' ? 'restore' : 'exclude';
+    const allFilteredSelected = fromGrid
+      ? (() => {
+          const filteredKeys = filteredChannelRows.map((row) => resolveChannelRowKey(row)).filter(Boolean);
+          if (!filteredKeys.length || filteredKeys.length !== channelKeys.length) return false;
+          const keySet = new Set(channelKeys);
+          return filteredKeys.every((key) => keySet.has(key));
+        })()
+      : areAllFilteredChannelsSelectedForAction;
     applyIncludeExcludeAction(nextVideoIds, targetKind, {
-      reason: selectedChannelKeys.length === 1
+      reason: channelKeys.length === 1
         ? 'Batch action from channel viewer.'
-        : `Batch action from channel viewer for ${selectedChannelKeys.length.toLocaleString()} selected channels.`,
+        : `Batch action from channel viewer for ${channelKeys.length.toLocaleString()} selected channels.`,
       scope: 'channels',
-      selectionMode: targetKind === 'exclude' && areAllFilteredChannelsSelectedForAction ? 'filtered_bulk' : 'manual',
+      selectionMode: targetKind === 'exclude' && allFilteredSelected ? 'filtered_bulk' : 'manual',
       filterSummary: summarizeFilterModel(channelFilterModel),
-      selectedRows: selectedChannelVideoRowsForActions,
+      selectedRows: channelVideoRows,
     });
-  }, [applyIncludeExcludeAction, areAllFilteredChannelsSelectedForAction, channelFilterModel, inclusionView, selectedChannelKeys, selectedChannelVideoRowsForActions]);
+  }, [applyIncludeExcludeAction, areAllFilteredChannelsSelectedForAction, channelFilterModel, channelVideoRowsByKey, filteredChannelRows, inclusionView, selectedChannelKeys, selectedChannelVideoRowsForActions]);
 
   const handleBatchCopyChannelSelection = useCallback(async (mode: BatchCopyExportMode) => {
     const channelRowsForCopy = selectedChannelRows;

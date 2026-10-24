@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { ColumnSchema, ImportOptions } from '../types';
 
+const DUCKDB_START_TIMEOUT_MS = 60_000;
+
 export function useDuckDB() {
   const workerRef = useRef<Worker | null>(null);
   const [isReady, setIsReady] = useState(false);
@@ -39,9 +41,22 @@ export function useDuckDB() {
 
     workerRef.current = worker;
 
+    // Without these, an engine that never starts (offline, CDN blocked) would leave imports waiting forever.
+    const failStart = (message: string) => {
+      setError(message);
+      readyRef.current?.reject(new Error(message));
+    };
+    worker.onerror = (event) => {
+      failStart(`The CSV engine (DuckDB) could not start: ${event.message || 'the worker failed to load'}.`);
+    };
+    const startTimeout = setTimeout(() => {
+      failStart('The CSV engine (DuckDB) did not start within 60 seconds. Check your connection and reload the page.');
+    }, DUCKDB_START_TIMEOUT_MS);
+
     const id = Math.random().toString(36).substring(7);
     worker.postMessage({ type: 'INIT', id });
     callbacksRef.current.set(id, (data) => {
+      clearTimeout(startTimeout);
       if (data?.error) {
         readyRef.current?.reject(new Error(`The CSV engine (DuckDB) could not start: ${data.error}`));
         return;
@@ -51,6 +66,7 @@ export function useDuckDB() {
     });
 
     return () => {
+      clearTimeout(startTimeout);
       worker.terminate();
     };
   }, []);
