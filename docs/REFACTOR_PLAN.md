@@ -120,11 +120,13 @@ Totals: 68 unit tests and 17 e2e tests.
     - the grid's channel-name button called a handler captured when the columns were last built;
     - the import dialog's merge preview ignored a switch to a channel-metadata import.
 
-Tests: 78 unit and 23 e2e.
+21. **YouTube player → `components/detail/useYouTubePlayer.ts`.** The hook covers the player lifecycle, its state and duration, and watch-session tracking. The "counts as watched" rule is now a pure, tested `qualifiesAsWatched`. DetailPanel went from 1,014 to 836 lines. Checked by hand in the browser: the embed loads, play and pause are tracked, a 5.7 s session is recorded with the correct duration, and switching videos rebuilds the player.
+
+Tests: 79 unit and 22 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
-- **DetailPanel's single-video view** (YouTube player, watch sessions, timestamps): extract a `useYouTubePlayer` hook, with a manual check, since there's no automated coverage of the embed.
 - **The 1M-row safety valve:** keep long text out of the grid rows. Not needed for the 100k target.
+- **Push the three branches and open the PRs** (needs a GitHub login on this Mac).
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 

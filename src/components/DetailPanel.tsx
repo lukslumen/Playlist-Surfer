@@ -4,7 +4,8 @@ import { Annotation, InclusionView, QuoteRef, TimestampRef } from '../types';
 import { BatchCopyExportMode, resolvePublishedAt, resolveTranscript, resolveVideoDescription, resolveVideoId, resolveVideoTags, resolveVideoTitle, resolveViews, sortQuoteRefs, TRANSCRIPT_COLUMN } from '../lib/data';
 import { buildMarkerPreview, insertAtPlayhead, parseTimestampDocument, removeById } from '../lib/timestampNotes';
 import { appendQuotedText, timestampRefsEqual } from '../lib/detailNotes';
-import { loadYouTubeApi, shouldIgnorePlayerShortcut } from '../lib/youtubeApi';
+import { shouldIgnorePlayerShortcut } from '../lib/youtubeApi';
+import { useYouTubePlayer } from './detail/useYouTubePlayer';
 import { InputRow } from './detail/InputRow';
 import { TimestampMarkerRail } from './detail/TimestampMarkerRail';
 import { TranscriptViewer } from './detail/TranscriptViewer';
@@ -90,15 +91,9 @@ export default function DetailPanel({
   const [isEditingTranscript, setIsEditingTranscript] = useState(false);
   const [transcriptEditValue, setTranscriptEditValue] = useState('');
   const [activeRange, setActiveRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
-  const playerShellRef = useRef<HTMLDivElement | null>(null);
-  const playerFrameRef = useRef<HTMLDivElement | null>(null);
-  const playerRef = useRef<any>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLDivElement | null>(null);
-  const [playerDuration, setPlayerDuration] = useState(0);
-  const [playerState, setPlayerState] = useState<number | null>(null);
-  const [playerLoadError, setPlayerLoadError] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [isNotesDirty, setIsNotesDirty] = useState(false);
   const [timestampUndoState, setTimestampUndoState] = useState<TimestampUndoState | null>(null);
@@ -121,23 +116,6 @@ export default function DetailPanel({
   const notesDraftRef = useRef('');
   const isNotesDirtyRef = useRef(false);
   const activeVideoIdRef = useRef<string | null>(null);
-  const watchSessionRef = useRef<{
-    videoId: string | null;
-    title: string;
-    startedAtMs: number | null;
-    accumulatedSeconds: number;
-    segmentStartedAtMs: number | null;
-    segmentStartedPlayerSeconds: number | null;
-    durationSeconds: number | null;
-  }>({
-    videoId: null,
-    title: '',
-    startedAtMs: null,
-    accumulatedSeconds: 0,
-    segmentStartedAtMs: null,
-    segmentStartedPlayerSeconds: null,
-    durationSeconds: null,
-  });
 
   useEffect(() => {
     setDetailMode('description');
@@ -159,72 +137,19 @@ export default function DetailPanel({
     return base == null ? '' : String(base);
   }, [effectiveRow]);
   const videoTitle = useMemo(() => resolveVideoTitle(effectiveRow), [effectiveRow]);
+  const {
+    playerShellRef,
+    playerFrameRef,
+    playerRef,
+    playerState,
+    playerDuration,
+    playerLoadError,
+  } = useYouTubePlayer({ enabled: !hasMultiSelection, videoId, videoTitle, onWatchSession });
   const currentNotes = savedNotes || '';
   const parsedTimestampDocument = useMemo(
     () => parseTimestampDocument(notesDraft, annotation?.timestampRefs || [], playerDuration),
     [annotation?.timestampRefs, notesDraft, playerDuration],
   );
-
-  const closeActiveWatchSegment = useCallback((player?: any) => {
-    const session = watchSessionRef.current;
-    if (session.segmentStartedAtMs === null) return;
-    const nowMs = Date.now();
-    const currentPlayerSeconds = Number(player?.getCurrentTime?.() ?? Number.NaN);
-    const hasPlayerDelta = Number.isFinite(currentPlayerSeconds) && session.segmentStartedPlayerSeconds !== null;
-    const delta = hasPlayerDelta
-      ? Math.max(0, currentPlayerSeconds - Number(session.segmentStartedPlayerSeconds))
-      : Math.max(0, (nowMs - session.segmentStartedAtMs) / 1000);
-    session.accumulatedSeconds += delta;
-    session.segmentStartedAtMs = null;
-    session.segmentStartedPlayerSeconds = null;
-  }, []);
-
-  const flushWatchSession = useCallback((player?: any) => {
-    const session = watchSessionRef.current;
-    closeActiveWatchSegment(player);
-    if (!session.videoId || session.startedAtMs === null || session.accumulatedSeconds <= 0) {
-      watchSessionRef.current = {
-        videoId: null,
-        title: '',
-        startedAtMs: null,
-        accumulatedSeconds: 0,
-        segmentStartedAtMs: null,
-        segmentStartedPlayerSeconds: null,
-        durationSeconds: null,
-      };
-      return;
-    }
-
-    const durationSeconds = session.durationSeconds && session.durationSeconds > 0
-      ? session.durationSeconds
-      : null;
-    const watchedSeconds = Number(session.accumulatedSeconds.toFixed(1));
-    const qualifies = watchedSeconds > 30 || (
-      durationSeconds !== null
-      && durationSeconds <= 30
-      && watchedSeconds >= Math.max(durationSeconds * 0.9, durationSeconds - 1)
-    );
-
-    onWatchSession?.({
-      videoId: session.videoId,
-      title: session.title || 'Untitled Video',
-      startedAt: new Date(session.startedAtMs).toISOString(),
-      endedAt: new Date().toISOString(),
-      watchedSeconds,
-      durationSeconds,
-      qualifies,
-    });
-
-    watchSessionRef.current = {
-      videoId: null,
-      title: '',
-      startedAtMs: null,
-      accumulatedSeconds: 0,
-      segmentStartedAtMs: null,
-      segmentStartedPlayerSeconds: null,
-      durationSeconds: null,
-    };
-  }, [closeActiveWatchSegment, onWatchSession]);
 
   const setNotesDraftState = useCallback((nextNotes: string, dirty: boolean) => {
     setNotesDraft(nextNotes);
@@ -289,13 +214,7 @@ export default function DetailPanel({
     });
     clearTimestampUndo();
     applyTimestampMutation(result.notes, result.timestampRefs, { cursorPosition: result.cursorPosition });
-  }, [
-    applyTimestampMutation,
-    clearTimestampUndo,
-    parsedTimestampDocument.timestampRefs,
-    playerDuration,
-    videoId,
-  ]);
+  }, [applyTimestampMutation, clearTimestampUndo, parsedTimestampDocument.timestampRefs, playerDuration, playerRef, videoId]);
 
   const handleDeleteTimestamp = useCallback((entryId: string) => {
     if (!videoId) return;
@@ -410,109 +329,6 @@ export default function DetailPanel({
   }, [autoSizeTextarea, isEditingTranscript, transcriptEditValue, videoId]);
 
   useEffect(() => {
-    let cancelled = false;
-    flushWatchSession(playerRef.current);
-    setPlayerDuration(0);
-    setPlayerLoadError(null);
-
-    if (hasMultiSelection || !videoId || !playerShellRef.current) {
-      playerRef.current?.destroy?.();
-      playerRef.current = null;
-      setPlayerState(null);
-      setPlayerDuration(0);
-      return;
-    }
-
-    loadYouTubeApi().then((YT) => {
-      if (cancelled || !playerShellRef.current) return;
-
-      playerRef.current?.destroy?.();
-      playerRef.current = null;
-      playerShellRef.current.innerHTML = '';
-
-      const mountNode = document.createElement('div');
-      mountNode.style.width = '100%';
-      mountNode.style.height = '100%';
-      mountNode.className = 'yt-player-host';
-      playerShellRef.current.appendChild(mountNode);
-
-      playerRef.current = new YT.Player(mountNode, {
-        width: '100%',
-        height: '100%',
-        videoId,
-        playerVars: {
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-        },
-        events: {
-          onReady: (event: any) => {
-            setPlayerLoadError(null);
-            const duration = Number(event.target?.getDuration?.() || 0);
-            setPlayerDuration(Number.isFinite(duration) ? Math.max(0, Math.floor(duration)) : 0);
-            setPlayerState(Number(event.target?.getPlayerState?.() ?? null));
-            watchSessionRef.current.durationSeconds = Number.isFinite(duration) ? duration : null;
-            const iframe = event.target?.getIframe?.();
-            if (iframe) {
-              iframe.style.width = '100%';
-              iframe.style.height = '100%';
-              iframe.style.position = 'absolute';
-              iframe.style.inset = '0';
-              iframe.style.border = '0';
-            }
-            playerFrameRef.current?.setAttribute('tabindex', '-1');
-          },
-          onStateChange: (event: any) => {
-            const duration = Number(event.target?.getDuration?.() || 0);
-            setPlayerDuration(Number.isFinite(duration) ? Math.max(0, Math.floor(duration)) : 0);
-            const nextState = Number(event?.data ?? event.target?.getPlayerState?.() ?? null);
-            setPlayerState(nextState);
-            watchSessionRef.current.durationSeconds = Number.isFinite(duration) ? duration : null;
-
-            const ytState = window.YT?.PlayerState;
-            const session = watchSessionRef.current;
-            if (nextState === ytState?.PLAYING) {
-              if (!session.videoId) {
-                session.videoId = videoId;
-                session.title = videoTitle;
-                session.startedAtMs = Date.now();
-                session.accumulatedSeconds = 0;
-              }
-              if (session.segmentStartedAtMs === null) {
-                session.segmentStartedAtMs = Date.now();
-                const playerSeconds = Number(event.target?.getCurrentTime?.() ?? Number.NaN);
-                session.segmentStartedPlayerSeconds = Number.isFinite(playerSeconds) ? playerSeconds : null;
-              }
-              window.setTimeout(() => playerFrameRef.current?.focus({ preventScroll: true }), 0);
-            } else {
-              closeActiveWatchSegment(event.target);
-              if (nextState === ytState?.PAUSED || nextState === ytState?.ENDED) {
-                flushWatchSession(event.target);
-              }
-            }
-
-            const iframe = event.target?.getIframe?.();
-            if (iframe) {
-              iframe.style.width = '100%';
-              iframe.style.height = '100%';
-            }
-          },
-        },
-      });
-    }).catch((error) => {
-      console.error('Failed to initialize YouTube player', error);
-      setPlayerLoadError('Unable to load the YouTube player. Check browser tracking/privacy settings and reload the page.');
-    });
-
-    return () => {
-      cancelled = true;
-      flushWatchSession(playerRef.current);
-      playerRef.current?.destroy?.();
-      playerRef.current = null;
-    };
-  }, [closeActiveWatchSegment, flushWatchSession, hasMultiSelection, videoId, videoTitle]);
-
-  useEffect(() => {
     if (hasMultiSelection || !videoId) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -581,7 +397,7 @@ export default function DetailPanel({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleAddTimestamp, hasMultiSelection, playerState, videoId]);
+  }, [handleAddTimestamp, hasMultiSelection, playerFrameRef, playerRef, playerState, videoId]);
 
   if (hasMultiSelection) {
     return (
