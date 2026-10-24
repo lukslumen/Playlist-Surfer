@@ -165,7 +165,7 @@ export default function DetailPanel({
     [annotation?.timestampRefs, notesDraft, playerDuration],
   );
 
-  const closeActiveWatchSegment = (player?: any) => {
+  const closeActiveWatchSegment = useCallback((player?: any) => {
     const session = watchSessionRef.current;
     if (session.segmentStartedAtMs === null) return;
     const nowMs = Date.now();
@@ -177,9 +177,9 @@ export default function DetailPanel({
     session.accumulatedSeconds += delta;
     session.segmentStartedAtMs = null;
     session.segmentStartedPlayerSeconds = null;
-  };
+  }, []);
 
-  const flushWatchSession = (player?: any) => {
+  const flushWatchSession = useCallback((player?: any) => {
     const session = watchSessionRef.current;
     closeActiveWatchSegment(player);
     if (!session.videoId || session.startedAtMs === null || session.accumulatedSeconds <= 0) {
@@ -224,7 +224,7 @@ export default function DetailPanel({
       segmentStartedPlayerSeconds: null,
       durationSeconds: null,
     };
-  };
+  }, [closeActiveWatchSegment, onWatchSession]);
 
   const setNotesDraftState = useCallback((nextNotes: string, dirty: boolean) => {
     setNotesDraft(nextNotes);
@@ -233,11 +233,11 @@ export default function DetailPanel({
     setIsNotesDirty(dirty);
   }, []);
 
-  const flushNotesDraft = (targetVideoId: string | null, nextValue?: string) => {
+  const flushNotesDraft = useCallback((targetVideoId: string | null, nextValue?: string) => {
     if (!targetVideoId) return;
     const value = nextValue ?? notesDraftRef.current;
     onUpdateNotes(targetVideoId, value);
-  };
+  }, [onUpdateNotes]);
 
   const clearTimestampUndo = useCallback(() => {
     if (timestampUndoTimeoutRef.current !== null) {
@@ -343,7 +343,7 @@ export default function DetailPanel({
     }
 
     activeVideoIdRef.current = videoId;
-  }, [videoId, currentNotes, onUpdateNotes, setNotesDraftState]);
+  }, [videoId, currentNotes, flushNotesDraft, setNotesDraftState]);
 
   useEffect(() => {
     if (activeVideoIdRef.current === videoId && !isNotesDirtyRef.current && notesDraftRef.current !== currentNotes) {
@@ -386,13 +386,13 @@ export default function DetailPanel({
       setIsNotesDirty(false);
     }, 450);
     return () => window.clearTimeout(timeout);
-  }, [videoId, isNotesDirty, onUpdateNotes]);
+  }, [videoId, isNotesDirty, flushNotesDraft]);
 
   useEffect(() => () => {
     if (activeVideoIdRef.current && isNotesDirtyRef.current) {
       flushNotesDraft(activeVideoIdRef.current);
     }
-  }, [onUpdateNotes]);
+  }, [flushNotesDraft]);
 
   useEffect(() => {
     if (!isEditingTranscript) {
@@ -510,7 +510,7 @@ export default function DetailPanel({
       playerRef.current?.destroy?.();
       playerRef.current = null;
     };
-  }, [hasMultiSelection, onWatchSession, videoId, videoTitle]);
+  }, [closeActiveWatchSegment, flushWatchSession, hasMultiSelection, videoId, videoTitle]);
 
   useEffect(() => {
     if (hasMultiSelection || !videoId) return;

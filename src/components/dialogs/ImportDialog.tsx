@@ -195,7 +195,7 @@ export function ImportDialog({
     } else {
       setVisibleColumnsDraft(getDefaultSelectedColumns(columns, existingVisibleColumns));
     }
-  }, [isOpen, columns, existingFileName, existingVisibleColumns, initialVisibleColumnsPool, fileName, canMapChannelById]);
+  }, [isOpen, columns, existingFileName, existingSchema, existingVisibleColumns, initialVisibleColumnsPool, fileName, canMapChannelById]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -235,7 +235,7 @@ export function ImportDialog({
       incomingJoinColumn: effectiveIncomingJoinColumn,
       columnMapping,
     });
-  }, [existingFileName, joinColumn, effectiveIncomingJoinColumn, dedupedExistingRows, dedupedIncomingRows, existingSchema, columns, columnMapping]);
+  }, [importKind, existingFileName, joinColumn, effectiveIncomingJoinColumn, dedupedExistingRows, dedupedIncomingRows, existingSchema, columns, columnMapping]);
 
   const unmatchedIncomingRows = useMemo(() => {
     if (!mergePreview || !joinColumn || !effectiveIncomingJoinColumn) return [];

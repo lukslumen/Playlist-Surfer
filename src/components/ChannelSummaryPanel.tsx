@@ -96,7 +96,7 @@ export default function ChannelSummaryPanel({
     thumbIndexRef.current = 0;
     setThumbIndex(0);
     setThumbStatus('loading');
-  }, [activeKey, thumbnailCandidateSignature]);
+  }, [activeKey, thumbnailCandidateSignature, thumbnailCandidates.length]);
 
   useEffect(() => {
     if (selectedKeys.length > 1) setTab('annotations');

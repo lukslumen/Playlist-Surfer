@@ -32,3 +32,19 @@ test('selecting several channels tags them and excludes all their videos', async
   await page.getByRole('button', { name: 'Exclude', exact: true }).click();
   await expect(page.getByRole('button', { name: /^Show excluded videos\. 3 videos\./ })).toBeVisible();
 });
+
+test("clicking a channel's name opens its videos", async ({ page }, testInfo) => {
+  const csv = testInfo.outputPath('two-channels.csv');
+  fs.writeFileSync(csv, 'videoId,videoTitle,channelId,channelTitle,viewCount\nv1,First A,UCa,Channel A,10\nv2,Second A,UCa,Channel A,20\nv3,First B,UCb,Channel B,30\n');
+  await page.goto('/');
+  await expect(page.getByText('No data loaded')).toBeVisible({ timeout: 45_000 });
+  await page.locator('input[type=file]').setInputFiles(csv);
+  await page.getByRole('button', { name: 'Import CSV' }).click();
+  await expect(page.getByText('showing 3 of 3 rows')).toBeVisible();
+  await page.getByTitle('Show generated channel metadata table').click();
+  await page.getByRole('button', { name: 'Generate channel metadata' }).first().click();
+  await expect(page.getByRole('contentinfo')).toContainText('Channels: showing 2 of 2 rows', { timeout: 30_000 });
+
+  await page.locator('.ag-center-cols-container').getByRole('button', { name: 'Channel A', exact: true }).click();
+  await expect(page.getByRole('contentinfo')).toContainText('Videos: showing 2 of');
+});

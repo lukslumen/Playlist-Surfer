@@ -143,7 +143,7 @@ export default function MetadataGrid({
     return next;
   }, [hasRows, schema]);
 
-  const channelNameOptionItems = useMemo(() => {
+  const channelNameOptionItemsRaw = useMemo(() => {
     if (!isChannelScope) return [];
     const counts = new Map<string, number>();
     rows.forEach((row) => {
@@ -155,6 +155,13 @@ export default function MetadataGrid({
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => a.value.localeCompare(b.value));
   }, [isChannelScope, rows]);
+  // Stable while unchanged, so the column definitions only rebuild when the filter options do.
+  const channelNameOptionItems = useStableValue(channelNameOptionItemsRaw);
+  // Read at click/creation time: the latest handler, and widths only matter for new columns.
+  const onChannelNavigateToVideosRef = useRef(onChannelNavigateToVideos);
+  onChannelNavigateToVideosRef.current = onChannelNavigateToVideos;
+  const columnWidthsRef = useRef(columnWidths);
+  columnWidthsRef.current = columnWidths;
 
   const applySelection = useCallback((update: ScopeSelectionUpdate) => {
     const selectedKeys = Array.from(new Set((update.selectedKeys || []).filter(Boolean)));
@@ -229,7 +236,7 @@ export default function MetadataGrid({
               : { getValues: () => getTagValues(col.column_name) })
             : { filterKind }),
         resizable: true,
-        initialWidth: columnWidths[col.column_name] || sizing.initialWidth,
+        initialWidth: columnWidthsRef.current[col.column_name] || sizing.initialWidth,
         minWidth: isTranscript ? Math.max(180, sizing.minWidth) : sizing.minWidth,
         maxWidth: sizing.maxWidth,
         tooltipField: col.column_name,
@@ -248,7 +255,7 @@ export default function MetadataGrid({
                     className="channel-link-button"
                     onClick={(event) => {
                       event.stopPropagation();
-                      onChannelNavigateToVideos?.(params.data);
+                      onChannelNavigateToVideosRef.current?.(params.data);
                     }}
                     title="Show videos for this channel"
                   >
@@ -323,7 +330,7 @@ export default function MetadataGrid({
       if (indexB !== -1) return 1;
       return nameA.localeCompare(nameB);
     });
-  }, [booleanMapSchemas, isChannelScope, listLikeColumns, sampleValuesByColumn, schema, getTagValues, visibleColumns]);
+  }, [booleanMapSchemas, channelNameOptionItems, getTagValues, isChannelScope, listLikeColumns, sampleValuesByColumn, schema, visibleColumns]);
 
   const syncSelectedRows = useCallback((rowIds: string[]) => {
     const api = gridApiRef.current;
