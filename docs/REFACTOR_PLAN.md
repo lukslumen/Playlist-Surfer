@@ -98,12 +98,30 @@ Totals: 68 unit tests and 17 e2e tests.
 
 **Perf correction:** repeated runs show exclude at 100k rows is bimodal, at about 60 ms or about 125 ms (GC and scheduling). The median is about 100 ms, right around the target; the 64 ms figure in the phase 2 table was a lucky run. The code at the end of phase 2 measures the same (97–120 ms), so phase 3 introduced no regression. At 10k rows it's about 36 ms.
 
+14. **Toasts** (`components/toast/ToastProvider`, with wording in `lib/feedbackMessages.ts`). They cover:
+   - a failed backup restore;
+   - an unreadable CSV;
+   - a failed reopen of the last project;
+   - failed saves in the browser;
+   - an exclude/restore that moved nothing or only part of the selection;
+   - clicking a row without a video ID.
+
+   Rows without a video ID also get unique grid IDs now (before, they all shared `''`).
+15. **TemplateDashboard: 1,274 → 85 lines.** Split into `dashboard/template/*`.
+16. **ChannelSummaryPanel: 1,172 → 745 lines.** Helpers moved to `lib/channelFieldFormatting.ts` and `lib/channelThumbnails.ts` (tested), and a duplicate quote helper was removed.
+17. **Lint: 48 → 8 warnings.**
+   - Dead code removed.
+   - Fixed unstable empty defaults. A fresh `[]` made seven memos recompute on every render in the channels view.
+   - 14 missing `useCallback`/`useMemo` dependencies added.
+18. **Startup.** The UI no longer waits for DuckDB-WASM to load; only CSV parsing does. Reopening a 10k-row project now takes 0.4 s instead of 4.2 s. At 100k it's about 3 s, bound by reading the rows back from IndexedDB.
+
+Tests: 78 unit and 20 e2e.
+
 Still open:
-- **DetailPanel's single-video view** (YouTube player lifecycle, watch sessions, timestamps): the next split would be a `useYouTubePlayer` hook. It isn't covered by automated tests, because it needs the YouTube embed over the network, so split it with a manual check.
-- **`TemplateDashboard` (1,274 lines) and `ChannelSummaryPanel` (1,172 lines).**
-- **Failed backup restores give no feedback:** they're only logged to the console. It needs a visible error, which means a toast system.
-- **Lint warnings:** 48, mostly `exhaustive-deps`.
-- **Startup:** the restore waits for DuckDB to initialise, though reading rows from IndexedDB doesn't need it.
+- **DetailPanel's single-video view** (YouTube player, watch sessions, timestamps): extract a `useYouTubePlayer` hook, with a manual check, since there's no automated coverage of the embed.
+- **ChannelSummaryPanel's batch view** shares its notes-draft state with the single-channel view, so extracting it needs that state lifted first.
+- **The 8 remaining lint warnings** are effects (DetailPanel notes flush, MetadataGrid column defs, ImportDialog). Adding their dependencies would change when they fire, so each needs a deliberate decision.
+- **The 1M-row safety valve:** keep long text out of the grid rows. Not needed for the 100k target.
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
