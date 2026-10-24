@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo, useReducer, useTransition } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo, useReducer, useTransition } from 'react';
 import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
 import { useDuckDB } from './hooks/useDuckDB';
@@ -51,11 +51,13 @@ import { planAutosaveRestore, planBackupRestore, unpackProjectBackup, type Saved
 import { buildChannelMetadataSnapshot, isChannelMetadataSnapshotFresh } from './lib/channelMetadata';
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
-import { ResearchLogDialog } from './components/dialogs/ResearchLogDialog';
 import { ImportDialog } from './components/dialogs/ImportDialog';
-import { DatasetDashboardDialog } from './components/dialogs/DatasetDashboardDialog';
 import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog';
 import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog';
+
+// The dashboards and research log are large and only needed once opened, so they load on demand.
+const DatasetDashboardDialog = lazy(() => import('./components/dialogs/DatasetDashboardDialog').then((module) => ({ default: module.DatasetDashboardDialog })));
+const ResearchLogDialog = lazy(() => import('./components/dialogs/ResearchLogDialog').then((module) => ({ default: module.ResearchLogDialog })));
 
 // Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
 const NO_SELECTED_KEYS: string[] = [];
@@ -320,6 +322,11 @@ export default function App() {
     hasBlockingOverlay,
     closeTopOverlay,
   } = useDialogs({ isImportOpen, closeImport });
+  // Lazy dialogs mount on first open and then stay mounted, so their internal state survives closing.
+  const [hasOpenedDashboard, setHasOpenedDashboard] = useState(false);
+  const [hasOpenedResearchLog, setHasOpenedResearchLog] = useState(false);
+  if (isDashboardOpen && !hasOpenedDashboard) setHasOpenedDashboard(true);
+  if (isResearchLogOpen && !hasOpenedResearchLog) setHasOpenedResearchLog(true);
 
   const workingSchema = useMemo(() => stripDeletedColumnsFromSchema(sourceSchema, deletedColumns), [sourceSchema, deletedColumns]);
   const baseRows = useMemo(() => stripDeletedColumnsFromRows(sourceRows, deletedColumns), [sourceRows, deletedColumns]);
@@ -4104,34 +4111,38 @@ ${heading}
         onUpdateSpecialMapping={handleUpdateSpecialMapping}
       />
 
-      <ResearchLogDialog
-        isOpen={isResearchLogOpen}
-        onClose={() => setIsResearchLogOpen(false)}
-        overview={state.projectOverview}
-        onUpdateOverview={(value) => setState((previous) => ({ ...previous, projectOverview: value }))}
-        diary={state.projectNotes}
-        onUpdateDiary={(value) => setState((previous) => ({ ...previous, projectNotes: value }))}
-        generatedSections={researchLogGeneratedSectionsWithComments}
-        sectionComments={state.researchLogSectionComments}
-        onUpdateSectionComment={(sectionId, value) => setState((previous) => ({
-          ...previous,
-          researchLogSectionComments: { ...previous.researchLogSectionComments, [sectionId]: value },
-        }))}
-        markdownPreview={researchLogMarkdown}
-        markdownOptions={researchLogMarkdownOptions}
-        onMarkdownOptionsChange={setResearchLogMarkdownOptions}
-        dashboardSnapshotsStale={isAnyDashboardSnapshotStale}
-        onRecalculateSnapshots={recalculateAllDashboardSnapshots}
-        onOpenDatasetDashboard={() => {
-          setIsResearchLogOpen(false);
-          setIsDashboardOpen(true);
-        }}
-        onOpenKeyboardHelp={() => setIsKeyboardHelpOpen(true)}
-        onInsertDiaryDate={handleInsertResearchDiaryDate}
-        dashboardSnapshotIndex={dashboardSnapshotIndex}
-        currentProjectName={currentProjectName}
-        onRenameProject={handleRenameProject}
-      />
+      {hasOpenedResearchLog && (
+        <Suspense fallback={null}>
+          <ResearchLogDialog
+            isOpen={isResearchLogOpen}
+            onClose={() => setIsResearchLogOpen(false)}
+            overview={state.projectOverview}
+            onUpdateOverview={(value) => setState((previous) => ({ ...previous, projectOverview: value }))}
+            diary={state.projectNotes}
+            onUpdateDiary={(value) => setState((previous) => ({ ...previous, projectNotes: value }))}
+            generatedSections={researchLogGeneratedSectionsWithComments}
+            sectionComments={state.researchLogSectionComments}
+            onUpdateSectionComment={(sectionId, value) => setState((previous) => ({
+              ...previous,
+              researchLogSectionComments: { ...previous.researchLogSectionComments, [sectionId]: value },
+            }))}
+            markdownPreview={researchLogMarkdown}
+            markdownOptions={researchLogMarkdownOptions}
+            onMarkdownOptionsChange={setResearchLogMarkdownOptions}
+            dashboardSnapshotsStale={isAnyDashboardSnapshotStale}
+            onRecalculateSnapshots={recalculateAllDashboardSnapshots}
+            onOpenDatasetDashboard={() => {
+              setIsResearchLogOpen(false);
+              setIsDashboardOpen(true);
+            }}
+            onOpenKeyboardHelp={() => setIsKeyboardHelpOpen(true)}
+            onInsertDiaryDate={handleInsertResearchDiaryDate}
+            dashboardSnapshotIndex={dashboardSnapshotIndex}
+            currentProjectName={currentProjectName}
+            onRenameProject={handleRenameProject}
+          />
+        </Suspense>
+      )}
 
       <CommandPaletteDialog
         isOpen={isCommandPaletteOpen}
@@ -4145,43 +4156,47 @@ ${heading}
         onClose={() => setIsKeyboardHelpOpen(false)}
       />
 
-      <DatasetDashboardDialog
-        isOpen={isDashboardOpen}
-        onClose={() => setIsDashboardOpen(false)}
-        scope={dashboardScope}
-        onScopeChange={setDashboardScope}
-        onRefresh={handleRefreshDashboard}
-        snapshot={currentDashboardSnapshot}
-        stale={isDashboardSnapshotStale}
-        activeTab={dashboardActiveTab}
-        onActiveTabChange={setDashboardActiveTab}
-        thumbnailCache={effectiveThumbnailCache}
-        thumbnailLoadProgress={thumbnailLoadProgress}
-        thumbnailTileSize={thumbnailTileSize}
-        canZoomOut={canThumbnailZoomOut}
-        canZoomIn={canThumbnailZoomIn}
-        onZoomOut={handleThumbnailZoomOut}
-        onZoomIn={handleThumbnailZoomIn}
-        onLoadFullThumbnails={handleLoadFullDashboardThumbnails}
-        onLoadFilteredThumbnails={handleLoadFilteredDashboardThumbnails}
-        onThumbnailEntryLoad={handleThumbnailEntryLoad}
-        onThumbnailEntryError={handleThumbnailEntryError}
-        onRetryFailedThumbnails={handleRetryFailedDashboardThumbnails}
-        onNavigateToVideo={handleDashboardNavigateToVideo}
-        onNavigateToChannel={handleDashboardNavigateToChannel}
-        onApplyContentFilter={handleApplyDashboardContentFilter}
-        allChannelIds={allVisibleChannelIdsForDashboard}
-        linkingProps={{
-          rows: currentLinkingRows,
-          state: linkingState,
-          sourceItems: linkingSourceItems,
-          onGenerate: handleGenerateLinkingSummary,
-          onSelectSource: handleSelectLinkingSource,
-          onApplyOverride: handleApplyLinkingOverride,
-          onSaveOverrideBatch: handleApplyLinkingOverrideBatch,
-          onApplyDrilldown: applyDashboardDrilldown,
-        }}
-      />
+      {hasOpenedDashboard && (
+        <Suspense fallback={null}>
+          <DatasetDashboardDialog
+            isOpen={isDashboardOpen}
+            onClose={() => setIsDashboardOpen(false)}
+            scope={dashboardScope}
+            onScopeChange={setDashboardScope}
+            onRefresh={handleRefreshDashboard}
+            snapshot={currentDashboardSnapshot}
+            stale={isDashboardSnapshotStale}
+            activeTab={dashboardActiveTab}
+            onActiveTabChange={setDashboardActiveTab}
+            thumbnailCache={effectiveThumbnailCache}
+            thumbnailLoadProgress={thumbnailLoadProgress}
+            thumbnailTileSize={thumbnailTileSize}
+            canZoomOut={canThumbnailZoomOut}
+            canZoomIn={canThumbnailZoomIn}
+            onZoomOut={handleThumbnailZoomOut}
+            onZoomIn={handleThumbnailZoomIn}
+            onLoadFullThumbnails={handleLoadFullDashboardThumbnails}
+            onLoadFilteredThumbnails={handleLoadFilteredDashboardThumbnails}
+            onThumbnailEntryLoad={handleThumbnailEntryLoad}
+            onThumbnailEntryError={handleThumbnailEntryError}
+            onRetryFailedThumbnails={handleRetryFailedDashboardThumbnails}
+            onNavigateToVideo={handleDashboardNavigateToVideo}
+            onNavigateToChannel={handleDashboardNavigateToChannel}
+            onApplyContentFilter={handleApplyDashboardContentFilter}
+            allChannelIds={allVisibleChannelIdsForDashboard}
+            linkingProps={{
+              rows: currentLinkingRows,
+              state: linkingState,
+              sourceItems: linkingSourceItems,
+              onGenerate: handleGenerateLinkingSummary,
+              onSelectSource: handleSelectLinkingSource,
+              onApplyOverride: handleApplyLinkingOverride,
+              onSaveOverrideBatch: handleApplyLinkingOverrideBatch,
+              onApplyDrilldown: applyDashboardDrilldown,
+            }}
+          />
+        </Suspense>
+      )}
 
       <ImportDialog
         isOpen={isImportOpen}
