@@ -4,6 +4,9 @@ import { appendQuotedText } from '../lib/detailNotes';
 import { CHANNEL_HEADER_META_KEYS, CHANNEL_KPI_KEYS, EMPTY_PLACEHOLDER, METADATA_HIDDEN_KEYS, MetadataBucket, PROFILE_SNAPSHOT_KEYS, SECTION_PRIORITY, bucketForKey, buildChannelMonogram, dedupeMetadataKeys, fieldLabel, formatMetadataDisplay, formatValue, isEmptyValue, isLongTextFieldKey, orderKeysByPriority, parseArrayLikeValue, resolveChannelDescription, resolveChannelKey } from '../lib/channelFieldFormatting';
 import { resolveChannelThumbnailCandidates } from '../lib/channelThumbnails';
 
+// Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
+const NO_TAGS: string[] = [];
+
 type BatchNoteApplyResult = {
   status: 'success' | 'error' | 'empty';
   appliedCount: number;
@@ -90,7 +93,7 @@ export default function ChannelSummaryPanel({
   const channelId = String(activeRow?.channel_id || '').trim();
   const youtubeChannelUrl = channelId ? `https://www.youtube.com/channel/${channelId}` : '';
 
-  const currentTags = activeKey ? (channelTagsById[activeKey] || []) : [];
+  const currentTags = (activeKey && channelTagsById[activeKey]) || NO_TAGS;
   const selectedKeys = useMemo(() => selectedRows.map(resolveChannelKey).filter(Boolean), [selectedRows]);
   const sharedTags = useMemo(() => {
     if (selectedKeys.length <= 1) return currentTags;

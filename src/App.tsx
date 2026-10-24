@@ -57,6 +57,9 @@ import { DatasetDashboardDialog } from './components/dialogs/DatasetDashboardDia
 import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog';
 import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog';
 
+// Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
+const NO_SELECTED_KEYS: string[] = [];
+
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
   const { showToast } = useToast();
@@ -519,7 +522,7 @@ export default function App() {
     return source ? buildTagValuesForColumn({ ...source, column }) : [];
   }, []);
   const activeGridFilterModel = viewScope === 'channels' ? channelFilterModel : filterModel;
-  const selectedVideoIdsForActions = viewScope === 'videos' ? videoSelection.selectedKeys : [];
+  const selectedVideoIdsForActions = viewScope === 'videos' ? videoSelection.selectedKeys : NO_SELECTED_KEYS;
   const selectedVideoCount = selectedVideoIdsForActions.length;
   const sourceMaskedRowByVideoId = useMemo(() => {
     const next = new Map<string, any>();
@@ -884,7 +887,7 @@ export default function App() {
     }
     setViewScope('videos');
     setPendingViewerTarget(entry.selectedVideoId ? { kind: 'video', videoId: entry.selectedVideoId } : null);
-  }, [clearScopeSelection]);
+  }, [clearScopeSelection, setInclusionView]);
 
   const markDerivedSnapshotsStale = useCallback((reason: string) => {
     setLinkingState((current) => ({
@@ -930,6 +933,8 @@ export default function App() {
     });
   }, [applyScopeSelection, rows, selectedVideoId, viewScope]);
 
+  // Navigation history is set up further down (it depends on later values); hydrate reaches it via a ref.
+  const resetNavigationHistoryRef = useRef<() => void>(() => {});
   const hydrateProject = useCallback((args: HydrateProjectArgs) => {
     const nextSourceRows = args.rows;
     const nextSourceSchema = applyFriendlyColumnMappings(args.schema || deriveSchemaFromRows(nextSourceRows), args.fileName || '');
@@ -1048,7 +1053,7 @@ export default function App() {
     setChannelFilterModel(args.channelFilterModel ?? {});
     clearChannelDrilldownState({ restoreVideoFilters: false });
     setVideoScopeChannelKeys(null);
-    resetNavigationHistory();
+    resetNavigationHistoryRef.current();
     setDashboardActiveTab('overview');
     setDashboardSnapshots(nextDashboardSnapshots);
     setSavedViewDashboardSnapshots(nextSavedViewSnapshots);
@@ -1083,7 +1088,7 @@ export default function App() {
       theme: args.theme ?? previous.theme,
       isRightPanelCollapsed: args.autoExpandPanel ? false : (args.isRightPanelCollapsed ?? previous.isRightPanelCollapsed),
     }));
-  }, [channelVisibleColumns, datasetVersion, filteredViewVersion]);
+  }, [channelVisibleColumns, clearChannelDrilldownState, clearScopeSelection, datasetVersion, filteredViewVersion, peekThumbnailSessionId, replaceThumbnailCaches, resetInclusionHistory, setChannelNotesById, setChannelTagsById, setInclusionState, setInclusionView, setResearchHistory]);
 
   const attemptAutoRestoreLastProject = useCallback(async (trigger: 'mount' | 'pageshow') => {
     if (isAutoRestoreInFlightRef.current) {
@@ -1121,7 +1126,7 @@ export default function App() {
     } finally {
       isAutoRestoreInFlightRef.current = false;
     }
-  }, [hydrateProject, persisted, showToast]);
+  }, [getLatestPersistedState, hydrateProject, persisted, showToast]);
 
   useEffect(() => {
     const mountRaf = window.requestAnimationFrame(() => {
@@ -1476,11 +1481,11 @@ export default function App() {
   const handleOpenDatasetDashboardTab = useCallback((tab: DashboardTemplateTab) => {
     setDashboardActiveTab(tab);
     setIsDashboardOpen(true);
-  }, []);
+  }, [setIsDashboardOpen]);
 
   const handleOpenResearchLog = useCallback(() => {
     setIsResearchLogOpen(true);
-  }, []);
+  }, [setIsResearchLogOpen]);
 
   const handleOpenSaveView = useCallback(() => {
     if (viewScope !== 'videos') {
@@ -1837,23 +1842,7 @@ export default function App() {
       setIsGeneratingChannelMetadata(false);
       updateLongTaskProgress(null);
     }
-  }, [
-    activeBaseRows,
-    appendResearchHistory,
-    datasetVersion,
-    effectiveGeneratedMetadataByVideoId,
-    importedChannelMetadata,
-    includedBaseRows,
-    inclusionView,
-    isGeneratingChannelMetadata,
-    channelMetadataSnapshot?.rows,
-    currentChannelMetadataCacheKey,
-    exclusionMembershipFingerprint,
-    sourceVisibility,
-    updateLongTaskProgress,
-    videoCorpusFingerprint,
-    viewScope,
-  ]);
+  }, [isGeneratingChannelMetadata, channelMetadataSnapshot?.rows?.length, updateLongTaskProgress, activeBaseRows, importedChannelMetadata, datasetVersion, inclusionView, videoCorpusFingerprint, exclusionMembershipFingerprint, currentChannelMetadataCacheKey, effectiveGeneratedMetadataByVideoId, clearScopeSelection, includedBaseRows, sourceVisibility, appendResearchHistory]);
 
   const updateExternalFilterModel = useCallback((nextFilterModel: ExplorerFilterModel) => {
     const sanitizedModel = Object.fromEntries(
@@ -1912,7 +1901,7 @@ export default function App() {
     }
     clearScopeSelection('videos', true);
     clearScopeSelection('channels', true);
-  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, excludedBaseRows.length, includedBaseRows.length, updateExternalFilterModel, viewScope]);
+  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, excludedBaseRows.length, includedBaseRows.length, setInclusionView, updateExternalFilterModel, viewScope]);
 
   const handleToggleSourceRows = useCallback((sourceId: string) => {
     setSourceVisibility((current) => {
@@ -2127,27 +2116,7 @@ export default function App() {
     } finally {
       updateLongTaskProgress(null);
     }
-  }, [
-    appendResearchHistory,
-    channelVisibleColumns,
-    clearAllThumbnailCaches,
-    columnLineage.byColumn,
-    deletedColumns,
-    markDerivedSnapshotsStale,
-    rowLineage.byRowId,
-    sourceRows,
-    sourceSchema,
-    sourceRegistry.byId,
-    sourceRegistry.orderedIds,
-    sourceRegistry.primarySourceId,
-    sourceVisibility.hiddenColumnSourceIdsByScope,
-    sourceVisibility.hiddenSourceIds,
-    state.annotations,
-    state.savedViews,
-    updateLongTaskProgress,
-    userTagsByVideoId,
-    visibleColumns,
-  ]);
+  }, [sourceRegistry.byId, sourceRegistry.primarySourceId, sourceRegistry.orderedIds, rowLineage.byRowId, updateLongTaskProgress, sourceRows, columnLineage.byColumn, sourceSchema, deletedColumns, visibleColumns, channelVisibleColumns, state.savedViews, sourceVisibility.hiddenSourceIds, sourceVisibility.hiddenColumnSourceIdsByScope?.videos, sourceVisibility.hiddenColumnSourceIdsByScope?.channels, clearScopeSelection, userTagsByVideoId, setInclusionState, inclusionStateRef, markDerivedSnapshotsStale, clearAllThumbnailCaches, appendResearchHistory]);
 
   const removeCurrentScopeFilter = useCallback((column: string) => {
     if (viewScope === 'channels') {
@@ -2566,7 +2535,7 @@ export default function App() {
     clearScopeSelection('videos', true);
     clearScopeSelection('channels', true);
     setFilteredViewVersion((version) => version + 1);
-  }, [clearScopeSelection]);
+  }, [clearScopeSelection, setInclusionView]);
 
   const handleVideoChannelClick = useCallback(({ channelName, row }: { channelName: string; row: any }) => {
     const normalizedChannelName = channelName?.trim() || resolveChannelName(row);
@@ -2667,7 +2636,7 @@ export default function App() {
     setState((previous) => ({ ...previous, activeViewId: null }));
     updateExternalFilterModel(nextFilterModel);
     setDashboardScope('filtered');
-  }, [clearChannelDrilldownState, displaySchema, filterModel, updateExternalFilterModel, viewScope]);
+  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, displaySchema, filterModel, setIsDashboardOpen, updateExternalFilterModel, viewScope]);
 
   const handleApplyDashboardContentFilter = useCallback((kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => {
     if (!label.trim()) return;
@@ -2929,32 +2898,7 @@ ${heading}
     ];
 
     return commands.filter((command) => !command.disabled || command.id === 'generate-channel-metadata');
-  }, [
-    channelMetadataSnapshot?.rows,
-    channelRows.length,
-    clearAllExplorerFilters,
-    handleGenerateChannelMetadata,
-    handleInclusionViewChange,
-    handleOpenDatasetDashboardTab,
-    handleOpenAnnotations,
-    handleOpenResearchLog,
-    handleViewScopeChange,
-    handleOpenSaveView,
-    handleRequestImport,
-    hasLoadedData,
-    hideOptionalColumns,
-    isChannelMetadataFresh,
-    inclusionView,
-    isGeneratingChannelMetadata,
-    resetVisibleColumnOrder,
-    showAllColumns,
-    state.isRightPanelCollapsed,
-    state.theme,
-    toggleRightPanel,
-    viewScope,
-    datasetVersion,
-    inclusionView,
-  ]);
+  }, [resetVisibleColumnOrder, viewScope, hasLoadedData, showAllColumns, hideOptionalColumns, handleRequestImport, handleOpenSaveView, handleOpenResearchLog, channelRows.length, channelMetadataSnapshot?.rows?.length, isChannelMetadataFresh, handleGenerateChannelMetadata, isGeneratingChannelMetadata, handleOpenAnnotations, clearAllExplorerFilters, inclusionView, state.isRightPanelCollapsed, state.theme, toggleRightPanel, handleOpenDatasetDashboardTab, setIsColumnsOpen, setIsExportOpen, setIsKeyboardHelpOpen, handleViewScopeChange, handleInclusionViewChange]);
   const handleGridReady = useCallback((api: GridApi) => {
     gridApiRef.current = api;
     setGridReadyVersion((current) => current + 1);
@@ -2999,7 +2943,7 @@ ${heading}
       clearAllExplorerFilters();
     }
     setPendingViewerTarget({ kind: 'video', videoId });
-  }, [clearAllExplorerFilters, requestSelectionScroll, rows]);
+  }, [clearAllExplorerFilters, requestSelectionScroll, rows, setIsDashboardOpen]);
 
   const handleDashboardNavigateToChannel = useCallback((channel: { channelId?: string | null; channelName?: string }) => {
     setIsDashboardOpen(false);
@@ -3025,7 +2969,7 @@ ${heading}
       }
     }
     setPendingViewerTarget({ kind: 'channel', channelId: channel.channelId, channelName: channel.channelName });
-  }, [channelRowsWithLinking, clearAllExplorerFilters, clearChannelDrilldownState, requestSelectionScroll, rows]);
+  }, [channelRowsWithLinking, clearAllExplorerFilters, clearChannelDrilldownState, clearChannelScopedVideoUniverse, requestSelectionScroll, rows, setIsDashboardOpen]);
 
   useEffect(() => {
     if (!pendingViewerTarget) return;
@@ -3104,6 +3048,7 @@ ${heading}
     currentEntry: currentNavigationEntry,
     restoreEntry: restoreNavigationEntry,
   });
+  resetNavigationHistoryRef.current = resetNavigationHistory;
 
   const handleRenameProject = useCallback((nextName: string) => {
     const trimmed = nextName.trim();
@@ -3164,7 +3109,7 @@ ${heading}
     if (state.activeViewId === id) {
       updateExternalFilterModel({});
     }
-  }, [appendResearchHistory, state.activeViewId, state.savedViews, updateExternalFilterModel]);
+  }, [appendResearchHistory, removeThumbnailScopes, state.activeViewId, state.savedViews, updateExternalFilterModel]);
 
   const applyView = useCallback((view: SavedView | null) => {
     clearChannelDrilldownState({ restoreVideoFilters: false });

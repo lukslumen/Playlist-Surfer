@@ -12,6 +12,10 @@ import {
   normalizeGenericModel,
 } from '../lib/filterCoordinator';
 
+// Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
+const NO_KEYS: string[] = [];
+const NO_LABELS: Record<string, string> = {};
+
 export { parseListString } from '../lib/filterCoordinator';
 
 function closeFilter(props: CustomFilterProps<any, any, any>) {
@@ -182,8 +186,8 @@ export function BooleanMapFilter(props: CustomFilterProps<any, any, BooleanMapFi
   const doesFilterPass = useCallback(() => true, []);
   useGridFilter({ doesFilterPass });
 
-  const keys = schema?.keys || [];
-  const labels = schema?.labels || {};
+  const keys = schema?.keys || NO_KEYS;
+  const labels = schema?.labels || NO_LABELS;
   const quickKeys = useMemo(() => {
     if (schema?.quickKeys?.length) return schema.quickKeys;
     return keys.slice(0, 8);
