@@ -122,11 +122,44 @@ Totals: 68 unit tests and 17 e2e tests.
 
 21. **YouTube player → `components/detail/useYouTubePlayer.ts`.** The hook covers the player lifecycle, its state and duration, and watch-session tracking. The "counts as watched" rule is now a pure, tested `qualifiesAsWatched`. DetailPanel went from 1,014 to 836 lines. Checked by hand in the browser: the embed loads, play and pause are tracked, a 5.7 s session is recorded with the correct duration, and switching videos rebuilds the player.
 
-Tests: 79 unit and 22 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
+22. **Phase 4 cleanup.**
+    - Removed the AI Studio template leftovers (HMR block, `@` alias, `dotenv`, unused tsconfig options).
+    - Build tools moved to devDependencies; added package metadata and `npm run check` (typecheck, lint, tests, build).
+    - The README now covers the checks, where data is stored and the project layout.
+23. **Unit tests for `lib/data.ts` and the dashboard libraries: 79 → 383 tests.** Two real bugs found and fixed:
+    - a merge appended rows without a key column twice;
+    - CSV export left the header row unquoted, so a column name with a comma broke the file.
+24. **The dashboards and research log load on first open** and then stay mounted, so their settings survive closing. About 90 KB of JS and 88 KB of CSS leave the main bundle. The main chunk is still about 1.97 MB, mostly AG Grid.
+25. **Fixes from a review of the whole branch:**
+    - the autosave restore no longer replaces a CSV imported while it was still reading;
+    - a failed restore shows one toast;
+    - restored rows are no longer written straight back on every reload (about 600 MB of serialization at 100k rows);
+    - DuckDB requests fail with a message if the worker can't start, instead of hanging;
+    - boot gives up on an unresponsive IndexedDB after 3 s;
+    - Delete in the channel grid uses the grid's own selection (new e2e test).
+
+Tests: 383 unit and 23 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
+- **Review findings not yet fixed:**
+  - **Closing the tab within about 1 s of an edit can lose that edit.** IndexedDB writes during unload aren't guaranteed. A small synchronous localStorage copy on `pagehide` would close the gap.
+  - **The channel link summary goes stale after a reload.** Its fingerprint includes the session-local `datasetVersion`; fingerprint on content instead.
+  - **Back/Forward uses a 1.5 s timer** to stop restoring. On slow 100k-row filters, the forward history can still be cut off.
+  - **Backspace now also moves the selection outside text fields,** and with Shift or Alt held. Confirm this is wanted.
+  - **Code quality:**
+    - thumbnail cache updates are O(n²);
+    - `hydrateProject` has an unstable identity;
+    - refs are written during render;
+    - research-event types still use `as any`.
+- **Suspected bugs found while testing the dashboards:**
+  - concentration shares can sum above 100% with fewer than 100 items;
+  - bare-domain links are counted twice in the linking dashboard;
+  - a missing view count becomes 0;
+  - `parseDurationToSeconds` reads "5 months" as 300 s;
+  - an epoch-0 publish date becomes empty.
+- **`App.tsx` is still about 4,200 lines,** and there are about 240 `any`s.
 - **The 1M-row safety valve:** keep long text out of the grid rows. Not needed for the 100k target.
-- **Push the three branches and open the PRs** (needs a GitHub login on this Mac).
+- **Push the branches and open the PRs** (needs a GitHub login on this Mac).
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
 
