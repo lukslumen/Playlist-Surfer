@@ -119,7 +119,7 @@ Tests: 78 unit and 20 e2e.
 
 Still open:
 - **DetailPanel's single-video view** (YouTube player, watch sessions, timestamps): extract a `useYouTubePlayer` hook, with a manual check, since there's no automated coverage of the embed.
-- **ChannelSummaryPanel's batch view** shares its notes-draft state with the single-channel view, so extracting it needs that state lifted first.
+- **ChannelSummaryPanel's batch view:** the unreachable batch branches in the single view are gone, so its batch state is now exclusive to the batch view. It can be extracted like DetailPanel's (it needs the shared tag input and handlers as props).
 - **The 8 remaining lint warnings** are effects (DetailPanel notes flush, MetadataGrid column defs, ImportDialog). Adding their dependencies would change when they fire, so each needs a deliberate decision.
 - **The 1M-row safety valve:** keep long text out of the grid rows. Not needed for the 100k target.
 
