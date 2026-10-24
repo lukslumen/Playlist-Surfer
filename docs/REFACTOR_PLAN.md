@@ -115,12 +115,15 @@ Totals: 68 unit tests and 17 e2e tests.
    - 14 missing `useCallback`/`useMemo` dependencies added.
 18. **Startup.** The UI no longer waits for DuckDB-WASM to load; only CSV parsing does. Reopening a 10k-row project now takes 0.4 s instead of 4.2 s. At 100k it's about 3 s, bound by reading the rows back from IndexedDB.
 
-Tests: 78 unit and 20 e2e.
+19. **ChannelSummaryPanel: 727 → 556 lines.** The batch view is now `components/channel/ChannelBatchPanel.tsx`. The unreachable batch branches in the single-channel view are gone.
+20. **Lint is clean** (0 warnings), and `exhaustive-deps` and `no-unused-vars` are now errors, so CI keeps it that way. The last fixes found two real stale-value bugs:
+    - the grid's channel-name button called a handler captured when the columns were last built;
+    - the import dialog's merge preview ignored a switch to a channel-metadata import.
+
+Tests: 78 unit and 23 e2e.
 
 Still open:
 - **DetailPanel's single-video view** (YouTube player, watch sessions, timestamps): extract a `useYouTubePlayer` hook, with a manual check, since there's no automated coverage of the embed.
-- **ChannelSummaryPanel's batch view:** the unreachable batch branches in the single view are gone, so its batch state is now exclusive to the batch view. It can be extracted like DetailPanel's (it needs the shared tag input and handlers as props).
-- **The 8 remaining lint warnings** are effects (DetailPanel notes flush, MetadataGrid column defs, ImportDialog). Adding their dependencies would change when they fire, so each needs a deliberate decision.
 - **The 1M-row safety valve:** keep long text out of the grid rows. Not needed for the 100k target.
 
 ## 1. Verdict: refactor step by step; slim the in-memory pipeline instead of rebuilding the data layer
