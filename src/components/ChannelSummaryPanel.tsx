@@ -677,7 +677,7 @@ export default function ChannelSummaryPanel({
             <div className="space-y-3 min-w-0">
               <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-3">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                  <Tag size={14} /> {selectedCount > 1 ? 'Batch channel tags' : 'Channel tags'}
+                  <Tag size={14} /> Channel tags
                 </div>
                 <div className="mb-3 flex min-w-0 flex-wrap gap-2">
                   {sharedTags.map((tag) => (
@@ -693,7 +693,7 @@ export default function ChannelSummaryPanel({
                     value={tagInput}
                     onChange={(event) => setTagInput(event.target.value)}
                     onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitTag(); } }}
-                    placeholder={selectedCount > 1 ? 'Add tag to selected channels' : 'Add channel tag'}
+                    placeholder="Add channel tag"
                     className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
                   />
                   <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90">
@@ -704,40 +704,19 @@ export default function ChannelSummaryPanel({
 
               <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-3">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                  <StickyNote size={14} /> {selectedCount > 1 ? 'Batch channel notes' : 'Channel notes'}
+                  <StickyNote size={14} /> Channel notes
                 </div>
-                {selectedCount > 1 ? (
-                  <>
-                    <textarea
-                      value={batchNotesDraft}
-                      onChange={(event) => setBatchNotesDraft(event.target.value)}
-                      placeholder="Apply the same note block to all selected channels..."
-                      className="custom-scrollbar min-h-[12rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                    />
-                    <div className="mt-3 flex justify-end">
-                      <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
-                        Apply to selected channels
-                      </button>
-                    </div>
-                    {batchNotesFeedback ? (
-                      <p className={`mt-2 text-[11px] ${batchNotesFeedback.status === 'success' ? 'text-[var(--accent)]' : batchNotesFeedback.status === 'error' ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
-                        {batchNotesFeedback.message}
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <textarea
-                    ref={notesRef}
-                    value={notesDraft}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setNotesDraft(next);
-                      if (activeKey) onUpdateChannelNotes?.(activeKey, next);
-                    }}
-                    placeholder="# Notes\n\nAdd channel-level observations, quotes, and coding decisions here..."
-                    className="custom-scrollbar min-h-[14rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                  />
-                )}
+                <textarea
+                  ref={notesRef}
+                  value={notesDraft}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setNotesDraft(next);
+                    if (activeKey) onUpdateChannelNotes?.(activeKey, next);
+                  }}
+                  placeholder="# Notes\n\nAdd channel-level observations, quotes, and coding decisions here..."
+                  className="custom-scrollbar min-h-[14rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                />
               </section>
             </div>
           )}
