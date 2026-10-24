@@ -98,6 +98,49 @@ npm run dev
 
 The Vite dev server starts on port `3000` by default.
 
+### Checks and tests
+
+| Command | What it does |
+|---|---|
+| `npm run check` | Typecheck, lint, unit tests and production build: run before every commit |
+| `npm test` | Unit tests (Vitest), in `src/lib/__tests__/` |
+| `npm run test:e2e` | Browser tests (Playwright), in `e2e/`. Run `npx playwright install chromium` once first |
+| `npm run lint` | ESLint, including React hook dependency checks (enforced as errors) |
+
+GitHub Actions runs all of these on every pull request (`.github/workflows/ci.yml`).
+
+Performance measurements are opt-in. They use a production build and synthetic datasets:
+
+```bash
+node scripts/generate-perf-fixture.mjs 100000
+```
+
+```bash
+PERF=1 PERF_ROWS=10000,100000 npx playwright test --config playwright.perf.config.ts e2e/perf.spec.ts
+```
+
+## Where your data lives
+
+Everything stays in your browser; nothing is uploaded.
+
+- **The dataset** is saved in IndexedDB in 1,000-row chunks, and reopened automatically on your next visit.
+- **Your curation** (exclusions, notes, tags, saved views, research log) is saved in IndexedDB too.
+- **To keep or share a project**, use *Export → Full project backup*. The zip restores everything, including in another browser.
+
+Clearing site data in the browser deletes the autosave, so export a backup for anything you want to keep.
+
+## Project structure
+
+| Path | Contents |
+|---|---|
+| `src/App.tsx` | App shell: wires state slices to the layout |
+| `src/state/` | State hooks per domain: inclusion, import flow, persistence, navigation, thumbnails, channels, linking, dialogs, research history |
+| `src/lib/` | Pure, unit-tested logic: data pipeline, filters, import/merge plans, restore, linking, dashboards, shortcuts |
+| `src/components/` | UI: grid (`MetadataGrid`), panels (`DetailPanel`, `ChannelSummaryPanel`), `dialogs/`, `dashboard/`, `layout/`, `toast/` |
+| `src/worker/` | DuckDB-WASM worker used to parse CSV files |
+| `e2e/` | Playwright tests; `e2e/fixtures/playlist61.csv` is a real YouTube Data Tools export used as the fixture |
+| `docs/REFACTOR_PLAN.md` | Refactor history, the bugs found and fixed, and performance measurements |
+
 ## Tech Stack
 
 - React 19
@@ -108,3 +151,4 @@ The Vite dev server starts on port `3000` by default.
 - Motion
 - Lucide React
 - Tailwind CSS via `@tailwindcss/vite`
+- Vitest and Playwright

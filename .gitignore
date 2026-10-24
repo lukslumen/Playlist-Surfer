@@ -5,8 +5,9 @@ coverage/
 .DS_Store
 *.log
 .env*
-!.env.example
 test-results/
 playwright-report/
 e2e/fixtures/perf/
 dist-perf/
+# Local Claude Code preview config and drafts
+.claude/
