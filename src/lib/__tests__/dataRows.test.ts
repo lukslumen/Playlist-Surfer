@@ -228,25 +228,29 @@ describe('overlayGeneratedMetadataRows / buildGeneratedMetadataSchema', () => {
 });
 
 describe('convertRowsToCsv', () => {
+  test('quotes header names, so names with commas or quotes stay one column', () => {
+    expect(convertRowsToCsv([{ 'a,b': 1, 'say "x"': 2 }], ['a,b', 'say "x"'])).toBe('"a,b","say ""x"""\n"1","2"');
+  });
+
   test('writes a header line and quotes every value', () => {
-    expect(convertRowsToCsv([{ a: 1, b: 'x' }], ['a', 'b'])).toBe('a,b\n"1","x"');
+    expect(convertRowsToCsv([{ a: 1, b: 'x' }], ['a', 'b'])).toBe('"a","b"\n"1","x"');
   });
 
   test('escapes embedded quotes by doubling them and keeps commas and newlines inside quotes', () => {
     const csv = convertRowsToCsv([{ text: 'He said "hi", then\nleft' }], ['text']);
-    expect(csv).toBe('text\n"He said ""hi"", then\nleft"');
+    expect(csv).toBe('"text"\n"He said ""hi"", then\nleft"');
   });
 
   test('joins arrays with a pipe and writes empty strings for missing values', () => {
-    expect(convertRowsToCsv([{ tags: ['a', 'b'], n: null }], ['tags', 'n', 'missing'])).toBe('tags,n,missing\n"a|b","",""');
+    expect(convertRowsToCsv([{ tags: ['a', 'b'], n: null }], ['tags', 'n', 'missing'])).toBe('"tags","n","missing"\n"a|b","",""');
   });
 
   test('keeps falsy but present values such as 0 and false', () => {
-    expect(convertRowsToCsv([{ a: 0, b: false }], ['a', 'b'])).toBe('a,b\n"0","false"');
+    expect(convertRowsToCsv([{ a: 0, b: false }], ['a', 'b'])).toBe('"a","b"\n"0","false"');
   });
 
   test('outputs only the header for no rows and follows column order', () => {
-    expect(convertRowsToCsv([], ['b', 'a'])).toBe('b,a');
-    expect(convertRowsToCsv([{ a: 1, b: 2 }], ['b', 'a'])).toBe('b,a\n"2","1"');
+    expect(convertRowsToCsv([], ['b', 'a'])).toBe('"b","a"');
+    expect(convertRowsToCsv([{ a: 1, b: 2 }], ['b', 'a'])).toBe('"b","a"\n"2","1"');
   });
 });

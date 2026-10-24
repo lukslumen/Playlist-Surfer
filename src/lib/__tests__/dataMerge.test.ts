@@ -151,6 +151,20 @@ describe('buildMergePreview', () => {
 });
 
 describe('applyMerge', () => {
+  test('rows without a join key are appended once, never matched to other key-less rows', () => {
+    const result = applyMerge({
+      existingRows: [{ videoId: '', title: 'E' }, { videoId: 'a', title: 'A' }],
+      incomingRows: [{ videoId: '', title: 'I', extra: 'x' }],
+      existingSchema: [{ column_name: 'videoId', column_type: 'VARCHAR' }, { column_name: 'title', column_type: 'VARCHAR' }],
+      incomingSchema: [{ column_name: 'videoId', column_type: 'VARCHAR' }, { column_name: 'title', column_type: 'VARCHAR' }, { column_name: 'extra', column_type: 'VARCHAR' }],
+      joinColumn: 'videoId',
+      mergeOptions: options({ conflictStrategies: { title: 'use-new' } }),
+    });
+    expect(result.rows).toHaveLength(3);
+    expect(result.rows[0]).toEqual({ videoId: '', title: 'E' });
+    expect(result.rows.filter((row) => row.title === 'I')).toHaveLength(1);
+  });
+
   test('add-update keeps existing values on conflict by default, fills blanks and adds new rows', () => {
     const { rows } = merge();
     expect(rows).toEqual([

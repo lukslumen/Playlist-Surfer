@@ -1135,7 +1135,8 @@ export function buildDisplayRows(baseRows: any[], userTagsByVideoId: Record<stri
 }
 
 export function convertRowsToCsv(rows: any[], columns: string[]): string {
-  const header = columns.join(',');
+  // Header names are quoted like values, so names containing commas or quotes stay one column.
+  const header = columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(',');
   const body = rows.map((row) =>
     columns
       .map((column) => {
@@ -1725,6 +1726,9 @@ export function applyMerge(args: {
 
   if (args.mergeOptions.mergeMode !== 'add-only') {
     incomingByKey.forEach((incomingRow, key) => {
+      // Rows without a join key never match: they are handled as unmatched below (as in the
+      // preview). Matching them here as well duplicated them in the result.
+      if (valueIsEmpty(key)) return;
       const existingRow = existingByKey.get(key);
       const resultIndex = resultIndexByKey.get(key);
       if (!existingRow || resultIndex === undefined) return;
