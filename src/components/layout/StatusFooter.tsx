@@ -8,6 +8,7 @@ export function StatusFooter({
   totalRowCount,
   isFilteringActive,
   selectedVideoCount,
+  isEngineReady,
 }: {
   hasLoadedData: boolean;
   viewScope: ViewScope;
@@ -15,6 +16,8 @@ export function StatusFooter({
   totalRowCount: number;
   isFilteringActive: boolean;
   selectedVideoCount: number;
+  /** DuckDB (used to parse CSVs) loads in the background after the app appears. */
+  isEngineReady: boolean;
 }) {
   return (
     <footer className="status-footer flex h-6 flex-shrink-0 items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 text-[11px] text-[var(--text-muted)]">
@@ -30,8 +33,8 @@ export function StatusFooter({
         )}
       </div>
       <div className="flex items-center gap-2">
-        <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-        DuckDB-Wasm Engine: Active
+        <span className={`h-1.5 w-1.5 rounded-full ${isEngineReady ? 'bg-green-500' : 'animate-pulse bg-amber-500'}`} />
+        DuckDB-Wasm Engine: {isEngineReady ? 'Active' : 'Loading…'}
       </div>
     </footer>
   );

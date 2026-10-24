@@ -89,6 +89,14 @@ for (const size of SIZES) {
     await timedKey(page, 'select all', results, 'ControlOrMeta+a', `${size.toLocaleString('en-US')} selected`);
     await timedKey(page, 'exclude all rows', results, 'Delete', rowsText(0));
 
+    // Reopening: from navigation until the restored project's rows are on screen.
+    await timedKey(page, 'restore all rows (undo)', results, 'ControlOrMeta+z', rowsText(size));
+    await page.waitForTimeout(1500);
+    await timed('reload to restored project', results, async () => {
+      await page.reload();
+      await expect(footer(page)).toContainText(rowsText(size), { timeout: 5 * 60_000 });
+    });
+
     const heapMb = await page.evaluate(() => {
       const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
       return memory ? Math.round(memory.usedJSHeapSize / 1e6) : null;

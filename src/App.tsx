@@ -3900,23 +3900,6 @@ ${heading}
     state.projectOverview,
   ]);
 
-  if (!isReady) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg-primary)]">
-        <div className="text-center">
-          <img
-            src="/wave-loader.gif"
-            alt="Initializing Playlist Surfer"
-            className="mx-auto mb-4 h-11 w-11 object-contain"
-            width={44}
-            height={44}
-          />
-          <p className="font-medium text-[var(--text-muted)]">Initializing Playlist Surfer</p>
-        </div>
-      </div>
-    );
-  }
-
   const isBatchMode = selectedVideoCount > 1;
   return (
     <div className={cn('flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-main)]', state.theme === 'pink-pop' && 'pink-ui-mode')}>
@@ -4064,6 +4047,7 @@ ${heading}
           ? (filteredColumns.length > 0 || Boolean(state.activeViewId))
           : channelFilteredColumns.length > 0}
         selectedVideoCount={selectedVideoCount}
+        isEngineReady={isReady}
       />
 
       <ExportDialog
