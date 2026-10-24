@@ -8,7 +8,7 @@ export type InfoProps = {
   codeExplanation?: string;
 };
 
-export function InfoPopover({ label, oneLine, method, codeSnippet, codeExplanation }: InfoProps) {
+export function InfoPopover({ label, oneLine, method, codeExplanation }: InfoProps) {
   const [open, setOpen] = useState(false);
   const id = useMemo(() => `metric-info-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`, [label]);
 

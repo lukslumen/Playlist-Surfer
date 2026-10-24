@@ -10,7 +10,7 @@ export function getArchiveEntry(files: Record<string, Uint8Array>, targetName: s
 export function stripNotesFromAnnotations(annotations: Record<string, Annotation>) {
   return Object.fromEntries(
     Object.entries(annotations).map(([videoId, annotation]) => {
-      const { notes, ...rest } = annotation;
+      const { notes: _notes, ...rest } = annotation;
       return [videoId, rest];
     })
   ) as Record<string, Annotation>;

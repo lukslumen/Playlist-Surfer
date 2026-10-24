@@ -5,7 +5,6 @@ import {
   ChannelMetadataSnapshot,
   ChannelMetadataRow,
   ColumnSchema,
-  ConflictStrategy,
   DashboardThumbnailCacheIndex,
   DuplicateGroup,
   ExcludedVideoMeta,
@@ -24,7 +23,6 @@ import {
   RowLineageState,
   ResearchLogCommentSectionId,
   SavedViewDashboardSnapshot,
-  RowConflictChoice,
   SourceRegistryState,
   SourceVisibilityState,
   ThemeMode,
@@ -935,12 +933,6 @@ function resolveComments(row: any): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function resolveThumbnailUrl(row: any): string | null {
-  const value = row?.thumbnailUrl ?? row?.thumbnail ?? row?.thumbnail_default ?? row?.thumbnail_medium ?? row?.thumbnail_high ?? row?.thumbnail_maxres;
-  if (value === null || value === undefined || value === '') return null;
-  const text = String(value).trim();
-  return text || null;
-}
 
 function parseTimestampMs(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;

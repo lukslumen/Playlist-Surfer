@@ -20,13 +20,6 @@ type Props = {
   onApplyDrilldown: (args: { filters: ExplorerFilterModel; visibleColumns?: string[] }) => void;
 };
 
-type InfoProps = {
-  label: string;
-  oneLine: string;
-  method: string;
-  codeSnippet: string;
-  codeExplanation?: string;
-};
 
 const BASE_BUCKET_OPTIONS = ['cross-platform', 'intra-platform', 'marketplace', 'crowdfunding', 'routing', 'other'] as const;
 
@@ -183,8 +176,6 @@ function LinkingInfoAuditPopover({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [open, baselineAssignments]);
-
-  const entriesByDomain = useMemo(() => new Map(domainAudit.map((entry) => [entry.domain, entry])), [domainAudit]);
 
   const filteredDomainSet = useMemo(() => {
     const query = search.trim().toLowerCase();

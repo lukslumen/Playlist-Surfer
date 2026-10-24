@@ -272,7 +272,7 @@ function shareBarRow(item: DashboardShareItem, width = PANEL_WIDTH - 4) {
   return `${label} ${pct} ${countText} ${bar(item.share, 1, 9)}`;
 }
 
-function bucketRow(label: string, count: number, total: number, max: number, width = PANEL_WIDTH - 4) {
+function bucketRow(label: string, count: number, total: number, max: number) {
   const pct = total > 0 ? count / total : 0;
   return `${padRight(label, 7)} ${padLeft(compactPercent(pct), 4)} ${padLeft(compactNumber(count), 5)} ${bar(count, Math.max(max, 1), 9)}`;
 }

@@ -114,7 +114,6 @@ export default function MetadataGrid({
   // content is unchanged so the column definitions below are not rebuilt.
   const listLikeColumns = useStableValue(listLikeColumnsProp);
   const booleanMapSchemas = useStableValue(booleanMapSchemasProp);
-  const selectedRowCount = selection.selectedKeys.length;
   const gridApiRef = useRef<GridApi | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const selectionRef = useRef<ScopeSelectionState>(selection);

@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Check, Eraser, Search, X } from 'lucide-react';
 import { CustomFilterProps, useGridFilter } from 'ag-grid-react';
 import {
-  parseListString,
   BooleanMapFilterModel,
   BooleanMapSchema,
   GenericFilterKind,

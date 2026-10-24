@@ -118,19 +118,6 @@ export function ResearchLogDialog({
   const [projectNameDraft, setProjectNameDraft] = useState(currentProjectName || 'ytde_project');
   const diaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const handleInsertDiaryDateClick = () => {
-    onInsertDiaryDate();
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const textarea = diaryTextareaRef.current;
-        if (!textarea) return;
-        const cursorPosition = textarea.value.length;
-        textarea.focus();
-        textarea.setSelectionRange(cursorPosition, cursorPosition);
-        textarea.scrollTop = textarea.scrollHeight;
-      });
-    });
-  };
 
   useEffect(() => {
     if (isOpen) setActiveSection('diary');

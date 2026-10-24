@@ -141,7 +141,6 @@ export function ImportDialog({
 
   const incomingColumnNames = useMemo(() => columns.map((column) => column.column_name), [columns]);
   const incomingDisplayNameMap = useMemo(() => buildColumnDisplayNameMap(columns), [columns]);
-  const existingDisplayNameMap = useMemo(() => buildColumnDisplayNameMap(existingSchema), [existingSchema]);
   const detectedFriendlySchema = useMemo(() => detectFriendlyImportSchema(columns, fileName), [columns, fileName]);
   const detectedFriendlySchemaLabel = useMemo(() => formatDetectedSchemaLabel(detectedFriendlySchema), [detectedFriendlySchema]);
   const currentMappings = useMemo(() => ({ ...detectSpecialMappings(existingSchema), ...(specialMappings || {}) }), [specialMappings, existingSchema]);

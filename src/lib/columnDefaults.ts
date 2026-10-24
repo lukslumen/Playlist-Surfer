@@ -78,17 +78,6 @@ export function findVideoChannelColumn(schema: { column_name: string; }[]) {
   return fallback?.column_name ?? null;
 }
 
-function findVideoChannelIdColumn(schema: { column_name: string; }[]) {
-  const preferred = ['channelId', 'channel_id', 'Channel_ID', 'channelID'];
-  for (const candidate of preferred) {
-    if (schema.some((column) => column.column_name === candidate)) return candidate;
-  }
-  const fallback = schema.find((column) => {
-    const normalized = column.column_name.toLowerCase();
-    return normalized.includes('channel') && normalized.includes('id');
-  });
-  return fallback?.column_name ?? null;
-}
 
 export function findDashboardCategoryColumn(schema: { column_name: string; }[]) {
   const preferred = ['video_category', 'video_category_label', 'category', 'categories'];
