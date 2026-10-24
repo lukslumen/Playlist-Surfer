@@ -35,7 +35,7 @@ const incomingRows = [
 ];
 const incomingSchema = cols('videoId', 'title', 'views', 'topic');
 
-function merge(overrides: Partial<MergeOptions> = {}, rows = incomingRows) {
+function merge(overrides: Partial<MergeOptions> = {}, rows: Array<Record<string, unknown>> = incomingRows) {
   return applyMerge({
     existingRows,
     incomingRows: rows,

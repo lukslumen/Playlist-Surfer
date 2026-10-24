@@ -182,6 +182,6 @@ describe('buildImportedChannelMetadataState', () => {
     });
     const rows = buildChannelMetadataRows(videoRows, state);
     expect(rows[0]).toMatchObject({ channel_id: 'UC1', channel_subscriber_count: '5000', video_count_in_dataset: 2 });
-    expect(rows[1].channel_subscriber_count).toBeUndefined();
+    expect((rows[1] as unknown as Record<string, unknown>).channel_subscriber_count).toBeUndefined();
   });
 });
