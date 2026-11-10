@@ -15,7 +15,7 @@ import {
 import { Check, X } from 'lucide-react';
 import {
   ColumnSchema,
-  DashboardThumbnailSortRule,
+  GridSortRule,
   InclusionView,
   SavedView,
   ViewScope,
@@ -23,10 +23,11 @@ import {
 import { BooleanMapFilter, GenericValueFilter, TagFilter, parseListString } from './CustomFilters';
 import { BooleanMapSchema, ExplorerFilterModel, parseBooleanMapValue } from '../lib/filterCoordinator';
 import { formatDateDisplay, formatDurationDisplay, getColumnDisplayName, getColumnHeaderTooltip, getDefaultGridColumnSizing, isDateLikeColumn, isDurationColumn, resolveVideoId, TRANSCRIPT_COLUMN } from '../lib/data';
-import { extractSortRulesFromColumnState } from '../lib/dashboardThumbnails';
+import { extractSortRulesFromColumnState } from '../lib/videoThumbnails';
 import { ScopeSelectionState, ScopeSelectionUpdate } from '../lib/selectionState';
 import { isDeleteKey } from '../lib/keyboard';
 import { useStableValue } from '../hooks/useStableValue';
+import { ExplorerNoRowsState } from './explorer/ExplorerNoRowsState';
 
 const EMPTY_BOOLEAN_MAP_SCHEMAS: Record<string, BooleanMapSchema> = {};
 
@@ -44,7 +45,7 @@ interface MetadataGridProps {
   booleanMapSchemas?: Record<string, BooleanMapSchema>;
   onGridReady: (api: GridApi) => void;
   onFilterModelChange?: (filterModel: ExplorerFilterModel) => void;
-  onSortModelChange?: (sortRules: DashboardThumbnailSortRule[]) => void;
+  onSortModelChange?: (sortRules: GridSortRule[]) => void;
   visibleColumns: string[];
   onFileDrop?: (file: File) => void;
   inclusionView: InclusionView;
@@ -811,43 +812,13 @@ export default function MetadataGrid({
             suppressColumnVirtualisation={false}
           />
           {showNoRowsRecovery ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] p-6">
-              <div className="pointer-events-auto w-full max-w-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6 text-center shadow-sm">
-                <p className="text-lg font-semibold text-[var(--text-main)]">No rows to show</p>
-                <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
-                  Data is loaded, but current view filters/scope settings hide all rows.
-                </p>
-                <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-                  {onClearFilters ? (
-                    <button
-                      type="button"
-                      onClick={onClearFilters}
-                      className="border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent)_14%,transparent)]"
-                    >
-                      {isChannelScope ? 'Reset channel filters' : 'Clear filters'}
-                    </button>
-                  ) : null}
-                  {!isChannelScope && hasHiddenSources && onShowAllSources ? (
-                    <button
-                      type="button"
-                      onClick={onShowAllSources}
-                      className="border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
-                    >
-                      Show all sources
-                    </button>
-                  ) : null}
-                  {!isChannelScope && onToggleInclusionView ? (
-                    <button
-                      type="button"
-                      onClick={onToggleInclusionView}
-                      className="border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
-                    >
-                      Switch to {inclusionView === 'included' ? 'Excluded' : 'Included'}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <ExplorerNoRowsState
+              isChannelScope={isChannelScope}
+              onClearFilters={onClearFilters}
+              onShowAllSources={!isChannelScope && hasHiddenSources ? onShowAllSources : undefined}
+              onToggleInclusionView={!isChannelScope ? onToggleInclusionView : undefined}
+              inclusionView={inclusionView}
+            />
           ) : null}
         </>
       )}

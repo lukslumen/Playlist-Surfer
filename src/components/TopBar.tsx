@@ -21,8 +21,10 @@ import {
   UserRound,
   ChevronLeft,
   ChevronRight,
+  LayoutGrid,
+  Table2,
 } from 'lucide-react';
-import { InclusionView, SavedView, ThemeMode, ViewScope } from '../types';
+import { ExplorerLayout, InclusionView, SavedView, ThemeMode, ViewScope } from '../types';
 import { cn } from '../lib/utils';
 
 interface TopBarProps {
@@ -51,6 +53,8 @@ interface TopBarProps {
   hasLoadedData: boolean;
   viewScope: ViewScope;
   onViewScopeChange: (scope: ViewScope) => void;
+  explorerLayout: ExplorerLayout;
+  onExplorerLayoutChange: (layout: ExplorerLayout) => void;
   hasChannelMetadata: boolean;
   saveViewRequestKey?: number;
   importRequestKey?: number;
@@ -87,6 +91,8 @@ export default function TopBar({
   hasLoadedData,
   viewScope,
   onViewScopeChange,
+  explorerLayout,
+  onExplorerLayoutChange,
   hasChannelMetadata,
   saveViewRequestKey = 0,
   importRequestKey = 0,
@@ -423,6 +429,47 @@ export default function TopBar({
                 {renderIcon(<UserRound size={14} />, '👤', 'Channels')}
                 <span className="sr-only">Channels</span>
               </button>
+            </div>
+          )}
+
+          {hasLoadedData && (
+            <div
+              className={cn(
+                'inline-flex h-8 shrink-0 items-center overflow-hidden rounded-sm border border-[var(--border-color)] bg-[var(--bg-primary)]',
+                viewScope !== 'videos' && 'opacity-50',
+              )}
+              role="group"
+              aria-label="Videos layout"
+            >
+              {([
+                { layout: 'table', icon: <Table2 size={14} />, emoji: '📋', label: 'Table' },
+                { layout: 'thumbnails', icon: <LayoutGrid size={14} />, emoji: '🖼️', label: 'Thumbnails' },
+              ] as const).map(({ layout, icon, emoji, label }, index) => {
+                const isActive = viewScope === 'videos' && explorerLayout === layout;
+                return (
+                  <button
+                    key={layout}
+                    type="button"
+                    onClick={() => onExplorerLayoutChange(layout)}
+                    disabled={viewScope !== 'videos'}
+                    aria-pressed={isActive}
+                    className={cn(
+                      'inline-flex h-full w-9 items-center justify-center text-[var(--text-muted)] transition-colors disabled:cursor-not-allowed',
+                      index === 0 && 'border-r border-[var(--border-color)]',
+                      isActive
+                        ? 'bg-[color-mix(in_oklab,var(--accent)_12%,var(--bg-primary))] text-[var(--text-main)]'
+                        : 'bg-[var(--bg-primary)] enabled:hover:bg-[var(--grid-hover)] enabled:hover:text-[var(--text-main)]',
+                    )}
+                    title={viewScope !== 'videos'
+                      ? 'Thumbnails are available in the Videos view'
+                      : (layout === 'table' ? 'Show videos as a table' : 'Show videos as thumbnails (Alt/Option + Shift + T)')}
+                    aria-label={layout === 'table' ? 'Show videos as a table' : 'Show videos as thumbnails'}
+                  >
+                    {renderIcon(icon, emoji, label)}
+                    <span className="sr-only">{label}</span>
+                  </button>
+                );
+              })}
             </div>
           )}
 

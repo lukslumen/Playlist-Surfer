@@ -62,7 +62,7 @@ export const APP_SHORTCUTS = {
     match: (event) => plainKey(event) && event.key === 'ArrowUp',
     when: outsideGrid,
   },
-  openThumbnailsDashboard: { keys: 'Alt/Option + Shift + T', description: 'thumbnails dashboard', match: (event) => matchesAltShiftShortcut(event, 't') },
+  toggleThumbnailView: { keys: 'Alt/Option + Shift + T', description: 'switch the videos view between table and thumbnails', match: (event) => matchesAltShiftShortcut(event, 't') },
   openAttentionDashboard: { keys: 'Alt/Option + Shift + A', description: 'attention dashboard', match: (event) => matchesAltShiftShortcut(event, 'a') },
   openContentDashboard: { keys: 'Alt/Option + Shift + C', description: 'content dashboard', match: (event) => matchesAltShiftShortcut(event, 'c') },
   openOverviewDashboard: { keys: 'Alt/Option + Shift + O', description: 'overview dashboard', match: (event) => matchesAltShiftShortcut(event, 'o') },

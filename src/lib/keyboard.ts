@@ -21,7 +21,7 @@ export function isEditableShortcutTarget(target: EventTarget | null) {
 export function isGridShortcutTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
   if (!element) return false;
-  return Boolean(element.closest('[data-metadata-grid-root="true"]'));
+  return Boolean(element.closest('[data-metadata-grid-root="true"], [data-thumbnail-grid-root="true"]'));
 }
 
 export function hasShortcutModifier(event: KeyboardEvent) {

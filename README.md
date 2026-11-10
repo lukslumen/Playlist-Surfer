@@ -8,7 +8,8 @@ Playlist Surfer is a React/TS research tool for analyzing CSV-based video and ch
 - Merge with metadata from your own analysis' CSV files, for example generated with [4CAT](https://4cat.digitalmethods.net/create-dataset/)
 - Filter, sort, and compare rows quickly
 - Switch between video view and channel view
-- Open dashboards for overview, content, attention, linking, and thumbnails
+- Switch the videos explorer between a table and a thumbnail grid
+- Open dashboards for overview, content, attention, and linking
 - Add notes, tags, and quotes while reviewing data
 - Review links, domains, and channel metadata
 - Save your work and export the project as a zip archive
@@ -71,8 +72,8 @@ Enter Playlist Surfer, a lightweight browser application for inspecting CSV-base
 - Video and channel views with linked navigation between rows, detail panels, and dashboards
 - Notes, tags, transcript quotes, description quotes, and channel-level annotations for close reading alongside quantitative analysis
 - Linking analysis that extracts and classifies URLs/domains from source columns, supports domain overrides, and produces ecology-focused summaries
-- Overview, attention, content, linking, and thumbnail dashboards that can switch between whole-dataset and filtered scopes
-- Thumbnail loading, zooming, and browsing for both filtered subsets and whole-dataset views
+- Overview, attention, content, and linking dashboards that can switch between whole-dataset and filtered scopes
+- A thumbnail view of the explorer: the table's filtered and sorted rows as a zoomable image grid, sharing its selection, Delete/undo and keyboard navigation
 - Channel metadata aggregation, channel age timelines, and channel-level batch actions
 - Research log and project history tracking so analytic steps, comments, and exports remain auditable
 - Project export/import as a zip archive for reproducibility, sharing, and later restoration
@@ -134,7 +135,7 @@ Clearing site data in the browser deletes the autosave, so export a backup for a
 | Path | Contents |
 |---|---|
 | `src/App.tsx` | App shell: wires state slices to the layout |
-| `src/state/` | State hooks per domain: inclusion, import flow, persistence, navigation, thumbnails, channels, linking, dialogs, research history |
+| `src/state/` | State hooks per domain: inclusion, import flow, persistence, navigation, channels, linking, dialogs, research history |
 | `src/lib/` | Pure, unit-tested logic: data pipeline, filters, import/merge plans, restore, linking, dashboards, shortcuts |
 | `src/components/` | UI: grid (`MetadataGrid`), panels (`DetailPanel`, `ChannelSummaryPanel`), `dialogs/`, `dashboard/`, `layout/`, `toast/` |
 | `src/worker/` | DuckDB-WASM worker used to parse CSV files |

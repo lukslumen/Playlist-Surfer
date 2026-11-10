@@ -13,10 +13,8 @@ type Props = {
   toolbarCenter?: ReactNode;
   activeTab?: DashboardTemplateTab;
   onTabChange?: (tab: DashboardTemplateTab) => void;
-  thumbnailsContent?: ReactNode;
   linkingContent?: ReactNode;
   emptyStateContent?: ReactNode;
-  fullscreenMode?: boolean;
   onNavigateToItem?: (item: DashboardTemplateColumn['ranking'][number]) => void;
   onApplyContentFilter?: (kind: ContentFilterKind, label: string) => void;
   allChannelIds?: string[];
@@ -29,10 +27,8 @@ export default function TemplateDashboard({
   toolbarCenter,
   activeTab,
   onTabChange,
-  thumbnailsContent,
   linkingContent,
   emptyStateContent,
-  fullscreenMode = false,
   onNavigateToItem,
   onApplyContentFilter,
   allChannelIds = [],
@@ -46,17 +42,15 @@ export default function TemplateDashboard({
 
   const shellClassName = [
     'exactdash-shell',
-    fullscreenMode ? 'is-fullscreen' : '',
-    resolvedActiveTab === 'thumbnails' ? 'is-thumbnails-view' : '',
     resolvedActiveTab === 'linking' ? 'is-linking-view' : '',
-    resolvedActiveTab !== 'thumbnails' && resolvedActiveTab !== 'linking' && !snapshot ? 'is-empty-view' : '',
+    resolvedActiveTab !== 'linking' && !snapshot ? 'is-empty-view' : '',
   ].filter(Boolean).join(' ');
 
   return (
     <div className={shellClassName}>
       <div className="exactdash-header">
         <div className="exactdash-tabs" role="tablist" aria-label="Dashboard sections">
-          {(['overview', 'attention', 'content', 'linking', 'thumbnails'] as DashboardTemplateTab[]).map((tab) => (
+          {(['overview', 'attention', 'content', 'linking'] as DashboardTemplateTab[]).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -72,8 +66,7 @@ export default function TemplateDashboard({
         <div className="exactdash-toolbar-center">{toolbarCenter}</div>
         {controls ? <div className="exactdash-controls" aria-label="Dashboard tools">{controls}</div> : null}
       </div>
-      {resolvedActiveTab === 'thumbnails' ? <main className="exactdash-thumbnails-tab">{thumbnailsContent}</main> : null}
-      {resolvedActiveTab !== 'thumbnails' && resolvedActiveTab !== 'linking' && !snapshot ? (
+      {resolvedActiveTab !== 'linking' && !snapshot ? (
         <main className="exactdash-empty-tab">{emptyStateContent}</main>
       ) : null}
       {resolvedActiveTab === 'overview' && snapshot ? <OverviewTab snapshot={snapshot} calculatedAt={calculatedAt} allChannelIds={allChannelIds} /> : null}

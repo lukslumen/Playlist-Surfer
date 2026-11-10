@@ -5,7 +5,6 @@ import {
   ChannelMetadataSnapshot,
   ChannelMetadataRow,
   ColumnSchema,
-  DashboardThumbnailCacheIndex,
   DuplicateGroup,
   ExcludedVideoMeta,
   GeneratedMetadataState,
@@ -1857,7 +1856,6 @@ export function createProjectManifest(args: {
   savedViewsVersion?: number;
   channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
   importedChannelMetadata?: ImportedChannelMetadataState | null;
-  thumbnailCacheIndex?: DashboardThumbnailCacheIndex;
   viewScope?: ViewScope;
   sourceRegistry?: SourceRegistryState;
   sourceVisibility?: SourceVisibilityState;
@@ -1902,7 +1900,6 @@ export function createProjectManifest(args: {
     dashboardSnapshots: args.dashboardSnapshots,
     savedViewDashboardSnapshots: args.savedViewDashboardSnapshots || {},
     savedViewsVersion: args.savedViewsVersion ?? 0,
-    thumbnailCacheIndex: args.thumbnailCacheIndex,
     channelMetadataSnapshot: args.channelMetadataSnapshot ?? null,
     importedChannelMetadata: args.importedChannelMetadata ?? null,
     viewScope: args.viewScope ?? 'videos',

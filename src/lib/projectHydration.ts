@@ -5,7 +5,6 @@ import type {
   ChannelMetadataSnapshot,
   ColumnLineageState,
   DashboardScope,
-  DashboardThumbnailCacheSnapshot,
   DatasetDashboardSnapshot,
   ExcludedVideoMeta,
   GeneratedMetadataState,
@@ -57,7 +56,6 @@ export interface HydrateProjectArgs {
   savedViewsVersion?: number;
   channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
   importedChannelMetadata?: ImportedChannelMetadataState | null;
-  thumbnailCaches?: Record<string, DashboardThumbnailCacheSnapshot>;
   viewScope?: ViewScope;
   channelFilterModel?: ExplorerFilterModel;
   channelSnapshotShouldBeFresh?: boolean;

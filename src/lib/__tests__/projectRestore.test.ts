@@ -50,7 +50,7 @@ describe('project backups', () => {
   test('restores excluded videos and starts in the included view', () => {
     const manifest = { version: 10, originalFileName: 'videos.csv', excluded_videos: ['a'], annotations: {} } as unknown as ProjectArchiveManifest;
     const unpacked = unpackProjectBackup({ 'project.json': encode(JSON.stringify(manifest)), 'data.csv': encode('videoId\na') });
-    const project = planBackupRestore({ manifest: unpacked.manifest, noteFiles: unpacked.noteFiles, parsed: { rows: [{ videoId: 'a' }], schema: [] }, restoredThumbnailCaches: {} });
+    const project = planBackupRestore({ manifest: unpacked.manifest, noteFiles: unpacked.noteFiles, parsed: { rows: [{ videoId: 'a' }], schema: [] } });
     expect(project.excludedVideoIds).toEqual(['a']);
     expect(project.inclusionView).toBe('included');
     expect(project.fileName).toBe('videos.csv');

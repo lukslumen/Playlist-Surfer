@@ -1,6 +1,5 @@
 import type {
   Annotation,
-  DashboardThumbnailCacheSnapshot,
   InclusionView,
   ProjectArchiveManifest,
 } from '../types';
@@ -133,9 +132,8 @@ export function planBackupRestore(args: {
   manifest: ProjectArchiveManifest;
   noteFiles: Record<string, string>;
   parsed: { rows: any[]; schema: any[] };
-  restoredThumbnailCaches: Record<string, DashboardThumbnailCacheSnapshot>;
 }): HydrateProjectArgs {
-  const { manifest, noteFiles, parsed, restoredThumbnailCaches } = args;
+  const { manifest, noteFiles, parsed } = args;
   return {
   rows: parsed.rows,
   schema: manifest.sourceSchema || parsed.schema,
@@ -167,7 +165,6 @@ export function planBackupRestore(args: {
   savedViewsVersion: manifest.savedViewsVersion ?? 0,
   channelMetadataSnapshot: manifest.channelMetadataSnapshot ?? null,
   importedChannelMetadata: manifest.importedChannelMetadata ?? null,
-  thumbnailCaches: restoredThumbnailCaches,
   viewScope: manifest.viewScope === 'channels' ? 'channels' : 'videos',
   channelSnapshotShouldBeFresh: true,
   sourceRegistry: manifest.sourceRegistry ?? createEmptySourceRegistry(),

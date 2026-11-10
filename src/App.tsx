@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo, useR
 import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
 import { useDuckDB } from './hooks/useDuckDB';
-import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, DashboardThumbnailArchiveEntry, DashboardThumbnailCacheIndex, DashboardThumbnailCacheSnapshot, DashboardThumbnailSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
+import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, ExplorerLayout, GridSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
 import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
@@ -16,14 +16,13 @@ import { buildDatasetDashboardStats } from './lib/datasetDashboard';
 import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
 import { aggregateChannelLinkingFromVideoRows } from './lib/linkingDashboard';
 import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
-import { THUMBNAIL_LIMIT, buildSavedViewThumbnailScopeKey, buildThumbnailSortSignature, inferFileExtensionFromMimeType, isPersistentThumbnailScopeKey, isSavedViewThumbnailScopeKey, resolveThumbnailCacheLabel, sanitizeThumbnailPathSegment, selectThumbnailCandidates } from './lib/dashboardThumbnails';
+import { normalizeThumbnailTileWidth, sortRowsLikeGrid } from './lib/videoThumbnails';
 import { cn } from './lib/utils';
 import { getBootPersistedStateJson } from './lib/persistedState';
 import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
 import { applySupportMappings, buildDefaultProjectSourceState, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
 import { CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
 import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
-import { buildThumbnailEntriesFromCacheSeed, FILTERED_TEMP_THUMBNAIL_SCOPE, normalizeRestoredThumbnailCaches, restoreThumbnailCachesFromArchive } from './lib/thumbnailCache';
 import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, buildTagUsageSummary, extractAnnotationsFromRows, stripNotesFromAnnotations } from './lib/projectNotes';
 import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
 import { describeFilterModelEntry, formatDurationLabel, parseDateLabel, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
@@ -43,7 +42,6 @@ import { useToast } from './components/toast/ToastProvider';
 import { autosaveRestoreFailedToast, describeInclusionResult, readFailedToast, restoreFailedToast, saveFailedToast } from './lib/feedbackMessages';
 import { usePersistence } from './state/usePersistence';
 import { useNavigationHistory } from './state/useNavigationHistory';
-import { useThumbnailCaches } from './state/useThumbnailCaches';
 import { useChannelAnnotations } from './state/useChannelAnnotations';
 import { useChannelRows } from './state/useChannelRows';
 import { useLinkingActions } from './state/useLinkingActions';
@@ -52,6 +50,8 @@ import { buildChannelMetadataSnapshot, isChannelMetadataSnapshotFresh } from './
 import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
 import { ImportDialog } from './components/dialogs/ImportDialog';
+import { ThumbnailGrid } from './components/explorer/ThumbnailGrid';
+import { ExplorerNoRowsState } from './components/explorer/ExplorerNoRowsState';
 import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog';
 import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog';
 
@@ -61,6 +61,7 @@ const ResearchLogDialog = lazy(() => import('./components/dialogs/ResearchLogDia
 
 // Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
 const NO_SELECTED_KEYS: string[] = [];
+const NO_ROWS: any[] = [];
 
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
@@ -152,26 +153,7 @@ export default function App() {
   const [savedViewDashboardSnapshots, setSavedViewDashboardSnapshots] = useState<Record<string, SavedViewDashboardSnapshot>>(() => {
     return persisted.savedViewDashboardSnapshots ?? {};
   });
-  const [videoSortRules, setVideoSortRules] = useState<DashboardThumbnailSortRule[]>([]);
-  const {
-    thumbnailCaches,
-    thumbnailCachesRef,
-    thumbnailLoadProgress,
-    nextThumbnailSessionId,
-    peekThumbnailSessionId,
-    clearAllThumbnailCaches,
-    replaceThumbnailCaches,
-    writeThumbnailScopes,
-    removeThumbnailScopes,
-    handleThumbnailEntryLoad,
-    handleThumbnailEntryError,
-    retryFailedThumbnails,
-    thumbnailTileSize,
-    canThumbnailZoomOut,
-    canThumbnailZoomIn,
-    handleThumbnailZoomOut,
-    handleThumbnailZoomIn,
-  } = useThumbnailCaches();
+  const [videoSortRules, setVideoSortRules] = useState<GridSortRule[]>([]);
   const inclusion = useInclusionState(persisted);
   const {
     inclusionView,
@@ -222,6 +204,9 @@ export default function App() {
   const [importedChannelMetadata, setImportedChannelMetadata] = useState<ImportedChannelMetadataState | null>(() => persisted.importedChannelMetadata ?? null);
   const [channelFilterModel, setChannelFilterModel] = useState<ExplorerFilterModel>(() => persisted.channelFilterModel ?? {});
   const [videoColumnWidths, setVideoColumnWidths] = useState<Record<string, number>>(() => persisted.videoColumnWidths ?? {});
+  // The videos view shows either the table or the thumbnail grid; both use the same rows and selection.
+  const [explorerLayout, setExplorerLayout] = useState<ExplorerLayout>(() => (persisted.explorerLayout === 'thumbnails' ? 'thumbnails' : 'table'));
+  const [thumbnailTileWidth, setThumbnailTileWidth] = useState(() => normalizeThumbnailTileWidth(persisted.thumbnailTileWidth));
   const [channelColumnWidths, setChannelColumnWidths] = useState<Record<string, number>>(() => persisted.channelColumnWidths ?? {});
   const [videoScopeChannelKeys, setVideoScopeChannelKeys] = useState<string[] | null>(null);
   const [defaultGridResetStage, setDefaultGridResetStage] = useState<0 | 1>(0);
@@ -766,6 +751,8 @@ export default function App() {
     selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
     videoColumnWidths,
     channelColumnWidths,
+    explorerLayout,
+    thumbnailTileWidth,
     sourceRegistry,
     sourceVisibility,
     rowLineage,
@@ -854,6 +841,12 @@ export default function App() {
     return filteredChannelRows[0] || null;
   }, [channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, filteredChannelRows, selectedChannelKeys, selectedChannelRows, viewScope]);
   const hasLoadedData = workingSchema.length > 0 && baseRows.length > 0;
+  const showThumbnailView = hasLoadedData && viewScope === 'videos' && explorerLayout === 'thumbnails';
+  // The thumbnails follow the table's sort order; only sort when they are shown.
+  const thumbnailViewRows = useMemo(
+    () => (showThumbnailView ? sortRowsLikeGrid(rows, videoSortRules) : NO_ROWS),
+    [rows, showThumbnailView, videoSortRules],
+  );
   const currentProjectName = useMemo(() => (state.fileName || 'ytde_project').replace(/\.(csv|zip)$/i, ''), [state.fileName]);
 
   const clearChannelDrilldownState = useCallback((options?: { restoreVideoFilters?: boolean }) => {
@@ -999,12 +992,6 @@ export default function App() {
           },
         ]))) as Record<string, SavedViewDashboardSnapshot>
       : {};
-    const restoredThumbnails = normalizeRestoredThumbnailCaches(args.thumbnailCaches ?? {}, {
-      sessionStart: peekThumbnailSessionId(),
-      datasetVersion: nextDatasetVersion,
-      filteredViewVersion: nextFilteredVersion,
-      savedViewsVersion: args.savedViewsVersion,
-    });
     const nextChannelSnapshot = args.channelMetadataSnapshot
       ? {
           ...args.channelMetadataSnapshot,
@@ -1068,8 +1055,6 @@ export default function App() {
     setDashboardActiveTab('overview');
     setDashboardSnapshots(nextDashboardSnapshots);
     setSavedViewDashboardSnapshots(nextSavedViewSnapshots);
-    // New thumbnail sessions start above any session id restored from the project.
-    replaceThumbnailCaches(restoredThumbnails.caches, restoredThumbnails.maxSessionId);
     setChannelMetadataSnapshot(nextChannelSnapshot);
     setImportedChannelMetadata(args.importedChannelMetadata ?? null);
     setSourceRegistry(nextSourceRegistry);
@@ -1099,7 +1084,7 @@ export default function App() {
       theme: args.theme ?? previous.theme,
       isRightPanelCollapsed: args.autoExpandPanel ? false : (args.isRightPanelCollapsed ?? previous.isRightPanelCollapsed),
     }));
-  }, [channelVisibleColumns, clearChannelDrilldownState, clearScopeSelection, datasetVersion, filteredViewVersion, peekThumbnailSessionId, replaceThumbnailCaches, resetInclusionHistory, setChannelNotesById, setChannelTagsById, setInclusionState, setInclusionView, setResearchHistory]);
+  }, [channelVisibleColumns, clearChannelDrilldownState, clearScopeSelection, datasetVersion, filteredViewVersion, resetInclusionHistory, setChannelNotesById, setChannelTagsById, setInclusionState, setInclusionView, setResearchHistory]);
 
   const attemptAutoRestoreLastProject = useCallback(async (trigger: 'mount' | 'pageshow') => {
     if (isAutoRestoreInFlightRef.current) {
@@ -1191,7 +1176,6 @@ export default function App() {
       await waitForNextPaint();
       const archiveFiles = readStoredZip(archiveBuffer);
       const { manifest, dataBytes, noteFiles } = unpackProjectBackup(archiveFiles);
-      const restoredThumbnailCaches = restoreThumbnailCachesFromArchive(manifest, archiveFiles);
       updateLongTaskProgress({
         title: 'Restoring project backup',
         detail: 'Parsing archived dataset',
@@ -1209,7 +1193,7 @@ export default function App() {
         total: 100,
       });
       await waitForNextPaint();
-      hydrateProject(planBackupRestore({ manifest, noteFiles, parsed, restoredThumbnailCaches }));
+      hydrateProject(planBackupRestore({ manifest, noteFiles, parsed }));
     } catch (error) {
       console.error('Failed to restore backup:', error);
       showToast(restoreFailedToast(file.name, error));
@@ -1393,10 +1377,9 @@ export default function App() {
     if (toast) showToast(toast);
   }, [showToast]);
   const handleBeforeInclusionChange = useCallback(() => {
-    clearAllThumbnailCaches();
     clearScopeSelection('videos', true);
     clearScopeSelection('channels', true);
-  }, [clearAllThumbnailCaches, clearScopeSelection]);
+  }, [clearScopeSelection]);
   const handleInclusionChanged = useCallback(() => {
     setDatasetVersion((version) => version + 1);
     setFilteredViewVersion((version) => version + 1);
@@ -1582,6 +1565,12 @@ export default function App() {
     api?.ensureIndexVisible(nextIndex, 'middle');
   }, [activeGridRows, applyScopeSelection, channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, channelSelection.selectedKeys, requestSelectionScroll, videoSelection.anchorKey, videoSelection.detailKey, videoSelection.focusKey, videoSelection.selectedKeys, viewScope]);
 
+  // Thumbnails are a videos-only layout; in the channels view the toggle declines.
+  const handleToggleExplorerLayout = useCallback(() => {
+    if (viewScope !== 'videos') return false;
+    setExplorerLayout((current) => (current === 'thumbnails' ? 'table' : 'thumbnails'));
+  }, [viewScope]);
+
   const hasVideoSelection = viewScope === 'videos' && selectedVideoIdsForActions.length > 0;
   useShortcuts({
     closeOverlay: closeTopOverlay,
@@ -1589,7 +1578,7 @@ export default function App() {
     historyForward: () => navigateHistoryByOffset(1),
     selectNext: () => moveActiveSelectionByDirection(1),
     selectPrevious: () => moveActiveSelectionByDirection(-1),
-    openThumbnailsDashboard: () => handleOpenDatasetDashboardTab('thumbnails'),
+    toggleThumbnailView: () => handleToggleExplorerLayout(),
     openAttentionDashboard: () => handleOpenDatasetDashboardTab('attention'),
     openContentDashboard: () => handleOpenDatasetDashboardTab('content'),
     openOverviewDashboard: () => handleOpenDatasetDashboardTab('overview'),
@@ -2134,7 +2123,6 @@ export default function App() {
       markDerivedSnapshotsStale('Source deleted. Refresh linking summary and channel metadata.');
       setChannelMetadataSnapshot(null);
       setChannelLinkingState(createEmptyChannelLinkingState());
-      clearAllThumbnailCaches();
       setDatasetVersion((version) => version + 1);
       setFilteredViewVersion((version) => version + 1);
       updateLongTaskProgress({
@@ -2151,7 +2139,7 @@ export default function App() {
     } finally {
       updateLongTaskProgress(null);
     }
-  }, [sourceRegistry.byId, sourceRegistry.primarySourceId, sourceRegistry.orderedIds, rowLineage.byRowId, updateLongTaskProgress, sourceRows, columnLineage.byColumn, sourceSchema, deletedColumns, visibleColumns, channelVisibleColumns, state.savedViews, sourceVisibility.hiddenSourceIds, sourceVisibility.hiddenColumnSourceIdsByScope?.videos, sourceVisibility.hiddenColumnSourceIdsByScope?.channels, clearScopeSelection, userTagsByVideoId, setInclusionState, inclusionStateRef, markDerivedSnapshotsStale, clearAllThumbnailCaches, appendResearchHistory]);
+  }, [sourceRegistry.byId, sourceRegistry.primarySourceId, sourceRegistry.orderedIds, rowLineage.byRowId, updateLongTaskProgress, sourceRows, columnLineage.byColumn, sourceSchema, deletedColumns, visibleColumns, channelVisibleColumns, state.savedViews, sourceVisibility.hiddenSourceIds, sourceVisibility.hiddenColumnSourceIdsByScope?.videos, sourceVisibility.hiddenColumnSourceIdsByScope?.channels, clearScopeSelection, userTagsByVideoId, setInclusionState, inclusionStateRef, markDerivedSnapshotsStale, appendResearchHistory]);
 
   const removeCurrentScopeFilter = useCallback((column: string) => {
     if (viewScope === 'channels') {
@@ -2291,65 +2279,6 @@ export default function App() {
 
     const projectName = options.projectName || sanitizeFileName(state.fileName, 'ytde_project');
     const archiveAnnotations = mergeAnnotationsWithUserTags(stripNotesFromAnnotations(state.annotations), userTagsByVideoId);
-    const thumbnailScopeIndex: Record<string, DashboardThumbnailCacheIndex['scopes'][string]> = {};
-    const thumbnailArchiveFiles: Array<{ fileName: string; data: Uint8Array }> = [];
-
-    (Object.entries(thumbnailCaches) as Array<[string, DashboardThumbnailCacheSnapshot]>).forEach(([scopeKey, scopeSnapshot]) => {
-      if (!isPersistentThumbnailScopeKey(scopeKey)) return;
-
-      const scopeFolder = scopeKey === 'full'
-        ? 'full'
-        : `saved_views/${sanitizeThumbnailPathSegment(scopeKey.replace('savedView:', ''), 'view')}`;
-
-      const indexedEntries: DashboardThumbnailArchiveEntry[] = [];
-      scopeSnapshot.entries.forEach((entry) => {
-        if (entry.status === 'loaded' && entry.bytes && entry.bytes.length > 0) {
-          const ext = inferFileExtensionFromMimeType(entry.mimeType);
-          const safeVideoId = sanitizeThumbnailPathSegment(entry.videoId || entry.dedupeKey || `thumb_${entry.rank}`, `thumb_${entry.rank}`);
-          const fileName = `thumbnails/${scopeFolder}/${String(entry.rank).padStart(4, '0')}_${safeVideoId}.${ext}`;
-          thumbnailArchiveFiles.push({ fileName, data: entry.bytes });
-          indexedEntries.push({
-            videoId: entry.videoId,
-            dedupeKey: entry.dedupeKey,
-            title: entry.title,
-            rank: entry.rank,
-            sourceUrl: entry.sourceUrl,
-            status: 'loaded',
-            mimeType: entry.mimeType || 'image/jpeg',
-            byteLength: entry.bytes.length,
-            fileName,
-          });
-          return;
-        }
-
-        indexedEntries.push({
-          videoId: entry.videoId,
-          dedupeKey: entry.dedupeKey,
-          title: entry.title,
-          rank: entry.rank,
-          sourceUrl: entry.sourceUrl,
-          status: 'failed',
-          error: entry.error || 'thumbnail unavailable',
-        });
-      });
-
-      if (!indexedEntries.length) return;
-      thumbnailScopeIndex[scopeKey] = {
-        scopeKey,
-        label: scopeSnapshot.label,
-        rowCount: scopeSnapshot.rowCount,
-        totalCandidates: scopeSnapshot.totalCandidates,
-        calculatedAt: scopeSnapshot.calculatedAt,
-        datasetVersionAtCalculation: scopeSnapshot.datasetVersionAtCalculation,
-        savedViewsVersionAtCalculation: scopeSnapshot.savedViewsVersionAtCalculation,
-        sortSignature: scopeSnapshot.sortSignature,
-        entries: indexedEntries,
-      };
-    });
-
-    const thumbnailCacheIndex: DashboardThumbnailCacheIndex | undefined = Object.keys(thumbnailScopeIndex).length
-      ? { version: 1, scopes: thumbnailScopeIndex }
-      : undefined;
 
     const manifest = createProjectManifest({
       fileName: state.fileName,
@@ -2381,7 +2310,6 @@ export default function App() {
       savedViewsVersion,
       channelMetadataSnapshot,
       importedChannelMetadata,
-      thumbnailCacheIndex,
       viewScope,
       sourceRegistry,
       sourceVisibility,
@@ -2399,7 +2327,6 @@ export default function App() {
       { name: `${archiveFolder}/research_log.md`, data: markdown },
       { name: `${archiveFolder}/annotations.json`, data: JSON.stringify(archiveAnnotations, null, 2) },
       { name: `${archiveFolder}/saved_views.json`, data: JSON.stringify(state.savedViews, null, 2) },
-      ...thumbnailArchiveFiles.map((entry) => ({ name: `${archiveFolder}/${entry.fileName}`, data: entry.data })),
       ...buildNoteArchiveFiles(notesByVideoId, archiveFolder),
     ]);
 
@@ -2754,12 +2681,13 @@ ${heading}
   const commandPaletteCommands = useMemo(() => {
     const commands = [
       {
-        id: 'dashboard-thumbnails',
-        label: 'Open thumbnails dashboard',
-        description: 'Jump straight to the thumbnails tab in the dataset dashboard.',
-        keywords: ['thumbnail thumbs dashboard dataset'],
+        id: 'toggle-thumbnail-view',
+        label: explorerLayout === 'thumbnails' ? 'Show table view' : 'Show thumbnail view',
+        description: 'Switch the videos explorer between the table and a grid of thumbnails.',
+        keywords: ['thumbnail thumbs grid images table layout'],
         shortcut: 'Alt/Option + Shift + T',
-        onSelect: () => handleOpenDatasetDashboardTab('thumbnails'),
+        disabled: !hasLoadedData || viewScope !== 'videos',
+        onSelect: () => handleToggleExplorerLayout(),
       },
       {
         id: 'dashboard-attention',
@@ -2933,7 +2861,7 @@ ${heading}
     ];
 
     return commands.filter((command) => !command.disabled || command.id === 'generate-channel-metadata');
-  }, [resetVisibleColumnOrder, viewScope, hasLoadedData, showAllColumns, hideOptionalColumns, handleRequestImport, handleOpenSaveView, handleOpenResearchLog, channelRows.length, channelMetadataSnapshot?.rows?.length, isChannelMetadataFresh, handleGenerateChannelMetadata, isGeneratingChannelMetadata, handleOpenAnnotations, clearAllExplorerFilters, inclusionView, state.isRightPanelCollapsed, state.theme, toggleRightPanel, handleOpenDatasetDashboardTab, setIsColumnsOpen, setIsExportOpen, setIsKeyboardHelpOpen, handleViewScopeChange, handleInclusionViewChange]);
+  }, [explorerLayout, handleToggleExplorerLayout, resetVisibleColumnOrder, viewScope, hasLoadedData, showAllColumns, hideOptionalColumns, handleRequestImport, handleOpenSaveView, handleOpenResearchLog, channelRows.length, channelMetadataSnapshot?.rows?.length, isChannelMetadataFresh, handleGenerateChannelMetadata, isGeneratingChannelMetadata, handleOpenAnnotations, clearAllExplorerFilters, inclusionView, state.isRightPanelCollapsed, state.theme, toggleRightPanel, handleOpenDatasetDashboardTab, setIsColumnsOpen, setIsExportOpen, setIsKeyboardHelpOpen, handleViewScopeChange, handleInclusionViewChange]);
   const handleGridReady = useCallback((api: GridApi) => {
     gridApiRef.current = api;
     setGridReadyVersion((current) => current + 1);
@@ -3135,7 +3063,6 @@ ${heading}
       activeViewId: previous.activeViewId === id ? null : previous.activeViewId,
     }));
     setSavedViewsVersion((version) => version + 1);
-    removeThumbnailScopes((scopeKey) => scopeKey === buildSavedViewThumbnailScopeKey(id));
     appendResearchHistory({
       type: 'saved_view_deleted',
       summary: `Saved view "${deletedView?.name || id}" deleted.`,
@@ -3144,7 +3071,7 @@ ${heading}
     if (state.activeViewId === id) {
       updateExternalFilterModel({});
     }
-  }, [appendResearchHistory, removeThumbnailScopes, state.activeViewId, state.savedViews, updateExternalFilterModel]);
+  }, [appendResearchHistory, state.activeViewId, state.savedViews, updateExternalFilterModel]);
 
   const applyView = useCallback((view: SavedView | null) => {
     clearChannelDrilldownState({ restoreVideoFilters: false });
@@ -3180,15 +3107,6 @@ ${heading}
     });
   }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, defaultGridResetStage, resetChannelLayoutToDefault, resetVideoLayoutToDefault, updateExternalFilterModel]);
 
-  useEffect(() => {
-    const validSavedViewKeys = new Set(state.savedViews.map((view) => buildSavedViewThumbnailScopeKey(view.id)));
-    removeThumbnailScopes((scopeKey) => isSavedViewThumbnailScopeKey(scopeKey) && !validSavedViewKeys.has(scopeKey));
-  }, [removeThumbnailScopes, state.savedViews]);
-
-  useEffect(() => {
-    removeThumbnailScopes((scopeKey) => scopeKey === FILTERED_TEMP_THUMBNAIL_SCOPE);
-  }, [filteredViewVersion, removeThumbnailScopes]);
-
   const handleApplyTagFilter = useCallback((tag: string, source: 'imported' | 'user', append = false) => {
     if (!tag) return;
     const mappedTagColumn = source === 'imported'
@@ -3220,156 +3138,6 @@ ${heading}
     () => detectListLikeColumns(includedDisplayRows, displaySchema, includedBooleanMapColumns),
     [includedBooleanMapColumns, includedDisplayRows, displaySchema],
   );
-  const activeSavedView = useMemo(
-    () => state.savedViews.find((view) => view.id === state.activeViewId) || null,
-    [state.activeViewId, state.savedViews],
-  );
-  const activeSavedViewThumbnailScopeKey = activeSavedView ? buildSavedViewThumbnailScopeKey(activeSavedView.id) : null;
-  const isActiveSavedViewFilterAligned = useMemo(() => {
-    if (!activeSavedView) return false;
-    return JSON.stringify(activeSavedView.filterModel || {}) === JSON.stringify(filterModel || {});
-  }, [activeSavedView, filterModel]);
-
-  const effectiveThumbnailScopeKey = useMemo(() => {
-    if (dashboardScope === 'full') return 'full';
-    if (thumbnailCaches[FILTERED_TEMP_THUMBNAIL_SCOPE]) return FILTERED_TEMP_THUMBNAIL_SCOPE;
-    if (
-      isActiveSavedViewFilterAligned
-      && activeSavedViewThumbnailScopeKey
-      && thumbnailCaches[activeSavedViewThumbnailScopeKey]
-    ) {
-      return activeSavedViewThumbnailScopeKey;
-    }
-    return FILTERED_TEMP_THUMBNAIL_SCOPE;
-  }, [activeSavedViewThumbnailScopeKey, dashboardScope, isActiveSavedViewFilterAligned, thumbnailCaches]);
-  const effectiveThumbnailCache = thumbnailCaches[effectiveThumbnailScopeKey];
-
-  const loadDashboardThumbnails = useCallback((mode: 'full' | 'filtered') => {
-    const primaryScopeKey: string = mode === 'full' ? 'full' : FILTERED_TEMP_THUMBNAIL_SCOPE;
-    const sourceRowsForLoad = mode === 'full' ? includedBaseRows : rows;
-    const sourceRowCount = sourceRowsForLoad.length;
-    const sortRules = mode === 'filtered' ? videoSortRules : [];
-    const sortSignature = buildThumbnailSortSignature(sortRules);
-    const candidates = selectThumbnailCandidates({
-      rows: sourceRowsForLoad,
-      sortRules: mode === 'filtered' ? sortRules : undefined,
-      limit: THUMBNAIL_LIMIT,
-    });
-    const mirrorSavedViewScopeKey = mode === 'filtered' && activeSavedView ? buildSavedViewThumbnailScopeKey(activeSavedView.id) : null;
-    const targetScopes = [
-      {
-        scopeKey: primaryScopeKey,
-        label: resolveThumbnailCacheLabel(primaryScopeKey as 'full' | 'filtered-temp'),
-        savedViewsVersionAtCalculation: undefined as number | undefined,
-      },
-      ...(mirrorSavedViewScopeKey ? [{
-        scopeKey: mirrorSavedViewScopeKey,
-        label: resolveThumbnailCacheLabel(mirrorSavedViewScopeKey, activeSavedView?.name),
-        savedViewsVersionAtCalculation: savedViewsVersion,
-      }] : []),
-    ];
-    const sessionIdByScope = new Map<string, number>();
-    targetScopes.forEach((target) => {
-      sessionIdByScope.set(target.scopeKey, nextThumbnailSessionId());
-    });
-
-    const seedSnapshot = mode === 'filtered'
-      ? thumbnailCachesRef.current.full
-      : undefined;
-    const primaryEntries = buildThumbnailEntriesFromCacheSeed({
-      candidates,
-      seedSnapshot,
-    });
-    writeThumbnailScopes(targetScopes.map((target): DashboardThumbnailCacheSnapshot => ({
-      scopeKey: target.scopeKey as DashboardThumbnailCacheSnapshot['scopeKey'],
-      label: target.label,
-      sessionId: sessionIdByScope.get(target.scopeKey) ?? 0,
-      rowCount: sourceRowCount,
-      totalCandidates: primaryEntries.length,
-      calculatedAt: new Date().toISOString(),
-      datasetVersionAtCalculation: datasetVersion,
-      filteredViewVersionAtCalculation: mode === 'filtered' ? filteredViewVersion : undefined,
-      savedViewsVersionAtCalculation: target.savedViewsVersionAtCalculation,
-      sortSignature,
-      entries: target.scopeKey === primaryScopeKey
-        ? primaryEntries
-        : buildThumbnailEntriesFromCacheSeed({ candidates, seedSnapshot }),
-    })), { showProgressFor: primaryScopeKey as DashboardThumbnailCacheSnapshot['scopeKey'] });
-  }, [
-    activeSavedView,
-    datasetVersion,
-    filteredViewVersion,
-    includedBaseRows,
-    nextThumbnailSessionId,
-    rows,
-    savedViewsVersion,
-    thumbnailCachesRef,
-    videoSortRules,
-    writeThumbnailScopes,
-  ]);
-
-  const handleLoadFullDashboardThumbnails = useCallback(() => {
-    loadDashboardThumbnails('full');
-  }, [loadDashboardThumbnails]);
-
-  const handleLoadFilteredDashboardThumbnails = useCallback(() => {
-    loadDashboardThumbnails('filtered');
-  }, [loadDashboardThumbnails]);
-
-  useEffect(() => {
-    if (dashboardScope !== 'filtered') return;
-    if (thumbnailCaches[FILTERED_TEMP_THUMBNAIL_SCOPE]) return;
-    if (
-      isActiveSavedViewFilterAligned
-      && activeSavedViewThumbnailScopeKey
-      && thumbnailCaches[activeSavedViewThumbnailScopeKey]
-    ) {
-      return;
-    }
-
-    const sortRules = videoSortRules;
-    const sortSignature = buildThumbnailSortSignature(sortRules);
-    const candidates = selectThumbnailCandidates({
-      rows,
-      sortRules,
-      limit: THUMBNAIL_LIMIT,
-    });
-    const entries = buildThumbnailEntriesFromCacheSeed({
-      candidates,
-      seedSnapshot: thumbnailCaches.full,
-    });
-    const sessionId = nextThumbnailSessionId();
-    const nextSnapshot: DashboardThumbnailCacheSnapshot = {
-      scopeKey: FILTERED_TEMP_THUMBNAIL_SCOPE as DashboardThumbnailCacheSnapshot['scopeKey'],
-      label: resolveThumbnailCacheLabel('filtered-temp'),
-      sessionId,
-      rowCount: rows.length,
-      totalCandidates: entries.length,
-      calculatedAt: new Date().toISOString(),
-      datasetVersionAtCalculation: datasetVersion,
-      filteredViewVersionAtCalculation: filteredViewVersion,
-      sortSignature,
-      entries,
-    };
-
-    writeThumbnailScopes([nextSnapshot], { showProgressFor: nextSnapshot.scopeKey, onlyIfMissing: true });
-  }, [
-    activeSavedViewThumbnailScopeKey,
-    dashboardScope,
-    datasetVersion,
-    filteredViewVersion,
-    isActiveSavedViewFilterAligned,
-    nextThumbnailSessionId,
-    rows,
-    thumbnailCaches,
-    videoSortRules,
-    writeThumbnailScopes,
-  ]);
-
-  const handleRetryFailedDashboardThumbnails = useCallback(() => {
-    retryFailedThumbnails(effectiveThumbnailScopeKey);
-  }, [effectiveThumbnailScopeKey, retryFailedThumbnails]);
-
   const createScopeDashboardSnapshot = useCallback((scope: DashboardScope, scopedRows: any[]): DatasetDashboardSnapshot => ({
     scope,
     stats: buildDatasetDashboardStats(scopedRows),
@@ -3962,6 +3730,8 @@ ${heading}
         excludedCount={excludedBaseRows.length}
         viewScope={viewScope}
         onViewScopeChange={handleViewScopeChange}
+        explorerLayout={explorerLayout}
+        onExplorerLayoutChange={setExplorerLayout}
         hasChannelMetadata={Boolean(channelRows.length > 0)}
         theme={state.theme}
         onToggleTheme={() => setState((previous) => ({ ...previous, theme: previous.theme === 'warm-light' ? 'dark' : 'warm-light' }))}
@@ -3982,6 +3752,29 @@ ${heading}
                 <ChannelMetadataEmptyState isGenerating={isGeneratingChannelMetadata} onGenerate={handleGenerateChannelMetadata} />
               ) : (
                 <div key={viewScope} className="h-full w-full">
+                  {showThumbnailView ? (
+                    <ThumbnailGrid
+                      rows={thumbnailViewRows}
+                      selection={videoSelection}
+                      onSelectionChange={handleGridSelectionChange}
+                      onMoveSelection={handleMoveSelectedVideos}
+                      onExcludeSelection={handleExcludeSelectedVideos}
+                      onUnkeyedRowInteraction={handleUnkeyedRowInteraction}
+                      tileWidth={thumbnailTileWidth}
+                      onTileWidthChange={setThumbnailTileWidth}
+                      isLoading={isLoadingRows || isIngesting}
+                      emptyState={(
+                        <ExplorerNoRowsState
+                          onClearFilters={clearAllExplorerFilters}
+                          onShowAllSources={(sourceVisibility.hiddenSourceIds || []).length > 0 ? handleShowAllSources : undefined}
+                          onToggleInclusionView={() => handleInclusionViewChange(inclusionView === 'included' ? 'excluded' : 'included')}
+                          inclusionView={inclusionView}
+                        />
+                      )}
+                    />
+                  ) : null}
+                  {/* The table stays mounted behind the thumbnails, so its sort state and row order are kept. */}
+                  <div className={cn('h-full w-full', showThumbnailView && 'hidden')}>
                   <MetadataGrid
                     rows={activeGridRows}
                     schema={activeGridSchema}
@@ -4015,6 +3808,7 @@ ${heading}
                     columnWidths={viewScope === 'channels' ? channelColumnWidths : videoColumnWidths}
                     onColumnWidthsChange={viewScope === 'channels' ? setChannelColumnWidths : setVideoColumnWidths}
                   />
+                  </div>
                 </div>
               )}
             </div>
@@ -4196,18 +3990,6 @@ ${heading}
             stale={isDashboardSnapshotStale}
             activeTab={dashboardActiveTab}
             onActiveTabChange={setDashboardActiveTab}
-            thumbnailCache={effectiveThumbnailCache}
-            thumbnailLoadProgress={thumbnailLoadProgress}
-            thumbnailTileSize={thumbnailTileSize}
-            canZoomOut={canThumbnailZoomOut}
-            canZoomIn={canThumbnailZoomIn}
-            onZoomOut={handleThumbnailZoomOut}
-            onZoomIn={handleThumbnailZoomIn}
-            onLoadFullThumbnails={handleLoadFullDashboardThumbnails}
-            onLoadFilteredThumbnails={handleLoadFilteredDashboardThumbnails}
-            onThumbnailEntryLoad={handleThumbnailEntryLoad}
-            onThumbnailEntryError={handleThumbnailEntryError}
-            onRetryFailedThumbnails={handleRetryFailedDashboardThumbnails}
             onNavigateToVideo={handleDashboardNavigateToVideo}
             onNavigateToChannel={handleDashboardNavigateToChannel}
             onApplyContentFilter={handleApplyDashboardContentFilter}

@@ -1,5 +1,5 @@
 import type { ExplorerFilterModel } from '../../lib/filterCoordinator';
-import { DashboardScope, DashboardTemplateTab, DashboardThumbnailCacheSnapshot, DashboardThumbnailLoadProgress, DatasetDashboardSnapshot } from '../../types';
+import { DashboardScope, DashboardTemplateTab, DatasetDashboardSnapshot } from '../../types';
 import DashboardWorkspace from '../dashboard/DashboardWorkspace';
 
 export interface DatasetDashboardDialogProps {
@@ -12,30 +12,6 @@ export interface DatasetDashboardDialogProps {
   stale: boolean;
   activeTab: DashboardTemplateTab;
   onActiveTabChange: (tab: DashboardTemplateTab) => void;
-  thumbnailCache?: DashboardThumbnailCacheSnapshot;
-  thumbnailLoadProgress?: DashboardThumbnailLoadProgress | null;
-  thumbnailTileSize: number;
-  canZoomOut: boolean;
-  canZoomIn: boolean;
-  onZoomOut: () => void;
-  onZoomIn: () => void;
-  onLoadFullThumbnails: () => void;
-  onLoadFilteredThumbnails: () => void;
-  onThumbnailEntryLoad: (
-    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
-    sessionId: number,
-    dedupeKey: string,
-    candidateIndex: number,
-    loadedUrl?: string,
-  ) => void;
-  onThumbnailEntryError: (
-    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
-    sessionId: number,
-    dedupeKey: string,
-    candidateIndex: number,
-    failedUrl?: string,
-  ) => void;
-  onRetryFailedThumbnails: () => void;
   onNavigateToVideo?: (videoId: string) => void;
   onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
   onApplyContentFilter?: (kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => void;
@@ -62,18 +38,6 @@ export function DatasetDashboardDialog({
   stale,
   activeTab,
   onActiveTabChange,
-  thumbnailCache,
-  thumbnailLoadProgress,
-  thumbnailTileSize,
-  canZoomOut,
-  canZoomIn,
-  onZoomOut,
-  onZoomIn,
-  onLoadFullThumbnails,
-  onLoadFilteredThumbnails,
-  onThumbnailEntryLoad,
-  onThumbnailEntryError,
-  onRetryFailedThumbnails,
   onNavigateToVideo,
   onNavigateToChannel,
   onApplyContentFilter,
@@ -102,18 +66,6 @@ export function DatasetDashboardDialog({
           stale={stale}
           activeTab={activeTab}
           onActiveTabChange={onActiveTabChange}
-          thumbnailCache={thumbnailCache}
-          thumbnailLoadProgress={thumbnailLoadProgress}
-          thumbnailTileSize={thumbnailTileSize}
-          canZoomOut={canZoomOut}
-          canZoomIn={canZoomIn}
-          onZoomOut={onZoomOut}
-          onZoomIn={onZoomIn}
-          onLoadFullThumbnails={onLoadFullThumbnails}
-          onLoadFilteredThumbnails={onLoadFilteredThumbnails}
-          onThumbnailEntryLoad={onThumbnailEntryLoad}
-          onThumbnailEntryError={onThumbnailEntryError}
-          onRetryFailedThumbnails={onRetryFailedThumbnails}
           onNavigateToVideo={onNavigateToVideo}
           onNavigateToChannel={onNavigateToChannel}
           onApplyContentFilter={onApplyContentFilter}

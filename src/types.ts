@@ -83,7 +83,10 @@ export interface ImportedChannelMetadataState {
 
 export type DashboardScope = 'full' | 'filtered';
 export type DashboardTabId = 'overview' | 'temporal' | 'inequality' | 'content' | 'locale' | 'reliability';
-export type DashboardTemplateTab = 'overview' | 'attention' | 'content' | 'thumbnails' | 'linking';
+export type DashboardTemplateTab = 'overview' | 'attention' | 'content' | 'linking';
+
+/** How the videos explorer shows its rows. */
+export type ExplorerLayout = 'table' | 'thumbnails';
 
 export type SourceKind = 'base' | 'enrichment' | 'generated';
 
@@ -253,64 +256,11 @@ export interface ChannelLinkingState {
   snapshot: ChannelLinkingSnapshotState | null;
 }
 
-export type DashboardThumbnailScopeKey = 'full' | 'filtered-temp' | `savedView:${string}`;
-export type DashboardThumbnailPersistentScopeKey = 'full' | `savedView:${string}`;
-
-export interface DashboardThumbnailSortRule {
+/** One sort column of the video table, in sort priority order. */
+export interface GridSortRule {
   columnId: string;
   direction: 'asc' | 'desc';
   order: number;
-}
-
-export interface DashboardThumbnailCandidate {
-  videoId: string;
-  dedupeKey: string;
-  title: string;
-  sourceUrl: string;
-  candidateUrls: string[];
-  rank: number;
-}
-
-export interface DashboardThumbnailCacheEntry {
-  videoId: string;
-  dedupeKey: string;
-  title: string;
-  rank: number;
-  sourceUrl: string;
-  candidateUrls?: string[];
-  activeUrl?: string;
-  fallbackIndex?: number;
-  activeCandidateIndex?: number;
-  status: 'pending' | 'loaded' | 'failed';
-  mimeType?: string;
-  byteLength?: number;
-  fileName?: string;
-  error?: string;
-  bytes?: Uint8Array;
-  objectUrl?: string;
-}
-
-export interface DashboardThumbnailCacheSnapshot {
-  scopeKey: DashboardThumbnailScopeKey;
-  label: string;
-  sessionId: number;
-  rowCount: number;
-  totalCandidates: number;
-  calculatedAt: string;
-  datasetVersionAtCalculation: number;
-  filteredViewVersionAtCalculation?: number;
-  savedViewsVersionAtCalculation?: number;
-  sortSignature?: string;
-  entries: DashboardThumbnailCacheEntry[];
-}
-
-export interface DashboardThumbnailLoadProgress {
-  scopeKey: DashboardThumbnailScopeKey;
-  label: string;
-  total: number;
-  completed: number;
-  failed: number;
-  loading: boolean;
 }
 
 export interface LongTaskProgress {
@@ -319,36 +269,6 @@ export interface LongTaskProgress {
   completed: number;
   total: number;
   indeterminate?: boolean;
-}
-
-export interface DashboardThumbnailArchiveEntry {
-  videoId: string;
-  dedupeKey: string;
-  title: string;
-  rank: number;
-  sourceUrl: string;
-  status: 'loaded' | 'failed';
-  mimeType?: string;
-  byteLength?: number;
-  fileName?: string;
-  error?: string;
-}
-
-export interface DashboardThumbnailArchiveScopeIndex {
-  scopeKey: DashboardThumbnailPersistentScopeKey;
-  label: string;
-  rowCount: number;
-  totalCandidates: number;
-  calculatedAt: string;
-  datasetVersionAtCalculation: number;
-  savedViewsVersionAtCalculation?: number;
-  sortSignature?: string;
-  entries: DashboardThumbnailArchiveEntry[];
-}
-
-export interface DashboardThumbnailCacheIndex {
-  version: number;
-  scopes: Record<string, DashboardThumbnailArchiveScopeIndex>;
 }
 
 export interface DashboardHotspot {
@@ -684,7 +604,6 @@ export interface ProjectArchiveManifest {
   dashboardSnapshots?: Partial<Record<DashboardScope, DatasetDashboardSnapshot>>;
   savedViewDashboardSnapshots?: Record<string, SavedViewDashboardSnapshot>;
   savedViewsVersion?: number;
-  thumbnailCacheIndex?: DashboardThumbnailCacheIndex;
   channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
   importedChannelMetadata?: ImportedChannelMetadataState | null;
   viewScope?: ViewScope;

@@ -138,7 +138,15 @@ Totals: 68 unit tests and 17 e2e tests.
     - boot gives up on an unresponsive IndexedDB after 3 s;
     - Delete in the channel grid uses the grid's own selection (new e2e test).
 
-Tests: 383 unit and 23 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
+26. **Thumbnails moved from the dashboard into the explorer.**
+    - A Table/Thumbnails toggle next to the Videos/Channels switch (also Alt/Option + Shift + T) shows the table's own rows, filtered and sorted the same way, as a virtualized image grid.
+    - The grid shares the table's selection: click, Shift/Cmd-click, arrows, Ctrl/Cmd + A, Delete/Backspace and undo all work. Titles and stats appear on hover.
+    - The zoom buttons, Ctrl/Cmd +/− and pinch change the tile size. The size and the layout are remembered.
+    - The table stays mounted behind the thumbnails, so its sort and column state survive switching.
+    - The dashboard's Thumbnails tab is gone, along with the thumbnail cache (`lib/thumbnailCache.ts`, `useThumbnailCaches`, about 900 lines) and the thumbnail images in project backups. Those images only ever came from older backups, and old backups still restore.
+    - At 100k rows, sorted by views: switching takes 0.2 s, and exclude/undo take 0.15/0.13 s (the table takes 0.12/0.05 s).
+
+Tests: 392 unit and 30 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
 - **Review findings not yet fixed:**
@@ -147,7 +155,6 @@ Still open:
   - **Back/Forward uses a 1.5 s timer** to stop restoring. On slow 100k-row filters, the forward history can still be cut off.
   - **Backspace now also moves the selection outside text fields,** and with Shift or Alt held. Confirm this is wanted.
   - **Code quality:**
-    - thumbnail cache updates are O(n²);
     - `hydrateProject` has an unstable identity;
     - refs are written during render;
     - research-event types still use `as any`.

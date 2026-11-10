@@ -97,6 +97,35 @@ for (const size of SIZES) {
       await expect(footer(page)).toContainText(rowsText(size), { timeout: 5 * 60_000 });
     });
 
+    // Thumbnail view, sorted by views: every exclude re-sorts the rows, so this is the worst case.
+    const viewsHeader = page.locator('.ag-header-cell[col-id="viewCount"] .ag-header-cell-label');
+    await viewsHeader.click();
+    await viewsHeader.click();
+    await expect(page.locator('.ag-header-cell[col-id="viewCount"]')).toHaveAttribute('aria-sort', 'descending');
+    await timed('switch to thumbnails (sorted)', results, async () => {
+      await page.getByRole('button', { name: 'Show videos as thumbnails' }).click();
+      await expect(page.locator('.thumbnail-tile').first()).toBeVisible({ timeout: 60_000 });
+    });
+    await page.locator('.thumbnail-grid-scroll').evaluate((element) => { element.scrollTop = 0; });
+    const thumbnailSamples: Record<string, number[]> = { 'thumbnails: exclude 1': [], 'thumbnails: undo': [] };
+    for (let i = 0; i < 5; i += 1) {
+      await page.locator('.thumbnail-tile[data-thumbnail-index="0"]').click();
+      await expect(footer(page)).toContainText('1 selected');
+      const sample: Record<string, number> = {};
+      await timedKey(page, 'thumbnails: exclude 1', sample, 'Delete', rowsText(size - 1));
+      await timedKey(page, 'thumbnails: undo', sample, 'ControlOrMeta+z', rowsText(size));
+      thumbnailSamples['thumbnails: exclude 1'].push(sample['thumbnails: exclude 1']);
+      thumbnailSamples['thumbnails: undo'].push(sample['thumbnails: undo']);
+    }
+    Object.entries(thumbnailSamples).forEach(([label, values]) => {
+      results[`${label} (median of 5)`] = [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+      console.log(`PERF median ${label}: ${results[`${label} (median of 5)`]} ms (${values.join(', ')})`);
+    });
+    await timed('thumbnails: scroll to end', results, async () => {
+      await page.locator('.thumbnail-grid-scroll').evaluate((element) => { element.scrollTop = element.scrollHeight; });
+      await expect(page.locator(`.thumbnail-tile[data-thumbnail-index="${size - 1}"]`)).toBeVisible();
+    });
+
     const heapMb = await page.evaluate(() => {
       const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
       return memory ? Math.round(memory.usedJSHeapSize / 1e6) : null;
