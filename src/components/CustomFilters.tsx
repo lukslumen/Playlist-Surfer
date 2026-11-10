@@ -96,9 +96,13 @@ export function GenericValueFilter(props: CustomFilterProps<any, any, GenericFil
         { value: 'gte', label: 'Greater or equal' },
         { value: 'lt', label: 'Less than' },
         { value: 'lte', label: 'Less or equal' },
+        { value: 'between', label: 'Between (from..to)' },
       ];
 
-  const placeholder = filterKind === 'duration'
+  const isRange = draftOperator === 'between';
+  const placeholder = isRange
+    ? (filterKind === 'date' ? '2024-01-01..2024-02-01' : filterKind === 'duration' ? '5:00..15:00' : 'from..to')
+    : filterKind === 'duration'
     ? 'Type 00:00 or 00:00:00'
     : filterKind === 'date'
       ? 'YYYY-MM-DD'
@@ -106,7 +110,7 @@ export function GenericValueFilter(props: CustomFilterProps<any, any, GenericFil
         ? 'Type a number'
         : 'Type to filter';
 
-  const inputType = filterKind === 'date' ? 'date' : 'text';
+  const inputType = filterKind === 'date' && !isRange ? 'date' : 'text';
 
   return (
     <div className="flex min-w-[250px] flex-col gap-3 overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">

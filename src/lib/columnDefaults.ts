@@ -121,3 +121,26 @@ export function findDashboardIntentColumn(schema: { column_name: string; }[]) {
   const fallback = schema.find((column) => column.column_name.toLowerCase().includes('intent'));
   return fallback?.column_name ?? null;
 }
+
+function findColumn(schema: { column_name: string; }[], preferred: string[], fallback?: (normalized: string) => boolean) {
+  for (const candidate of preferred) {
+    const match = schema.find((column) => column.column_name.toLowerCase() === candidate.toLowerCase());
+    if (match) return match.column_name;
+  }
+  if (!fallback) return null;
+  return schema.find((column) => fallback(column.column_name.toLowerCase()))?.column_name ?? null;
+}
+
+export function findDashboardPublishedColumn(schema: { column_name: string; }[]) {
+  return findColumn(schema, ['publishedAt', 'published_at', 'publishedAtSQL', 'Published_At'], (name) => name.includes('published'));
+}
+
+export function findDashboardViewsColumn(schema: { column_name: string; }[]) {
+  return findColumn(schema, ['viewCount', 'view_count', 'views']);
+}
+
+export function findDashboardLanguageColumn(schema: { column_name: string; }[], source: 'audio' | 'declared') {
+  return source === 'audio'
+    ? findColumn(schema, ['defaultAudioLanguage', 'default_audio_language', 'audioLanguage'])
+    : findColumn(schema, ['defaultLanguage', 'default_language', 'language']);
+}

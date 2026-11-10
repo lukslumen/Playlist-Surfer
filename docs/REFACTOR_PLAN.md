@@ -146,7 +146,17 @@ Totals: 68 unit tests and 17 e2e tests.
     - The dashboard's Thumbnails tab is gone, along with the thumbnail cache (`lib/thumbnailCache.ts`, `useThumbnailCaches`, about 900 lines) and the thumbnail images in project backups. Those images only ever came from older backups, and old backups still restore.
     - At 100k rows, sorted by views: switching takes 0.2 s, and exclude/undo take 0.15/0.13 s (the table takes 0.12/0.05 s).
 
-Tests: 392 unit and 30 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
+27. **The overview dashboard was redesigned to answer "what is this dataset?".**
+    - A plain-language summary and six headline numbers: videos, channels, years published, total views, typical (median) views and typical length.
+    - Uploads per day, week, month, quarter or year, depending on the span, with empty periods shown. Click a bar or drag across bars to filter the explorer to that period.
+    - Length, views per video, categories and languages, each clickable to filter the explorer.
+    - Data health is one quiet row (coverage, duplicates, dates) that lists issues only when there are any.
+    - It uses the app's own fonts and theme colours.
+    - The data comes from a tested `lib/overviewProfile.ts`, and drill-downs from `lib/overviewDrilldown.ts`. Snapshots saved before this change ask to be regenerated.
+    - Range filters (`from..to`) now parse dates and durations, so drill-downs show as `2024-03-01..2024-04-01`, and the column filter popup has a Between option.
+    - Removed: the channel-age timeline, the copy-all-channel-IDs button (the explorer's batch copy does this), `TimelineChart`, and about 26 KB of unused dashboard CSS.
+
+Tests: 407 unit and 31 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
 - **Review findings not yet fixed:**

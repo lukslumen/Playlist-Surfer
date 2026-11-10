@@ -47,3 +47,42 @@ describe('buildTagValuesForColumn', () => {
     expect(buildTagValuesForColumn({ ...base, filterModel: {}, column: 'videoId' })).toEqual([]);
   });
 });
+
+describe('between ranges', () => {
+  const rangeSchema: ColumnSchema[] = [
+    { column_name: 'videoId', column_type: 'VARCHAR' },
+    { column_name: 'publishedAt', column_type: 'VARCHAR' },
+    { column_name: 'viewCount', column_type: 'BIGINT' },
+    { column_name: 'duration', column_type: 'VARCHAR' },
+  ];
+  const rangeRows = [
+    { videoId: 'a', publishedAt: '2024-02-29T23:00:00Z', viewCount: 999, duration: 'PT59S' },
+    { videoId: 'b', publishedAt: '2024-03-01T00:00:00Z', viewCount: 1000, duration: 'PT1M' },
+    { videoId: 'c', publishedAt: '2024-03-31T23:59:59Z', viewCount: 9999, duration: 'PT4M59S' },
+    { videoId: 'd', publishedAt: '2024-04-01T00:00:00Z', viewCount: 10000, duration: 'PT5M' },
+  ];
+  const filter = (column: string, filterKind: string, value: string) => buildUnifiedFilterState({
+    rows: rangeRows,
+    schema: rangeSchema,
+    listLikeColumns: new Set<string>(),
+    filterModel: { [column]: { filterKind, operator: 'between', value } },
+  }).filteredRows.map((row) => row.videoId);
+
+  test('dates accept readable bounds, including the start and excluding the end', () => {
+    expect(filter('publishedAt', 'date', '2024-03-01..2024-04-01')).toEqual(['b', 'c']);
+  });
+
+  test('timestamps in milliseconds still work', () => {
+    expect(filter('publishedAt', 'date', `${Date.UTC(2024, 2, 1)}..${Date.UTC(2024, 3, 1)}`)).toEqual(['b', 'c']);
+  });
+
+  test('numbers and durations use their own parsing', () => {
+    expect(filter('viewCount', 'number', '1000..10000')).toEqual(['b', 'c']);
+    expect(filter('duration', 'duration', '60..300')).toEqual(['b', 'c']);
+    expect(filter('duration', 'duration', '1:00..5:00')).toEqual(['b', 'c']);
+  });
+
+  test('a malformed range matches nothing', () => {
+    expect(filter('viewCount', 'number', '1000..')).toEqual([]);
+  });
+});

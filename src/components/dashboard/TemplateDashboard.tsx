@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import type { DashboardTemplateColumn, DashboardTemplateSnapshot } from '../../lib/dashboardTemplateTypes';
+import type { DashboardTemplateColumn, DashboardTemplateSnapshot, OverviewDrilldown } from '../../lib/dashboardTemplateTypes';
 import type { DashboardTemplateTab } from '../../types';
 import './templateExact.css';
 import { ContentFilterKind, ContentTab } from './template/ContentTab';
@@ -17,7 +17,8 @@ type Props = {
   emptyStateContent?: ReactNode;
   onNavigateToItem?: (item: DashboardTemplateColumn['ranking'][number]) => void;
   onApplyContentFilter?: (kind: ContentFilterKind, label: string) => void;
-  allChannelIds?: string[];
+  onOverviewDrilldown?: (drilldown: OverviewDrilldown) => void;
+  onRegenerate?: () => void;
 };
 
 export default function TemplateDashboard({
@@ -31,7 +32,8 @@ export default function TemplateDashboard({
   emptyStateContent,
   onNavigateToItem,
   onApplyContentFilter,
-  allChannelIds = [],
+  onOverviewDrilldown,
+  onRegenerate,
 }: Props) {
   const [internalActiveTab, setInternalActiveTab] = useState<DashboardTemplateTab>('overview');
   const resolvedActiveTab = activeTab ?? internalActiveTab;
@@ -69,7 +71,7 @@ export default function TemplateDashboard({
       {resolvedActiveTab !== 'linking' && !snapshot ? (
         <main className="exactdash-empty-tab">{emptyStateContent}</main>
       ) : null}
-      {resolvedActiveTab === 'overview' && snapshot ? <OverviewTab snapshot={snapshot} calculatedAt={calculatedAt} allChannelIds={allChannelIds} /> : null}
+      {resolvedActiveTab === 'overview' && snapshot ? <OverviewTab snapshot={snapshot} calculatedAt={calculatedAt} onDrilldown={onOverviewDrilldown} onRegenerate={onRegenerate} /> : null}
       {resolvedActiveTab === 'attention' && snapshot ? <main className="dashboard-frame">{snapshot.columns.map((column) => <InequalityColumn key={column.key} column={column} onNavigateToItem={onNavigateToItem} />)}</main> : null}
       {resolvedActiveTab === 'content' && snapshot ? <ContentTab snapshot={snapshot} onApplyContentFilter={onApplyContentFilter} /> : null}
       {resolvedActiveTab === 'linking' ? linkingContent : null}

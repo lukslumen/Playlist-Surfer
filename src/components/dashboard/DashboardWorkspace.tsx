@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Filter, Maximize2, Minimize2, RefreshCw, Rows3, X } from 'lucide-react';
 import { DashboardScope, DashboardTemplateTab, DatasetDashboardSnapshot } from '../../types';
+import type { OverviewDrilldown } from '../../lib/dashboardTemplateTypes';
 import TemplateDashboard from './TemplateDashboard';
 import LinkingDashboard from './LinkingDashboard';
 import type { ExplorerFilterModel } from '../../lib/filterCoordinator';
@@ -19,7 +20,7 @@ type Props = {
   onNavigateToVideo?: (videoId: string) => void;
   onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
   onApplyContentFilter?: (kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => void;
-  allChannelIds?: string[];
+  onOverviewDrilldown?: (drilldown: OverviewDrilldown) => void;
   linkingProps: {
     rows: any[];
     state: any;
@@ -84,7 +85,7 @@ export default function DashboardWorkspace({
   onNavigateToVideo,
   onNavigateToChannel,
   onApplyContentFilter,
-  allChannelIds = [],
+  onOverviewDrilldown,
   linkingProps,
 }: Props) {
   const fitContentWidth = DASHBOARD_CANVAS_WIDTH;
@@ -295,7 +296,8 @@ export default function DashboardWorkspace({
       emptyStateContent={emptyStateContent}
       onApplyContentFilter={onApplyContentFilter}
       onNavigateToItem={navigateToItem}
-      allChannelIds={allChannelIds}
+      onOverviewDrilldown={onOverviewDrilldown}
+      onRegenerate={onRefresh}
     />
   );
 

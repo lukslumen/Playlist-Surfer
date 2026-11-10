@@ -297,11 +297,15 @@ function compareNumbers(operator: GenericNumericOperator, sourceValue: number, f
   }
 }
 
-function compareBetween(sourceValue: number, rawRange: string) {
+/**
+ * `from..to`, including `from` and excluding `to`. Each end is parsed like the column's values, so dates
+ * can be written as `2024-03-01..2024-04-01` and durations as `5:00..15:00`; plain numbers still work.
+ */
+function compareBetween(sourceValue: number, rawRange: string, parseBound: (value: string) => number | null) {
   const [rawMin, rawMax] = String(rawRange || '').split('..');
-  const minValue = Number(rawMin);
-  const maxValue = Number(rawMax);
-  if (Number.isNaN(minValue) || Number.isNaN(maxValue)) return false;
+  const minValue = parseBound(String(rawMin ?? '').trim());
+  const maxValue = parseBound(String(rawMax ?? '').trim());
+  if (minValue === null || maxValue === null || Number.isNaN(minValue) || Number.isNaN(maxValue)) return false;
   return sourceValue >= minValue && sourceValue < maxValue;
 }
 
@@ -388,13 +392,15 @@ function buildPredicate(
     };
   }
 
+  const parseFilterValue = (value: string): number | null => (filterKind === 'duration'
+    ? parseDurationToSeconds(value)
+    : filterKind === 'date'
+      ? parseDateToTimestamp(value)
+      : (value === '' ? null : Number(value)));
+
   return (row: any) => {
     const rawValue = row?.[column.column_name];
-    const parsedFilterValue = filterKind === 'duration'
-      ? parseDurationToSeconds(model.value)
-      : filterKind === 'date'
-        ? parseDateToTimestamp(model.value)
-        : Number(model.value);
+    const parsedFilterValue = parseFilterValue(model.value);
     const parsedSourceValue = filterKind === 'duration'
       ? parseDurationToSeconds(rawValue)
       : filterKind === 'date'
@@ -406,7 +412,7 @@ function buildPredicate(
     }
 
     if (model.operator === 'between') {
-      return compareBetween(Number(parsedSourceValue), model.value);
+      return compareBetween(Number(parsedSourceValue), model.value, parseFilterValue);
     }
 
     if (parsedFilterValue === null || Number.isNaN(parsedFilterValue)) {

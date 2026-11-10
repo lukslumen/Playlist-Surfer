@@ -1,5 +1,6 @@
 import type { ExplorerFilterModel } from '../../lib/filterCoordinator';
 import { DashboardScope, DashboardTemplateTab, DatasetDashboardSnapshot } from '../../types';
+import type { OverviewDrilldown } from '../../lib/dashboardTemplateTypes';
 import DashboardWorkspace from '../dashboard/DashboardWorkspace';
 
 export interface DatasetDashboardDialogProps {
@@ -15,7 +16,7 @@ export interface DatasetDashboardDialogProps {
   onNavigateToVideo?: (videoId: string) => void;
   onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
   onApplyContentFilter?: (kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => void;
-  allChannelIds?: string[];
+  onOverviewDrilldown?: (drilldown: OverviewDrilldown) => void;
   linkingProps: {
     rows: any[];
     state: any;
@@ -41,7 +42,7 @@ export function DatasetDashboardDialog({
   onNavigateToVideo,
   onNavigateToChannel,
   onApplyContentFilter,
-  allChannelIds = [],
+  onOverviewDrilldown,
   linkingProps,
 }: DatasetDashboardDialogProps) {
   if (!isOpen) return null;
@@ -69,7 +70,7 @@ export function DatasetDashboardDialog({
           onNavigateToVideo={onNavigateToVideo}
           onNavigateToChannel={onNavigateToChannel}
           onApplyContentFilter={onApplyContentFilter}
-          allChannelIds={allChannelIds}
+          onOverviewDrilldown={onOverviewDrilldown}
           linkingProps={linkingProps}
         />
       </div>

@@ -24,10 +24,10 @@ import type {
   DashboardTemplateTimePoint,
   DashboardTemplateVideoRecord,
 } from './dashboardTemplateTypes';
+import { buildOverviewProfile, normalizeLanguage, UNKNOWN_LANGUAGE } from './overviewProfile';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
-const UNKNOWN_LANGUAGE = 'unknown';
 const SHORTS_DURATION_MAX_SECONDS = 70;
 const SHORTS_SCORE_THRESHOLD = 3;
 const SHORTS_HASHTAG_RE = /#shorts?\b/i;
@@ -129,22 +129,6 @@ function parseTimestamp(value: string | undefined): number | null {
   const parsed = Date.parse(raw);
   if (!Number.isFinite(parsed)) return null;
   return parsed;
-}
-
-function normalizeLanguage(rawValue: string): string {
-  const normalized = rawValue
-    .trim()
-    .toLowerCase()
-    .replace(/_/g, '-');
-
-  if (!normalized || normalized === 'na' || normalized === 'n/a' || normalized === 'none') {
-    return UNKNOWN_LANGUAGE;
-  }
-
-  const base = normalized.split('-')[0].trim();
-  if (!base || base === 'und' || base === 'zxx') return UNKNOWN_LANGUAGE;
-  if (!/^[a-z]{2,3}$/.test(base)) return UNKNOWN_LANGUAGE;
-  return base;
 }
 
 function toLanguageLabel(code: string): string {
@@ -1202,6 +1186,7 @@ export function buildDashboardTemplateSnapshot(args: {
     content: deriveContentInsights(normalized),
     overview: deriveOverviewInsights(normalized),
     provenance: deriveProvenanceInsights(normalized),
+    profile: buildOverviewProfile(normalized),
   };
 
   return {

@@ -19,43 +19,10 @@ export function formatPercent(share: number, digits = 1): string {
   return `${(share * 100).toFixed(digits)}%`;
 }
 
-export async function copyText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return;
-    } catch {
-      // fall back
-    }
-  }
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', '');
-  textarea.style.position = 'absolute';
-  textarea.style.left = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand('copy');
-  document.body.removeChild(textarea);
-}
-
 export function displayScopeLabel(snapshot: DashboardTemplateSnapshot) {
   const datasetLower = snapshot.datasetLabel.toLowerCase();
   if (datasetLower.includes('sample')) return 'sampled set';
   return snapshot.scopeLabel;
-}
-
-export function statusClass(status: DashboardTemplateSnapshot['overview']['overallStatus']): string {
-  if (status === 'good') return 'status-good';
-  if (status === 'usable with caveats') return 'status-caveat';
-  if (status === 'limited') return 'status-limited';
-  return 'status-poor';
-}
-
-export function severityClass(severity: 'low' | 'warning' | 'high'): string {
-  if (severity === 'high') return 'is-high';
-  if (severity === 'warning') return 'is-warning';
-  return 'is-low';
 }
 
 export const DATE_FMT = new Intl.DateTimeFormat('en-GB', {

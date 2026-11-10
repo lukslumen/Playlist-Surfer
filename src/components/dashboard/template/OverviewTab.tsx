@@ -1,241 +1,403 @@
-import { useEffect, useState } from 'react';
-import type { DashboardTemplateLanguageRow, DashboardTemplateSnapshot } from '../../../lib/dashboardTemplateTypes';
-import { rangeOf } from '../../../lib/largeData';
-import { DATE_FMT, copyText, displayScopeLabel, formatCompact, formatPercent, severityClass, statusClass } from './format';
-import { InfoPopover } from './InfoPopover';
-import { TimelineChart } from './TimelineChart';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import type {
+  DashboardOverviewBucket,
+  DashboardOverviewProfile,
+  DashboardOverviewShare,
+  DashboardOverviewTimeBin,
+  DashboardTemplateOverviewInsights,
+  DashboardTemplateSnapshot,
+  OverviewDrilldown,
+} from '../../../lib/dashboardTemplateTypes';
+import { DATE_FMT, displayScopeLabel } from './format';
+import './overview.css';
 
-function LanguageOverview({ rows }: { rows: DashboardTemplateLanguageRow[] }) {
-  if (!rows.length) return <div className="provenance-empty">No language fields available.</div>;
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+const compactShort = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0 });
+const whole = new Intl.NumberFormat('en-US');
+const MONTH_FMT = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' });
+
+const percent = (share: number) => `${share > 0 && share < 0.01 ? '<1' : Math.round(share * 100)}%`;
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return '—';
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours) return `${hours} h ${minutes} min`;
+  if (minutes) return `${minutes} min`;
+  return `${total} s`;
+}
+
+function formatSpan(firstTs: number | null, lastTs: number | null): string {
+  if (firstTs === null || lastTs === null) return '';
+  const days = (lastTs - firstTs) / 86_400_000;
+  if (days < 1) return 'one day';
+  if (days < 60) return `${Math.round(days)} days`;
+  if (days < 730) return `${Math.round(days / 30.4)} months`;
+  return `${(days / 365.25).toFixed(days < 3650 ? 1 : 0).replace(/\.0$/, '')} years`;
+}
+
+/** A readable top for the y axis: even up to 10 (so the midline is a whole number), then 1, 2 or 5 × 10ⁿ. */
+function niceCeiling(value: number): number {
+  if (value <= 2) return 2;
+  if (value <= 10) return Math.ceil(value / 2) * 2;
+  const power = 10 ** Math.floor(Math.log10(value));
+  const step = [1, 2, 5, 10].find((candidate) => candidate * power >= value) ?? 10;
+  return step * power;
+}
+
+const UNIT_LABEL: Record<DashboardOverviewProfile['uploads']['unit'], string> = {
+  day: 'day',
+  week: 'week',
+  month: 'month',
+  quarter: 'quarter',
+  year: 'year',
+};
+
+/** Which bins get an axis label: the starts of years (or months for short spans), thinned to about a dozen. */
+function axisTicks(bins: DashboardOverviewTimeBin[], unit: DashboardOverviewProfile['uploads']['unit']) {
+  const isBoundary = (bin: DashboardOverviewTimeBin, index: number) => {
+    if (index === 0) return true;
+    const date = new Date(bin.startTs);
+    const previous = new Date(bins[index - 1].startTs);
+    if (unit === 'day' || unit === 'week') return date.getUTCMonth() !== previous.getUTCMonth();
+    return date.getUTCFullYear() !== previous.getUTCFullYear();
+  };
+  const candidates = bins.flatMap((bin, index) => (isBoundary(bin, index) ? [index] : []));
+  const every = Math.max(1, Math.ceil(candidates.length / 12));
+  // Labels need room: drop the first one when the next boundary follows right after it (Dec 2020, then 2021).
+  const minGap = bins.length / 16;
+  const thinned = candidates.filter((_, position) => position % every === 0)
+    .filter((index, position, list) => !(position === 0 && list.length > 1 && list[1] - index < minGap));
+  return thinned.map((index) => {
+    const date = new Date(bins[index].startTs);
+    const label = unit === 'day' || unit === 'week'
+      ? (date.getUTCMonth() === 0 || index === 0 ? MONTH_FMT.format(date) : date.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' }))
+      : String(date.getUTCFullYear());
+    return { index, label };
+  });
+}
+
+function UploadTimeline({ uploads, datedCount, totalVideos, onDrilldown }: {
+  uploads: DashboardOverviewProfile['uploads'];
+  datedCount: number;
+  totalVideos: number;
+  onDrilldown?: (drilldown: OverviewDrilldown) => void;
+}) {
+  const { bins, unit } = uploads;
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const [drag, setDrag] = useState<{ anchor: number; current: number } | null>(null);
+  const top = niceCeiling(uploads.maxCount);
+  const ticks = useMemo(() => axisTicks(bins, unit), [bins, unit]);
+
+  // Finish a drag wherever the pointer is released, and cancel it with Escape.
+  useEffect(() => {
+    if (!drag) return;
+    const finish = () => {
+      const from = Math.min(drag.anchor, drag.current);
+      const to = Math.max(drag.anchor, drag.current);
+      setDrag(null);
+      onDrilldown?.({ kind: 'published', startTs: bins[from].startTs, endTs: bins[to].endTs });
+    };
+    const cancel = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDrag(null);
+    };
+    window.addEventListener('pointerup', finish);
+    window.addEventListener('keydown', cancel);
+    return () => {
+      window.removeEventListener('pointerup', finish);
+      window.removeEventListener('keydown', cancel);
+    };
+  }, [bins, drag, onDrilldown]);
+
+  if (!bins.length) {
+    return <div className="ov-empty">No valid publish dates in this scope.</div>;
+  }
+
+  const selection = drag ? [Math.min(drag.anchor, drag.current), Math.max(drag.anchor, drag.current)] as const : null;
+  const tooltip = (() => {
+    if (selection) {
+      const count = bins.slice(selection[0], selection[1] + 1).reduce((total, bin) => total + bin.count, 0);
+      const label = selection[0] === selection[1] ? bins[selection[0]].label : `${bins[selection[0]].label} – ${bins[selection[1]].label}`;
+      return { index: Math.round((selection[0] + selection[1]) / 2), title: label, value: `${whole.format(count)} ${count === 1 ? 'video' : 'videos'} · release to filter` };
+    }
+    if (hoverIndex === null) return null;
+    const bin = bins[hoverIndex];
+    return { index: hoverIndex, title: bin.label, value: `${whole.format(bin.count)} ${bin.count === 1 ? 'video' : 'videos'}` };
+  })();
+
   return (
-    <div className="language-compare-grid">
-      <div className="language-compare-head"><span /><span>declared</span><span>audio</span></div>
-      <div className="provenance-language-list">
-        {rows.slice(0, 7).map((row) => (
-          <div className="provenance-language-row" key={row.label}>
-            <div className="provenance-language-code">{row.label}</div>
-            <div className="language-track-cell">
-              <div className="provenance-language-track"><div className="provenance-language-fill declared" style={{ width: `${Math.max(row.declaredShare * 100, row.declaredCount > 0 ? 1.5 : 0)}%` }} /></div>
-              <div className="provenance-language-values">{formatPercent(row.declaredShare, 0)}</div>
-            </div>
-            <div className="language-track-cell">
-              <div className="provenance-language-track"><div className="provenance-language-fill audio" style={{ width: `${Math.max(row.audioShare * 100, row.audioCount > 0 ? 1.5 : 0)}%` }} /></div>
-              <div className="provenance-language-values">{formatPercent(row.audioShare, 0)}</div>
-            </div>
-          </div>
-        ))}
+    <div className="ov-timeline">
+      <div className="ov-timeline-axis-y" aria-hidden="true">
+        <span>{whole.format(top)}</span>
+        <span>{whole.format(top / 2)}</span>
+        <span>0</span>
       </div>
+      <div className="ov-timeline-body">
+        <div
+          className={`ov-timeline-plot ${bins.length > 160 ? 'is-dense' : ''}`}
+          role="group"
+          aria-label={`Uploads per ${UNIT_LABEL[unit]}`}
+          onPointerLeave={() => setHoverIndex(null)}
+        >
+          <div className="ov-gridline" style={{ bottom: '50%' }} />
+          <div className="ov-gridline" style={{ bottom: '100%' }} />
+          {bins.map((bin, index) => {
+            const isSelected = selection ? index >= selection[0] && index <= selection[1] : false;
+            return (
+              <div
+                key={bin.startTs}
+                className={`ov-bar-column ${isSelected ? 'is-selected' : ''} ${hoverIndex === index ? 'is-hover' : ''}`}
+                onPointerEnter={() => {
+                  setHoverIndex(index);
+                  if (drag) setDrag({ ...drag, current: index });
+                }}
+                onPointerDown={(event) => {
+                  if (!onDrilldown || event.button !== 0) return;
+                  event.preventDefault();
+                  (event.target as Element).releasePointerCapture?.(event.pointerId);
+                  setDrag({ anchor: index, current: index });
+                }}
+              >
+                <div className="ov-bar" style={{ height: bin.count ? `max(2px, ${(bin.count / top) * 100}%)` : 0 }} />
+              </div>
+            );
+          })}
+          {tooltip ? (
+            <div
+              className="ov-tooltip"
+              style={{ left: `${((tooltip.index + 0.5) / bins.length) * 100}%` }}
+              role="status"
+            >
+              <strong>{tooltip.title}</strong>
+              <span>{tooltip.value}</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="ov-timeline-axis-x" aria-hidden="true">
+          {ticks.map((tick) => (
+            <span key={tick.index} style={{ left: `${(tick.index / bins.length) * 100}%` }}>{tick.label}</span>
+          ))}
+        </div>
+      </div>
+      {datedCount < totalVideos ? (
+        <p className="ov-footnote">{whole.format(totalVideos - datedCount)} videos have no valid publish date and are not shown.</p>
+      ) : null}
     </div>
   );
 }
 
-export function OverviewTab({ snapshot, calculatedAt, allChannelIds = [] }: { snapshot: DashboardTemplateSnapshot; calculatedAt: string; allChannelIds?: string[] }) {
-  const insights = snapshot.overview;
-  const provenance = snapshot.provenance;
-  const coverageValues = insights.coverage.map((metric) => metric.presentShare);
-  const coverageRange = rangeOf(coverageValues, 0, 0);
-  const maxCoverage = coverageRange.max;
-  const minCoverage = coverageRange.min;
-  const coverageUneven = maxCoverage - minCoverage >= 0.28;
-  const firstCaveat = insights.caveats[0];
-  const malformedDateRate = insights.totalVideos > 0 ? insights.malformedDateCount / insights.totalVideos : 0;
-  const caveatAuditText = insights.caveats.length
-    ? insights.caveats.map((caveat, index) => `${index + 1}. [${caveat.severity}] ${caveat.text}`).join('\n')
-    : 'No caveats generated by the quality pipeline.';
+interface BarRow {
+  key: string;
+  label: string;
+  count: number;
+  share: number;
+  onSelect?: () => void;
+}
 
-  const toolbarItems = [
-    { key: 'dataset', label: 'dataset', value: snapshot.datasetLabel },
-    { key: 'source', label: 'source', value: snapshot.sourceLabel },
-    { key: 'snapshot', label: 'snapshot', value: DATE_FMT.format(new Date(calculatedAt || snapshot.snapshotTs).getTime()) },
-    { key: 'scope', label: 'scope', value: displayScopeLabel(snapshot) },
-    { key: 'views', label: 'views', value: formatCompact(insights.totalViews) },
-    { key: 'videos', label: 'videos', value: String(insights.totalVideos) },
-    { key: 'channels', label: 'channels', value: String(insights.uniqueChannels) },
-    { key: 'comments', label: 'comments', value: formatCompact(insights.totalComments) },
-    { key: 'likes', label: 'likes', value: formatCompact(insights.totalLikes) },
+function BarList({ rows, emptyText, footnote }: { rows: BarRow[]; emptyText: string; footnote?: string }) {
+  if (!rows.length) return <div className="ov-empty">{emptyText}</div>;
+  const maxShare = Math.max(...rows.map((row) => row.share), 0.0001);
+  return (
+    <>
+      <ul className="ov-bar-list">
+        {rows.map((row) => {
+          const content = (
+            <>
+              <span className="ov-bar-label" title={row.label}>{row.label}</span>
+              <span className="ov-bar-track"><span className="ov-bar-fill" style={{ width: `${(row.share / maxShare) * 100}%` }} /></span>
+              <span className="ov-bar-value">
+                <strong>{percent(row.share)}</strong>
+                <span>{whole.format(row.count)}</span>
+              </span>
+            </>
+          );
+          return (
+            <li key={row.key}>
+              {row.onSelect ? (
+                <button type="button" className="ov-bar-row is-interactive" onClick={row.onSelect} title={`Show these ${whole.format(row.count)} videos in the explorer`}>
+                  {content}
+                </button>
+              ) : (
+                <div className="ov-bar-row">{content}</div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {footnote ? <p className="ov-footnote">{footnote}</p> : null}
+    </>
+  );
+}
+
+function bucketRows(buckets: DashboardOverviewBucket[], kind: 'length' | 'views', onDrilldown?: (drilldown: OverviewDrilldown) => void): BarRow[] {
+  return buckets.map((bucket) => ({
+    key: bucket.key,
+    label: bucket.label,
+    count: bucket.count,
+    share: bucket.share,
+    onSelect: onDrilldown && bucket.count ? () => onDrilldown({ kind, min: bucket.min, max: bucket.max }) : undefined,
+  }));
+}
+
+function shareRows(shares: DashboardOverviewShare[], toDrilldown: (value: string) => OverviewDrilldown, onDrilldown?: (drilldown: OverviewDrilldown) => void): BarRow[] {
+  return shares.map((entry) => ({
+    key: entry.filterValue ?? `other:${entry.label}`,
+    label: entry.label,
+    count: entry.count,
+    share: entry.share,
+    onSelect: onDrilldown && entry.filterValue ? () => onDrilldown(toDrilldown(entry.filterValue!)) : undefined,
+  }));
+}
+
+function DataHealth({ overview }: { overview: DashboardTemplateOverviewInsights }) {
+  // An empty scope has nothing to check; its "100% missing" caveats would only be noise.
+  const issues = overview.totalRows ? overview.caveats.filter((caveat) => caveat.severity !== 'low') : [];
+  const checks = [
+    overview.duplicateCount ? `${whole.format(overview.duplicateCount)} duplicate videos` : 'No duplicate videos',
+    overview.malformedDateCount ? `${whole.format(overview.malformedDateCount)} unreadable dates` : 'All dates readable',
   ];
+  return (
+    <section className={`ov-card ov-health ${issues.length ? 'has-issues' : ''}`} aria-label="Data health">
+      <div className="ov-health-status">
+        {issues.length ? <AlertTriangle size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}
+        <div>
+          <strong>{issues.length ? `${issues.length} ${issues.length === 1 ? 'thing' : 'things'} to check` : 'No problems found'}</strong>
+          <span>{checks.join(' · ')}</span>
+        </div>
+      </div>
+      <div className="ov-coverage" aria-label="Field coverage">
+        {overview.coverage.map((metric) => (
+          <div className="ov-coverage-item" key={metric.key} title={`${whole.format(metric.presentCount)} of ${whole.format(metric.presentCount + metric.missingCount)} videos have ${metric.label}`}>
+            <span className="ov-coverage-label">{metric.label}</span>
+            <span className="ov-coverage-meter"><span style={{ width: `${metric.presentShare * 100}%` }} /></span>
+            <span className="ov-coverage-value">{percent(metric.presentShare)}</span>
+          </div>
+        ))}
+      </div>
+      {issues.length ? (
+        <ul className="ov-issues">
+          {issues.map((issue) => (
+            <li key={issue.text} className={`is-${issue.severity}`}>{issue.text}</li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
 
-  const qualityRows: Array<{ label: string; value: string; severity: 'low' | 'warning' | 'high' }> = [
-    { label: 'duplicate videos', value: formatPercent(insights.duplicateRate, 1), severity: insights.duplicateRate >= 0.05 ? 'high' : insights.duplicateRate >= 0.01 ? 'warning' : 'low' },
-    { label: 'duplicate rows', value: formatPercent(insights.exactDuplicateRowRate, 1), severity: insights.exactDuplicateRowRate >= 0.05 ? 'high' : insights.exactDuplicateRowRate >= 0.01 ? 'warning' : 'low' },
-    { label: 'zero comments', value: formatPercent(insights.zeroCommentRate, 1), severity: insights.zeroCommentRate >= 0.5 ? 'high' : insights.zeroCommentRate >= 0.3 ? 'warning' : 'low' },
-    { label: 'channels once', value: formatPercent(insights.oneVideoChannelShare, 1), severity: insights.oneVideoChannelShare >= 0.8 ? 'high' : insights.oneVideoChannelShare >= 0.6 ? 'warning' : 'low' },
-    { label: 'malformed dates', value: String(insights.malformedDateCount), severity: malformedDateRate >= 0.1 ? 'high' : malformedDateRate > 0 ? 'warning' : 'low' },
-  ];
+function Kpi({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="ov-kpi">
+      <span className="ov-kpi-label">{label}</span>
+      <strong className="ov-kpi-value" title={value}>{value}</strong>
+      {detail ? <span className="ov-kpi-detail" title={detail}>{detail}</span> : null}
+    </div>
+  );
+}
 
-  const [channelIdCopyFeedback, setChannelIdCopyFeedback] = useState<string>('');
+export function OverviewTab({ snapshot, calculatedAt, onDrilldown, onRegenerate }: {
+  snapshot: DashboardTemplateSnapshot;
+  calculatedAt: string;
+  onDrilldown?: (drilldown: OverviewDrilldown) => void;
+  onRegenerate?: () => void;
+}) {
+  const profile = snapshot.profile;
+  if (!profile) {
+    return (
+      <main className="ov">
+        <section className="ov-card ov-outdated">
+          <strong>This snapshot was made by an earlier version of the overview.</strong>
+          <span>Regenerate it to see the new summary.</span>
+          {onRegenerate ? (
+            <button type="button" className="ov-button" onClick={onRegenerate}><RefreshCw size={14} aria-hidden="true" /> Regenerate</button>
+          ) : null}
+        </section>
+      </main>
+    );
+  }
 
-  useEffect(() => {
-    if (!channelIdCopyFeedback) return;
-    const timeout = window.setTimeout(() => setChannelIdCopyFeedback(''), 2200);
-    return () => window.clearTimeout(timeout);
-  }, [channelIdCopyFeedback]);
-
-  const handleCopyAllChannelIds = async () => {
-    if (!allChannelIds.length) {
-      setChannelIdCopyFeedback('No channel IDs available in this scope.');
-      return;
-    }
-    try {
-      await copyText(allChannelIds.join(','));
-      setChannelIdCopyFeedback(`Copied ${allChannelIds.length.toLocaleString()} channel IDs.`);
-    } catch {
-      setChannelIdCopyFeedback('Could not copy channel IDs.');
-    }
-  };
-
-  const coverageToneByKey: Record<string, string> = {
-    thumbnails: 'tone-thumbnails',
-    descriptions: 'tone-descriptions',
-    tags: 'tone-tags',
-    captions: 'tone-captions',
-    transcripts: 'tone-transcripts',
-  };
+  const overview = snapshot.overview;
+  // Years fit the card; the exact months go in the detail line.
+  const published = (() => {
+    const { firstPublishedTs: first, lastPublishedTs: last } = profile;
+    if (first === null || last === null) return { value: '—', detail: undefined };
+    const firstYear = new Date(first).getUTCFullYear();
+    const lastYear = new Date(last).getUTCFullYear();
+    const months = MONTH_FMT.format(first) === MONTH_FMT.format(last) ? MONTH_FMT.format(first) : `${MONTH_FMT.format(first)} – ${MONTH_FMT.format(last)}`;
+    if (firstYear === lastYear) return { value: MONTH_FMT.format(first) === MONTH_FMT.format(last) ? MONTH_FMT.format(first) : String(firstYear), detail: months };
+    return { value: `${firstYear}–${lastYear}`, detail: `${months} · ${formatSpan(first, last)}` };
+  })();
+  const engagement = profile.medianEngagementPerThousand;
+  const languageSourceLabel = profile.languageSource === 'audio' ? 'audio language' : 'declared language';
 
   return (
-    <main className="dataset-overview-frame overview-layout">
-      <section className="overview-toolbar">
-        <div className="overview-toolbar-grid">
-          {toolbarItems.map((item) => (
-            <div className="overview-toolbar-item" key={item.key}>
-              <span>{item.label}</span>
-              <strong title={item.value}>{item.value}</strong>
-            </div>
-          ))}
+    <main className="ov">
+      <header className="ov-head">
+        <div className="ov-head-line">
+          <h2 className="ov-title" title={snapshot.datasetLabel}>{snapshot.datasetLabel}</h2>
+          <span className="ov-chip">{displayScopeLabel(snapshot)}</span>
+          <span className="ov-meta">Snapshot {DATE_FMT.format(new Date(calculatedAt || snapshot.snapshotTs).getTime())}</span>
         </div>
+        <p className="ov-summary">{profile.summary.join(' ')}</p>
+      </header>
+
+      <section className="ov-kpis" aria-label="Key numbers">
+        <Kpi label="Videos" value={whole.format(profile.videos)} detail={overview.totalRows !== profile.videos ? `${whole.format(overview.totalRows)} rows` : undefined} />
+        <Kpi label={profile.channels === 1 ? 'Channel' : 'Channels'} value={whole.format(profile.channels)} detail={profile.singleChannelName ?? undefined} />
+        <Kpi label="Published" value={published.value} detail={published.detail} />
+        <Kpi label="Total views" value={compact.format(profile.totalViews)} detail={`${compactShort.format(overview.totalLikes)} likes · ${compactShort.format(overview.totalComments)} comments`} />
+        <Kpi
+          label="Typical views"
+          value={profile.medianViews === null ? '—' : compact.format(profile.medianViews)}
+          detail={profile.p10Views !== null && profile.p90Views !== null ? `middle 80%: ${compact.format(profile.p10Views)}–${compact.format(profile.p90Views)}` : undefined}
+        />
+        <Kpi label="Typical length" value={formatDuration(profile.medianDurationSec)} detail={engagement === null ? undefined : `${engagement < 10 ? engagement.toFixed(1) : Math.round(engagement)} likes and comments per 1K views`} />
       </section>
 
-      <section className="overview-main-grid">
-        <article className="dataset-overview-card overview-panel timeline-panel">
-          <section className="timeline-half">
-            <div className="section-title section-title-row timeline-title-row">
-              <span className="timeline-title-main">
-                <span>upload timeline</span>
-                <InfoPopover
-                  label="Upload timeline"
-                  oneLine="Time series of upload counts with rolling trend, date rug marks, and automatically selected binning."
-                  method="Rows are grouped into daily bins for tighter date ranges and weekly bins for broader histories. Each bar is a count of uploads in that bin. The line is a rolling average that smooths spikes so you can see the general publishing arc. Rug marks at the bottom show individual upload timestamps."
-                  codeSnippet={`const binning = rangeDays <= 160 ? 'daily' : 'weekly';
-
-const counts = bins.map((bucket) => bucketCounts.get(bucket) ?? 0);
-
-const moving = movingAverage(counts, binning === 'daily' ? 7 : 4);
-
-const peaks = detectPeakIndices(counts);`}
-                  codeExplanation="The code first decides how coarse the timeline should be, then computes raw counts, then overlays a moving average, then flags local maxima as peaks. That is why the chart communicates both exact bursts and overall rhythm."
-                />
-              </span>
-              <span className="timeline-meta">{provenance.overview.upload.binning} bins | {provenance.overview.upload.totalBins} bins | peaks {provenance.overview.upload.peakCount}</span>
-            </div>
-            <TimelineChart snapshot={snapshot} series="upload" ariaLabel="Upload counts over time" />
-          </section>
-          <section className="timeline-half timeline-half-secondary">
-            <div className="section-title section-title-row timeline-title-row">
-              <span className="timeline-title-main">
-                <span>channel age timeline</span>
-                <InfoPopover
-                  label="Channel age timeline"
-                  oneLine="Distribution of channel creation dates for the current scope using imported channel metadata."
-                  method="The dashboard looks for a canonical channel creation field, then groups those timestamps into daily or weekly bins exactly like the upload chart. If no channel metadata has been imported yet, the panel stays in an instructional empty state so the layout does not jump."
-                  codeSnippet={`const createdAt = row.channel_created_at ?? importedRow?.publishedAt;
-
-const series = deriveTimelineInsights(createdAtTimestamps, rows.length);`}
-                  codeExplanation="This keeps the chart compatible with imported YouTube Data Tools channel lists where the creation date comes in as publishedAt."
-                />
-              </span>
-              <span className="timeline-meta">{provenance.overview.channelAge.totalBins ? `${provenance.overview.channelAge.binning} bins | ${provenance.overview.channelAge.totalBins} bins | peaks ${provenance.overview.channelAge.peakCount}` : 'channel metadata not loaded'}</span>
-            </div>
-            <TimelineChart
-              snapshot={snapshot}
-              series="channelAge"
-              ariaLabel="Channel creation dates over time"
-              emptyMessage={
-                <div className="space-y-3">
-                  <div>Import channel list from YouTube Data Tools to see channel age distribution, you can use multi row selection to get copy ready list of channel IDs.</div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button type="button" onClick={handleCopyAllChannelIds} className="border border-[var(--line)] bg-[var(--surface-2)] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text)] hover:bg-[var(--surface-3)]">
-                      Copy all channel IDs
-                    </button>
-                    {channelIdCopyFeedback ? <span className="text-xs text-[var(--muted)]">{channelIdCopyFeedback}</span> : null}
-                  </div>
-                </div>
-              }
-            />
-          </section>
-        </article>
-
-        <article className="dataset-overview-card overview-panel quality-panel compact-quality">
-          <div className="section-title section-title-row">
-            <span>quality checks</span>
-            <InfoPopover
-              label="Quality checks"
-              oneLine="Compact diagnostic summary of duplication, engagement sparsity, channel repetition, and date parsing issues."
-              method={`The panel blends rule-based structural checks with the dashboard's quality classifier. Duplicate videos and exact duplicate rows are measured separately. Zero-comment rate is calculated only where comment fields exist. 'Channels once' measures how many channels appear only one time in the dataset.\n\nOnly the first caveat is shown inline for readability. Full caveat audit:\n${caveatAuditText}`}
-              codeSnippet={`const firstCaveat = insights.caveats[0];
-
-const caveatAuditText = insights.caveats
-  .map((caveat, index) => (index + 1) + '. [' + caveat.severity + '] ' + caveat.text)
-  .join('\n');`}
-              codeExplanation="The inline panel stays concise, but the full generated caveat list is preserved here so someone auditing the dataset can see every triggered warning and not only the first one that fit on screen."
-            />
-          </div>
-          <div className="quality-metric-list">
-            {qualityRows.map((metric) => (
-              <div className="quality-metric-row" key={metric.label}>
-                <span className="quality-metric-label">{metric.label}</span>
-                <strong className="quality-metric-value">{metric.value}</strong>
-                <span className={`quality-severity-badge ${severityClass(metric.severity)}`}>{metric.severity}</span>
-              </div>
-            ))}
-          </div>
-          <div className="dataset-status-row">
-            <span className={`dataset-status-badge ${statusClass(insights.overallStatus)}`}>{insights.overallStatus}</span>
-            <span className="dataset-status-copy">{insights.statusReason}</span>
-          </div>
-          {firstCaveat ? (
-            <div className="dataset-caveat-inline">
-              <span className={`dataset-caveat-severity ${firstCaveat.severity}`}>{firstCaveat.severity === 'medium' ? 'warning' : firstCaveat.severity}</span>
-              <span className="dataset-caveat-inline-text">{firstCaveat.text}</span>
-            </div>
+      <section className="ov-card ov-timeline-card">
+        <div className="ov-card-head">
+          <h3>Uploads per {UNIT_LABEL[profile.uploads.unit]}</h3>
+          {profile.uploads.busiest && profile.uploads.busiest.count > 1 ? (
+            <span className="ov-card-note">Busiest: {profile.uploads.busiest.label} ({whole.format(profile.uploads.busiest.count)})</span>
           ) : null}
+          {onDrilldown ? <span className="ov-hint">Click a bar or drag across bars to filter the explorer</span> : null}
+        </div>
+        <UploadTimeline uploads={profile.uploads} datedCount={profile.datedCount} totalVideos={profile.videos} onDrilldown={onDrilldown} />
+      </section>
+
+      <section className="ov-grid">
+        <article className="ov-card">
+          <div className="ov-card-head"><h3>Length</h3></div>
+          <BarList
+            rows={bucketRows(profile.lengths, 'length', onDrilldown)}
+            emptyText="No durations in this scope."
+            footnote={profile.lengthUnknownCount ? `${whole.format(profile.lengthUnknownCount)} without a duration.` : undefined}
+          />
+        </article>
+        <article className="ov-card">
+          <div className="ov-card-head"><h3>Views per video</h3></div>
+          <BarList
+            rows={bucketRows(profile.views, 'views', onDrilldown)}
+            emptyText="No view counts in this scope."
+            footnote={profile.viewsUnknownCount ? `${whole.format(profile.viewsUnknownCount)} without a view count.` : undefined}
+          />
+        </article>
+        <article className="ov-card">
+          <div className="ov-card-head"><h3>Categories</h3></div>
+          <BarList rows={shareRows(profile.categories, (value) => ({ kind: 'category', value }), onDrilldown)} emptyText="No categories in this scope." />
+        </article>
+        <article className="ov-card">
+          <div className="ov-card-head"><h3>Languages</h3><span className="ov-card-note">{languageSourceLabel}</span></div>
+          <BarList
+            rows={shareRows(profile.languages, (value) => ({ kind: 'language', value, source: profile.languageSource }), onDrilldown)}
+            emptyText="No language fields in this scope."
+          />
         </article>
       </section>
 
-      <section className="overview-secondary-grid">
-        <article className="dataset-overview-card overview-panel coverage-panel">
-          <div className="section-title">coverage</div>
-          <div className="dataset-coverage-map">
-            {insights.coverage.map((metric) => (
-              <div className="dataset-coverage-row" key={metric.key}>
-                <div className="dataset-coverage-top">
-                  <div className="dataset-coverage-label">{metric.label}</div>
-                  <div className="dataset-coverage-values">{formatPercent(metric.presentShare, 0)}</div>
-                </div>
-                <div className="coverage-track">
-                  <div className={`coverage-fill ${coverageToneByKey[metric.key] ?? 'tone-tags'}`} style={{ width: `${Math.max(metric.presentShare * 100, metric.presentCount > 0 ? 1.2 : 0)}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className={`dataset-coverage-note ${coverageUneven ? 'is-uneven' : 'is-balanced'}`}>coverage is {coverageUneven ? 'uneven' : 'relatively even'}</div>
-        </article>
-
-        <article className="dataset-overview-card overview-panel language-overview-panel">
-          <div className="section-title section-title-row">
-            <span>language overview</span>
-            <InfoPopover
-              label="Language overview"
-              oneLine="Declared versus audio language shares for the most common language codes in the dataset."
-              method="The dashboard normalizes both declared and audio language fields to base codes such as en or nl, counts them separately, then renders paired bars so mismatches are visible at a glance."
-              codeSnippet={`declaredCode = normalizeLanguage(defaultLanguage);
-audioCode = normalizeLanguage(defaultAudioLanguage);`}
-              codeExplanation="Normalizing to base codes prevents tiny formatting differences like en-US versus en-GB from fragmenting the language distribution and makes the two metadata sources comparable."
-            />
-          </div>
-          <div className="provenance-legend"><span><i className="swatch declared" /> declared</span><span><i className="swatch audio" /> audio</span></div>
-          <LanguageOverview rows={provenance.languageRows} />
-        </article>
-      </section>
+      <DataHealth overview={overview} />
     </main>
   );
 }

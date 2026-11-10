@@ -8,7 +8,7 @@ import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, detectIncomingChannelIdColumn, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
+import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
 import { createStoredZip, readStoredZip } from './lib/archive';
 import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
@@ -17,6 +17,8 @@ import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashb
 import { aggregateChannelLinkingFromVideoRows } from './lib/linkingDashboard';
 import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
 import { normalizeThumbnailTileWidth, sortRowsLikeGrid } from './lib/videoThumbnails';
+import { buildOverviewDrilldownFilter, overviewDrilldownColumns } from './lib/overviewDrilldown';
+import type { OverviewDrilldown } from './lib/dashboardTemplateTypes';
 import { cn } from './lib/utils';
 import { getBootPersistedStateJson } from './lib/persistedState';
 import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
@@ -2586,6 +2588,7 @@ export default function App() {
       findDashboardTopicColumn(displaySchema) || '',
       findDashboardDurationColumn(displaySchema) || '',
       findDashboardIntentColumn(displaySchema) || '',
+      ...overviewDrilldownColumns(displaySchema),
       ...Object.keys(normalizedDrilldownFilters || {}),
     ].filter(Boolean));
     const preservedNonLinkFilters = Object.fromEntries(
@@ -2658,6 +2661,15 @@ export default function App() {
     if (!nextFilterModel) return;
     applyDashboardDrilldown({ filters: nextFilterModel, visibleColumns: Object.keys(nextFilterModel) });
   }, [applyDashboardDrilldown, displaySchema]);
+
+  const handleOverviewDrilldown = useCallback((drilldown: OverviewDrilldown) => {
+    const filters = buildOverviewDrilldownFilter(drilldown, displaySchema);
+    if (!filters) {
+      showToast({ kind: 'info', message: 'This dataset has no column to filter on for that.' });
+      return;
+    }
+    applyDashboardDrilldown({ filters, visibleColumns: Object.keys(filters) });
+  }, [applyDashboardDrilldown, displaySchema, showToast]);
 
   const handleInsertResearchDiaryDate = useCallback(() => {
     const formatter = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
@@ -3182,23 +3194,6 @@ ${heading}
     };
   }, [datasetVersion, displaySchema, importedChannelMetadata, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns, savedViewsVersion, state.annotations, state.fileName]);
 
-  const allVisibleChannelIdsForDashboard = useMemo(() => {
-    const scopedRows = dashboardScope === 'full' ? includedDisplayRows : rows;
-    const channelIdColumn = detectIncomingChannelIdColumn(displaySchema);
-    if (!channelIdColumn) return [];
-
-    const seen = new Set<string>();
-    const values: string[] = [];
-    scopedRows.forEach((row) => {
-      const value = row?.[channelIdColumn];
-      if (value === null || value === undefined) return;
-      const normalized = String(value).trim();
-      if (!normalized || seen.has(normalized)) return;
-      seen.add(normalized);
-      values.push(normalized);
-    });
-    return values;
-  }, [dashboardScope, displaySchema, includedDisplayRows, rows]);
 
   const currentLinkingRows = useMemo(
     () => (dashboardScope === 'full' ? includedBaseRowsWithGenerated : rows),
@@ -3993,7 +3988,7 @@ ${heading}
             onNavigateToVideo={handleDashboardNavigateToVideo}
             onNavigateToChannel={handleDashboardNavigateToChannel}
             onApplyContentFilter={handleApplyDashboardContentFilter}
-            allChannelIds={allVisibleChannelIdsForDashboard}
+            onOverviewDrilldown={handleOverviewDrilldown}
             linkingProps={{
               rows: currentLinkingRows,
               state: linkingState,
