@@ -64,7 +64,7 @@ export const APP_SHORTCUTS = {
   },
   toggleThumbnailView: { keys: 'Alt/Option + Shift + T', description: 'switch the videos view between table and thumbnails', match: (event) => matchesAltShiftShortcut(event, 't') },
   openAttentionDashboard: { keys: 'Alt/Option + Shift + A', description: 'attention dashboard', match: (event) => matchesAltShiftShortcut(event, 'a') },
-  openContentDashboard: { keys: 'Alt/Option + Shift + C', description: 'content dashboard', match: (event) => matchesAltShiftShortcut(event, 'c') },
+  openVernacularDashboard: { keys: 'Alt/Option + Shift + C', description: 'vernacular dashboard', match: (event) => matchesAltShiftShortcut(event, 'c') },
   openOverviewDashboard: { keys: 'Alt/Option + Shift + O', description: 'overview dashboard', match: (event) => matchesAltShiftShortcut(event, 'o') },
   openColumns: { keys: 'Alt/Option + Shift + V', description: 'toggle column visibility / edit view', match: (event) => matchesAltShiftShortcut(event, 'v') },
   openExport: { keys: 'Alt/Option + Shift + E', description: 'export', match: (event) => matchesAltShiftShortcut(event, 'e') },

@@ -3,12 +3,15 @@ import type { OverviewDrilldown } from './dashboardTemplateTypes';
 import type { ExplorerFilterModel } from './filterCoordinator';
 import {
   findDashboardCategoryColumn,
+  findDashboardDescriptionColumn,
+  findDashboardTitleColumn,
+  findDashboardTopicColumn,
   findDashboardDurationColumn,
   findDashboardLanguageColumn,
   findDashboardPublishedColumn,
   findDashboardViewsColumn,
 } from './columnDefaults';
-import { formatDurationDisplay } from './data';
+import { formatDurationDisplay, resolveTagFilterColumn } from './data';
 
 const isoDay = (ts: number) => new Date(ts).toISOString().slice(0, 10);
 
@@ -21,6 +24,10 @@ export function overviewDrilldownColumns(schema: ColumnSchema[]): string[] {
     findDashboardCategoryColumn(schema),
     findDashboardLanguageColumn(schema, 'audio'),
     findDashboardLanguageColumn(schema, 'declared'),
+    findDashboardTopicColumn(schema),
+    findDashboardTitleColumn(schema),
+    findDashboardDescriptionColumn(schema),
+    resolveTagFilterColumn(schema),
   ].filter((column): column is string => Boolean(column));
 }
 
@@ -58,6 +65,16 @@ export function buildOverviewDrilldownFilter(drilldown: OverviewDrilldown, schem
       const column = findDashboardCategoryColumn(schema);
       if (!column) return null;
       return { [column]: { values: [drilldown.value], matchMode: 'any' } } as ExplorerFilterModel;
+    }
+    case 'term': {
+      if (drilldown.unit === 'tags' || drilldown.unit === 'topics') {
+        const column = drilldown.unit === 'tags' ? resolveTagFilterColumn(schema) : findDashboardTopicColumn(schema);
+        if (!column) return null;
+        return { [column]: { values: [drilldown.value], matchMode: 'any' } } as ExplorerFilterModel;
+      }
+      const column = drilldown.unit === 'hashtags' ? findDashboardDescriptionColumn(schema) : findDashboardTitleColumn(schema);
+      if (!column) return null;
+      return { [column]: { filterKind: 'text', operator: 'contains', value: drilldown.value } };
     }
     case 'language': {
       const column = findDashboardLanguageColumn(schema, drilldown.source);

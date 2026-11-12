@@ -11,50 +11,20 @@ import {
   resolveViews,
 } from './data';
 import type {
-  DashboardTemplateColumn,
-  DashboardTemplateContentInsights,
-  DashboardTemplateCountStat,
   DashboardTemplateCoverageMetric,
   DashboardTemplateIssue,
   DashboardTemplateOverviewInsights,
-  DashboardTemplateProvenanceInsights,
-  DashboardTemplateRankedItem,
-  DashboardTemplateSegment,
   DashboardTemplateSnapshot,
-  DashboardTemplateTimePoint,
   DashboardTemplateVideoRecord,
 } from './dashboardTemplateTypes';
-import { buildOverviewProfile, normalizeLanguage, UNKNOWN_LANGUAGE } from './overviewProfile';
+import { buildOverviewProfile } from './overviewProfile';
+import { buildAttentionProfile } from './attentionProfile';
+import { buildTimeProfile } from './timeProfile';
+import { buildVernacularProfile, termIndex } from './vernacularProfile';
+import { languageName } from './overviewProfile';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const WEEK_MS = 7 * DAY_MS;
-const SHORTS_DURATION_MAX_SECONDS = 70;
-const SHORTS_SCORE_THRESHOLD = 3;
-const SHORTS_HASHTAG_RE = /#shorts?\b/i;
-const SHORTS_KEYWORD_RE = /\b(yt\s*shorts?|shorts?|short-form|vertical video|60s|one minute|1 minute)\b/i;
-const SHORTS_TAG_RE = /^(short|shorts|ytshorts)$/i;
-
-const DATE_LABEL_FMT = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: '2-digit',
-  year: 'numeric',
-  timeZone: 'UTC',
-});
-
-const SHORT_DATE_FMT = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: '2-digit',
-  timeZone: 'UTC',
-});
-
-const STOPWORDS = new Set([
-  'a', 'about', 'after', 'all', 'also', 'an', 'and', 'any', 'are', 'as', 'at', 'be', 'been', 'before', 'being',
-  'best', 'but', 'by', 'can', 'channel', 'check', 'click', 'com', 'could', 'did', 'do', 'does', 'dont', 'for',
-  'from', 'get', 'has', 'have', 'here', 'how', 'http', 'https', 'if', 'in', 'into', 'is', 'it', 'its', 'just',
-  'learn', 'like', 'more', 'my', 'new', 'not', 'now', 'of', 'on', 'or', 'our', 'out', 'please', 'share', 'so',
-  'some', 'subscribe', 'than', 'that', 'the', 'their', 'them', 'there', 'this', 'to', 'today', 'too', 'up',
-  'use', 'video', 'was', 'we', 'what', 'when', 'where', 'which', 'who', 'why', 'will', 'with', 'you', 'your',
-]);
+// Builds the dashboard snapshot: normalized video records, the data-health checks, the profile of each
+// tab, and a plain-text write-up of all of it for copying into notes or a methods section.
 
 export const INTENT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   { label: 'tutorial / explainer', pattern: /\b(how\s+to|tutorial|guide|explained|what\s+is|basics?)\b/i },
@@ -131,126 +101,12 @@ function parseTimestamp(value: string | undefined): number | null {
   return parsed;
 }
 
-function toLanguageLabel(code: string): string {
-  return code === UNKNOWN_LANGUAGE ? code : code.toUpperCase();
-}
-
-function cleanText(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, ' ')
-    .replace(/[^a-z0-9\s]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function tokenizeForKeywords(text: string): string[] {
-  if (!text) return [];
-  const cleaned = cleanText(text);
-  if (!cleaned) return [];
-  return cleaned
-    .split(' ')
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 3 && token.length <= 28 && !STOPWORDS.has(token));
-}
-
-function keywordDocumentFrequency(texts: string[], limit: number): DashboardTemplateCountStat[] {
-  const counter = new Map<string, number>();
-  let docs = 0;
-
-  for (const text of texts) {
-    const tokens = new Set(tokenizeForKeywords(text));
-    if (tokens.size === 0) continue;
-    docs += 1;
-    for (const token of tokens) {
-      counter.set(token, (counter.get(token) ?? 0) + 1);
-    }
-  }
-
-  return [...counter.entries()]
-    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
-    .slice(0, limit)
-    .map(([label, count]) => ({ label, count, share: toShare(count, docs) }));
-}
-
-function countBy(items: string[], limit: number): DashboardTemplateCountStat[] {
-  const counter = new Map<string, number>();
-  for (const item of items) {
-    const label = item.trim();
-    if (!label) continue;
-    counter.set(label, (counter.get(label) ?? 0) + 1);
-  }
-  return [...counter.entries()]
-    .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
-    .slice(0, limit)
-    .map(([label, count]) => ({ label, count, share: toShare(count, items.length) }));
-}
-
-function durationBucket(seconds: number | null): string {
-  if (seconds === null || !Number.isFinite(seconds) || seconds <= 0) return 'unknown';
-  if (seconds < 60) return '<1m';
-  if (seconds < 300) return '1-5m';
-  if (seconds < 900) return '5-15m';
-  if (seconds < 1800) return '15-30m';
-  return '30m+';
-}
-
 export function inferIntentFromText(text: string): string {
   if (!text) return 'other';
   for (const candidate of INTENT_PATTERNS) {
     if (candidate.pattern.test(text)) return candidate.label;
   }
   return 'other';
-}
-
-function floorUtcDay(ts: number): number {
-  const date = new Date(ts);
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
-}
-
-function floorUtcWeek(ts: number): number {
-  const dayStart = floorUtcDay(ts);
-  const weekday = (new Date(dayStart).getUTCDay() + 6) % 7;
-  return dayStart - weekday * DAY_MS;
-}
-
-function movingAverage(values: number[], windowSize: number): number[] {
-  if (!values.length) return [];
-  const output: number[] = [];
-  let rollingSum = 0;
-  for (let i = 0; i < values.length; i += 1) {
-    rollingSum += values[i];
-    if (i >= windowSize) rollingSum -= values[i - windowSize];
-    const denom = Math.min(i + 1, windowSize);
-    output.push(rollingSum / denom);
-  }
-  return output;
-}
-
-function detectPeakIndices(values: number[]): Set<number> {
-  if (values.length === 0) return new Set<number>();
-  const mean = values.reduce((acc, value) => acc + value, 0) / values.length;
-  const threshold = Math.max(2, Math.ceil(mean * 1.35));
-  const candidates: number[] = [];
-
-  for (let i = 1; i < values.length - 1; i += 1) {
-    const prev = values[i - 1];
-    const current = values[i];
-    const next = values[i + 1];
-    if (current > prev && current >= next && current >= threshold) {
-      candidates.push(i);
-    }
-  }
-
-  if (candidates.length === 0) {
-    let maxIndex = 0;
-    for (let i = 1; i < values.length; i += 1) {
-      if (values[i] > values[maxIndex]) maxIndex = i;
-    }
-    return values[maxIndex] > 0 ? new Set<number>([maxIndex]) : new Set<number>();
-  }
-
-  return new Set<number>([...candidates].sort((a, b) => values[b] - values[a]).slice(0, 6));
 }
 
 function quantile(sortedOrUnsorted: number[], p: number): number | null {
@@ -264,213 +120,18 @@ function quantile(sortedOrUnsorted: number[], p: number): number | null {
   return sorted[low] + (sorted[high] - sorted[low]) * weight;
 }
 
-function sum(values: number[]): number {
-  return values.reduce((acc, value) => acc + value, 0);
-}
-
-function gini(values: number[]): number {
-  if (!values.length) return 0;
-  const sorted = [...values].filter((v) => v >= 0).sort((a, b) => a - b);
-  const total = sum(sorted);
-  if (total === 0) return 0;
-  let weighted = 0;
-  for (let i = 0; i < sorted.length; i += 1) {
-    weighted += (i + 1) * sorted[i];
+/** cyrb53: a fast 53-bit string hash; collisions are negligible next to the other key fields. */
+function hashText(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
   }
-  return (2 * weighted) / (sorted.length * total) - (sorted.length + 1) / sorted.length;
-}
-
-function computeBoxStats(values: number[]) {
-  const sorted = [...values].filter(Number.isFinite).sort((a, b) => a - b);
-  const medianValue = quantile(sorted, 0.5) ?? 0;
-  const p90 = quantile(sorted, 0.9) ?? 0;
-  return {
-    min: sorted[0] ?? 0,
-    p10: quantile(sorted, 0.1) ?? 0,
-    q1: quantile(sorted, 0.25) ?? 0,
-    median: medianValue,
-    q3: quantile(sorted, 0.75) ?? 0,
-    p90,
-    max: sorted[sorted.length - 1] ?? 0,
-    gini: gini(sorted),
-    ratioP90ToMedian: medianValue > 0 ? p90 / medianValue : undefined,
-    sampleSize: sorted.length,
-  };
-}
-
-function buildSegments(items: { value: number }[], mode: 'video' | 'channel' | 'engagement'): DashboardTemplateSegment[] {
-  const total = sum(items.map((item) => item.value));
-  const cumulativeLabels = mode === 'channel'
-    ? { top1: 'top 1', nextBucket: 'top 5', restTop10: 'top 10', rest90: 'all' }
-    : { top1: 'top 1', nextBucket: 'top 10', restTop10: 'top 10%', rest90: 'all' };
-
-  if (total <= 0 || items.length === 0) {
-    return [
-      { key: 'top1', label: cumulativeLabels.top1, share: 0, rawValue: 0 },
-      { key: 'nextBucket', label: cumulativeLabels.nextBucket, share: 0, rawValue: 0 },
-      { key: 'restTop10', label: cumulativeLabels.restTop10, share: 0, rawValue: 0 },
-      { key: 'rest90', label: cumulativeLabels.rest90, share: 0, rawValue: 0 },
-    ];
-  }
-
-  const topCount = Math.max(1, Math.ceil(items.length * 0.1));
-  const top1 = items.slice(0, 1);
-  const nextBucket = mode === 'video' ? items.slice(1, 10) : items.slice(1, 5);
-  const topBound = mode === 'channel' ? 10 : topCount;
-  const restTop10 = items.slice(mode === 'video' ? 10 : 5, topBound);
-  const rest90 = items.slice(topBound);
-
-  return [
-    { key: 'top1', label: cumulativeLabels.top1, share: sum(top1.map((item) => item.value)) / total, rawValue: sum(top1.map((item) => item.value)) },
-    { key: 'nextBucket', label: cumulativeLabels.nextBucket, share: sum(nextBucket.map((item) => item.value)) / total, rawValue: sum(nextBucket.map((item) => item.value)) },
-    { key: 'restTop10', label: cumulativeLabels.restTop10, share: sum(restTop10.map((item) => item.value)) / total, rawValue: sum(restTop10.map((item) => item.value)) },
-    { key: 'rest90', label: cumulativeLabels.rest90, share: sum(rest90.map((item) => item.value)) / total, rawValue: sum(rest90.map((item) => item.value)) },
-  ];
-}
-
-function buildRanking<T extends {
-  label: string;
-  value: number;
-  kind?: DashboardTemplateRankedItem['kind'];
-  videoId?: string;
-  channelId?: string | null;
-  channelName?: string;
-}>(items: T[], total: number): DashboardTemplateRankedItem[] {
-  return items.slice(0, 5).map((item, index) => ({
-    rank: index + 1,
-    label: item.label,
-    fullLabel: item.label,
-    rawValue: item.value,
-    share: total > 0 ? item.value / total : 0,
-    kind: item.kind,
-    videoId: item.videoId,
-    channelId: item.channelId,
-    channelName: item.channelName,
-  }));
-}
-
-function makeUnavailable(
-  key: DashboardTemplateColumn['key'],
-  title: string,
-  metricLabel: string,
-  headlineLabel: string,
-  rankingTitle: string,
-  missingFields: string[],
-): DashboardTemplateColumn {
-  return {
-    key,
-    title,
-    metricLabel,
-    headlineLabel,
-    headlineShare: 0,
-    concentration: [],
-    boxStats: { min: 0, p10: 0, q1: 0, median: 0, q3: 0, p90: 0, max: 0 },
-    rankingTitle,
-    ranking: [],
-    available: false,
-    missingFields,
-  };
-}
-
-function deriveColumns(rows: DashboardTemplateVideoRecord[]): DashboardTemplateColumn[] {
-  return [deriveVideoColumn(rows), deriveChannelColumn(rows), deriveEngagementColumn(rows)];
-}
-
-function deriveVideoColumn(rows: DashboardTemplateVideoRecord[]): DashboardTemplateColumn {
-  const usable = rows.filter((row) => row.title && row.viewCount !== null);
-  if (!usable.length) return makeUnavailable('video', 'Video', 'views per video', 'top 10%', 'top 5 videos by views', ['title', 'viewCount']);
-
-  const ranked = [...usable]
-    .map((row) => ({ label: row.title, value: row.viewCount as number, kind: 'video' as const, videoId: row.videoId }))
-    .sort((a, b) => b.value - a.value);
-  const values = ranked.map((row) => row.value);
-  const total = sum(values);
-  const topCount = Math.max(1, Math.ceil(ranked.length * 0.1));
-  return {
-    key: 'video',
-    title: 'Video',
-    metricLabel: 'views per video',
-    headlineLabel: 'top 10%',
-    headlineShare: total > 0 ? sum(ranked.slice(0, topCount).map((row) => row.value)) / total : 0,
-    concentration: buildSegments(ranked, 'video'),
-    boxStats: computeBoxStats(values),
-    rankingTitle: 'top 5 videos by views',
-    ranking: buildRanking(ranked, total),
-    available: true,
-  };
-}
-
-function deriveChannelColumn(rows: DashboardTemplateVideoRecord[]): DashboardTemplateColumn {
-  const usable = rows.filter((row) => row.channelTitle && row.viewCount !== null);
-  if (!usable.length) return makeUnavailable('channel', 'Channel', 'views per channel', 'top 5', 'top 5 channels by views', ['channelTitle', 'viewCount']);
-
-  const byChannel = new Map<string, { label: string; value: number; channelId: string | null; channelName: string }>();
-  usable.forEach((row) => {
-    const channelKey = row.channelId ? `id:${row.channelId}` : `name:${row.channelTitle.toLowerCase()}`;
-    const existing = byChannel.get(channelKey) || {
-      label: row.channelTitle,
-      value: 0,
-      channelId: row.channelId ?? null,
-      channelName: row.channelTitle,
-    };
-    existing.value += row.viewCount as number;
-    byChannel.set(channelKey, existing);
-  });
-  const ranked = [...byChannel.values()].map((entry) => ({
-    label: entry.label,
-    value: entry.value,
-    kind: 'channel' as const,
-    channelId: entry.channelId,
-    channelName: entry.channelName,
-  })).sort((a, b) => b.value - a.value);
-  const total = sum(ranked.map((row) => row.value));
-  const boxStats = computeBoxStats(ranked.map((row) => row.value));
-
-  return {
-    key: 'channel',
-    title: 'Channel',
-    metricLabel: 'views per channel',
-    headlineLabel: 'top 5',
-    headlineShare: total > 0 ? sum(ranked.slice(0, 5).map((row) => row.value)) / total : 0,
-    concentration: buildSegments(ranked, 'channel'),
-    boxStats,
-    rankingTitle: 'top 5 channels by views',
-    ranking: buildRanking(ranked, total),
-    available: true,
-  };
-}
-
-function deriveEngagementColumn(rows: DashboardTemplateVideoRecord[]): DashboardTemplateColumn {
-  const usable = rows.filter((row) => row.title && row.commentCount !== null);
-  if (!usable.length) return makeUnavailable('engagement', 'Comments', 'comments per video', 'top 10%', 'top 5 videos by comments', ['title', 'commentCount']);
-
-  const ranked = [...usable]
-    .map((row) => ({ label: row.title, value: row.commentCount as number, likes: row.likeCount ?? 0, kind: 'video' as const, videoId: row.videoId }))
-    .sort((a, b) => b.value - a.value);
-
-  const values = ranked.map((row) => row.value);
-  const total = sum(values);
-  const topCount = Math.max(1, Math.ceil(ranked.length * 0.1));
-  const boxStats = computeBoxStats(values);
-  const likes = ranked.map((row) => row.likes).sort((a, b) => a - b);
-  const likesTotal = sum(ranked.map((row) => row.likes));
-
-  return {
-    key: 'engagement',
-    title: 'Comments',
-    metricLabel: 'comments per video',
-    headlineLabel: 'top 10%',
-    headlineShare: total > 0 ? sum(ranked.slice(0, topCount).map((row) => row.value)) / total : 0,
-    concentration: buildSegments(ranked, 'engagement'),
-    boxStats: {
-      ...boxStats,
-      medianLikes: quantile(likes, 0.5) ?? undefined,
-      likesTop10Share: likesTotal > 0 ? sum(ranked.slice(0, topCount).map((row) => row.likes)) / likesTotal : undefined,
-    },
-    rankingTitle: 'top 5 videos by comments',
-    ranking: buildRanking(ranked, total),
-    available: true,
-  };
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
 
 function isPresentText(value: string): boolean {
@@ -580,7 +241,8 @@ function deriveOverviewInsights(rows: DashboardTemplateVideoRecord[]): Dashboard
       normalizedVideoId,
       normalizedTitle,
       normalizedChannel,
-      row.description.trim().toLowerCase(),
+      // A hash, not the text: 100k full descriptions in keys cost hundreds of MB.
+      hashText(row.description.trim().toLowerCase()),
       normalizedPublished,
       row.viewCount ?? '',
       row.commentCount ?? '',
@@ -670,141 +332,6 @@ function deriveOverviewInsights(rows: DashboardTemplateVideoRecord[]): Dashboard
   };
 }
 
-function deriveProvenanceInsights(rows: DashboardTemplateVideoRecord[]): DashboardTemplateProvenanceInsights {
-  const uploadTimeline = deriveTimelineInsights(
-    rows
-      .map((row) => parseTimestamp(row.publishedAt))
-      .filter((value): value is number => value !== null),
-    rows.length,
-  );
-
-  const channelCreatedByKey = new Map<string, number>();
-  rows.forEach((row) => {
-    const ts = parseTimestamp(row.channelCreatedAt);
-    if (ts === null) return;
-    const key = (row.channelId && row.channelId.trim()) || row.channelTitle.trim().toLowerCase();
-    if (!key || channelCreatedByKey.has(key)) return;
-    channelCreatedByKey.set(key, ts);
-  });
-
-  const channelAgeTimeline = deriveTimelineInsights(
-    [...channelCreatedByKey.values()],
-    Math.max(channelCreatedByKey.size, 1),
-  );
-
-  const declared = new Map<string, number>();
-  const audio = new Map<string, number>();
-  rows.forEach((row) => {
-    const declaredCode = normalizeLanguage(row.defaultLanguage);
-    const audioCode = normalizeLanguage(row.defaultAudioLanguage);
-    declared.set(declaredCode, (declared.get(declaredCode) ?? 0) + 1);
-    audio.set(audioCode, (audio.get(audioCode) ?? 0) + 1);
-  });
-
-  const combined = new Map<string, number>();
-  for (const [code, count] of declared.entries()) combined.set(code, (combined.get(code) ?? 0) + count);
-  for (const [code, count] of audio.entries()) combined.set(code, (combined.get(code) ?? 0) + count);
-  const sortedCodes = [...combined.entries()].sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0])).map(([code]) => code);
-  const selected = sortedCodes.slice(0, 7);
-  if ((combined.get(UNKNOWN_LANGUAGE) ?? 0) > 0 && !selected.includes(UNKNOWN_LANGUAGE)) selected.push(UNKNOWN_LANGUAGE);
-  const languageRows = selected.slice(0, 8).map((code) => ({
-    label: toLanguageLabel(code),
-    declaredCount: declared.get(code) ?? 0,
-    audioCount: audio.get(code) ?? 0,
-    declaredShare: toShare(declared.get(code) ?? 0, rows.length),
-    audioShare: toShare(audio.get(code) ?? 0, rows.length),
-  }));
-
-  return {
-    overview: {
-      totalVideos: rows.length,
-      upload: uploadTimeline.overview,
-      channelAge: channelAgeTimeline.overview,
-    },
-    timeSeries: uploadTimeline.timeSeries,
-    uploadTimestamps: uploadTimeline.timestamps,
-    minTs: uploadTimeline.minTs,
-    maxTs: uploadTimeline.maxTs,
-    channelAgeSeries: channelAgeTimeline.timeSeries,
-    channelAgeTimestamps: channelAgeTimeline.timestamps,
-    channelAgeMinTs: channelAgeTimeline.minTs,
-    channelAgeMaxTs: channelAgeTimeline.maxTs,
-    languageRows,
-  };
-}
-
-function computeShortsEstimate(rows: DashboardTemplateVideoRecord[]) {
-  let shortCount = 0;
-  let hashtagSignalHits = 0;
-  let tagSignalHits = 0;
-  let keywordSignalHits = 0;
-  let durationSignalHits = 0;
-
-  for (const row of rows) {
-    const mergedText = `${row.title} ${row.description}`.trim();
-    const hasHashtagSignal = SHORTS_HASHTAG_RE.test(mergedText);
-    const hasTagSignal = row.tags.some((tag) => SHORTS_TAG_RE.test(tag.trim()));
-    const hasKeywordSignal = SHORTS_KEYWORD_RE.test(mergedText);
-    const hasDurationSignal = typeof row.durationSec === 'number' && row.durationSec > 0 && row.durationSec <= SHORTS_DURATION_MAX_SECONDS;
-    const hasTitleLeadSignal = /^\s*#shorts?\b/i.test(row.title);
-
-    let score = 0;
-    if (hasHashtagSignal) score += 3;
-    if (hasTagSignal) score += 2;
-    if (hasDurationSignal) score += 2;
-    if (hasKeywordSignal) score += 1;
-    if (hasTitleLeadSignal) score += 1;
-
-    const isEstimatedShort = hasHashtagSignal || score >= SHORTS_SCORE_THRESHOLD;
-    if (isEstimatedShort) shortCount += 1;
-    if (hasHashtagSignal) hashtagSignalHits += 1;
-    if (hasTagSignal) tagSignalHits += 1;
-    if (hasKeywordSignal) keywordSignalHits += 1;
-    if (hasDurationSignal) durationSignalHits += 1;
-  }
-
-  return {
-    shortCount,
-    longCount: Math.max(0, rows.length - shortCount),
-    shortShare: rows.length ? shortCount / rows.length : 0,
-    longShare: rows.length ? Math.max(0, rows.length - shortCount) / rows.length : 0,
-    hashtagSignalHits,
-    tagSignalHits,
-    keywordSignalHits,
-    durationSignalHits,
-    scoreThreshold: SHORTS_SCORE_THRESHOLD,
-  };
-}
-
-function deriveContentInsights(rows: DashboardTemplateVideoRecord[]): DashboardTemplateContentInsights {
-  const withCategory = rows.filter((row) => row.videoCategoryLabel).length;
-  const withTags = rows.filter((row) => row.tags.length > 0).length;
-  const withDescription = rows.filter((row) => row.description).length;
-  const withTopics = rows.filter((row) => row.topicCategories.length > 0).length;
-  const tagTotal = rows.reduce((acc, row) => acc + row.tags.length, 0);
-
-  return {
-    overview: {
-      videos: rows.length,
-      withCategory,
-      withTags,
-      withDescription,
-      withTopics,
-      avgTagsPerTaggedVideo: withTags > 0 ? tagTotal / withTags : 0,
-    },
-    categories: countBy(rows.map((row) => row.videoCategoryLabel || 'unknown'), 6),
-    topics: countBy(rows.flatMap((row) => row.topicCategories.length ? row.topicCategories : ['unknown']), 6),
-    intent: countBy(rows.map((row) => inferIntentFromText(`${row.title} ${row.description}`)), 6),
-    durations: countBy(rows.map((row) => durationBucket(row.durationSec)), 6),
-    shortsEstimate: computeShortsEstimate(rows),
-    keywords: {
-      titleKeywords: keywordDocumentFrequency(rows.map((row) => row.title).filter(Boolean), 36),
-      descriptionKeywords: keywordDocumentFrequency(rows.map((row) => row.description).filter(Boolean), 36),
-      tagKeywords: keywordDocumentFrequency(rows.map((row) => row.tags.join(' ')).filter(Boolean), 36),
-    },
-  };
-}
-
 function resolveThumbnailUrl(row: any): string {
   return toText(
     row?.thumbnailUrl
@@ -870,93 +397,8 @@ function resolveChannelCreatedAt(row: any, importedChannelMetadata?: ImportedCha
   return toText(value);
 }
 
-function buildEmptyTimelineOverview(): DashboardTemplateProvenanceInsights['overview']['upload'] {
-  return {
-    validDateCount: 0,
-    validDateShare: 0,
-    firstLabel: 'n/a',
-    lastLabel: 'n/a',
-    rangeDays: 0,
-    binning: 'weekly',
-    totalBins: 0,
-    peakCount: 0,
-    maxBinCount: 0,
-  };
-}
-
-function deriveTimelineInsights(timestamps: number[], totalRows: number): {
-  overview: DashboardTemplateProvenanceInsights['overview']['upload'];
-  timeSeries: DashboardTemplateTimePoint[];
-  timestamps: number[];
-  minTs: number | null;
-  maxTs: number | null;
-} {
-  const sortedTimestamps = [...timestamps].sort((a, b) => a - b);
-  const validDateCount = sortedTimestamps.length;
-  const minTs = sortedTimestamps[0] ?? null;
-  const maxTs = sortedTimestamps[sortedTimestamps.length - 1] ?? null;
-
-  if (validDateCount === 0 || minTs === null || maxTs === null) {
-    return {
-      overview: buildEmptyTimelineOverview(),
-      timeSeries: [] as DashboardTemplateTimePoint[],
-      timestamps: [] as number[],
-      minTs: null as number | null,
-      maxTs: null as number | null,
-    };
-  }
-
-  const minDay = floorUtcDay(minTs);
-  const maxDay = floorUtcDay(maxTs);
-  const rangeDays = Math.floor((maxDay - minDay) / DAY_MS) + 1;
-  const binning: DashboardTemplateProvenanceInsights['overview']['upload']['binning'] = rangeDays <= 160 ? 'daily' : 'weekly';
-  const binSize = binning === 'daily' ? DAY_MS : WEEK_MS;
-  const bucketFloor = binning === 'daily' ? floorUtcDay : floorUtcWeek;
-  const bucketCounts = new Map<number, number>();
-  sortedTimestamps.forEach((ts) => {
-    const bucket = bucketFloor(ts);
-    bucketCounts.set(bucket, (bucketCounts.get(bucket) ?? 0) + 1);
-  });
-
-  const startBucket = bucketFloor(minTs);
-  const endBucket = bucketFloor(maxTs);
-  const points: Array<{ startTs: number; count: number }> = [];
-  for (let bucket = startBucket; bucket <= endBucket; bucket += binSize) {
-    points.push({ startTs: bucket, count: bucketCounts.get(bucket) ?? 0 });
-  }
-
-  const counts = points.map((point) => point.count);
-  const moving = movingAverage(counts, binning === 'daily' ? 7 : 4);
-  const peakIndices = detectPeakIndices(counts);
-  const maxBinCount = Math.max(0, ...counts);
-
-  return {
-    overview: {
-      validDateCount,
-      validDateShare: toShare(validDateCount, totalRows),
-      firstLabel: DATE_LABEL_FMT.format(minTs),
-      lastLabel: DATE_LABEL_FMT.format(maxTs),
-      rangeDays,
-      binning,
-      totalBins: points.length,
-      peakCount: peakIndices.size,
-      maxBinCount,
-    },
-    timeSeries: points.map((point, index) => ({
-      key: `${point.startTs}-${index}`,
-      startTs: point.startTs,
-      label: binning === 'daily' ? SHORT_DATE_FMT.format(point.startTs) : `wk ${SHORT_DATE_FMT.format(point.startTs)}`,
-      count: point.count,
-      movingAvg: moving[index] ?? point.count,
-      isPeak: peakIndices.has(index),
-    })),
-    timestamps: sortedTimestamps,
-    minTs,
-    maxTs,
-  };
-}
-
-function normalizeTemplateRows(rows: any[], annotations: Record<string, Annotation> = {}, importedChannelMetadata?: ImportedChannelMetadataState | null): DashboardTemplateVideoRecord[] {
+/** Rows as the dashboard's normalized video records (also used for on-demand exports). */
+export function normalizeTemplateRows(rows: any[], annotations: Record<string, Annotation> = {}, importedChannelMetadata?: ImportedChannelMetadataState | null): DashboardTemplateVideoRecord[] {
   return rows.map((row) => {
     const videoId = resolveVideoId(row) ?? undefined;
     const annotation = videoId ? annotations[videoId] : undefined;
@@ -984,187 +426,91 @@ function normalizeTemplateRows(rows: any[], annotations: Record<string, Annotati
   });
 }
 
-function formatCompact(value: number): string {
-  if (!Number.isFinite(value)) return '—';
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `${trim(value / 1_000_000_000)}b`;
-  if (abs >= 1_000_000) return `${trim(value / 1_000_000)}m`;
-  if (abs >= 1_000) return `${trim(value / 1_000)}k`;
-  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(value);
-}
 
-function formatPercent(share: number, digits = 1): string {
-  if (!Number.isFinite(share)) return '—';
-  return `${(share * 100).toFixed(digits)}%`;
-}
+const compactFormat = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+const formatCompact = (value: number | null | undefined) => (value === null || value === undefined || !Number.isFinite(value) ? 'n/a' : compactFormat.format(value));
+const formatPercent = (share: number, digits = 1) => (Number.isFinite(share) ? `${(share * 100).toFixed(digits)}%` : 'n/a');
+const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-function trim(value: number): string {
-  if (Math.abs(value) >= 100) return value.toFixed(0);
-  return value.toFixed(1).replace(/\.0$/, '');
-}
+type SnapshotBase = Omit<DashboardTemplateSnapshot, 'summaryText' | 'detailedSummaryText'>;
 
-function buildSummaryText(snapshot: Omit<DashboardTemplateSnapshot, 'summaryText' | 'detailedSummaryText'>): string {
-  const topVideo = snapshot.columns.find((column) => column.key === 'video')?.ranking[0];
-  const topChannel = snapshot.columns.find((column) => column.key === 'channel')?.ranking[0];
+function buildSummaryText(snapshot: SnapshotBase): string {
+  const profile = snapshot.profile;
   return [
     `Dashboard snapshot for ${snapshot.datasetLabel} (${snapshot.scopeLabel})`,
-    `Rows: ${snapshot.overview.totalRows}`,
-    `Unique channels: ${snapshot.overview.uniqueChannels}`,
-    `Total views: ${formatCompact(snapshot.overview.totalViews)}`,
+    ...(profile?.summary ?? []),
     `Status: ${snapshot.overview.overallStatus}`,
-    `Caveat: ${snapshot.overview.caveats[0]?.text ?? 'No major structural quality flags detected.'}`,
-    `Top video: ${topVideo ? `${topVideo.fullLabel} (${formatPercent(topVideo.share, 1)})` : 'n/a'}`,
-    `Top channel: ${topChannel ? `${topChannel.fullLabel} (${formatPercent(topChannel.share, 1)})` : 'n/a'}`,
   ].join('\n');
 }
 
-function formatDateLabel(value: number | null): string {
-  if (!value || !Number.isFinite(value)) return 'n/a';
-  return DATE_LABEL_FMT.format(value);
+function topList(items: Array<{ label: string; videos: number; share: number }>, limit: number): string[] {
+  return items.slice(0, limit).map((item, index) => `  ${index + 1}. ${item.label}: ${item.videos.toLocaleString('en-US')} videos (${formatPercent(item.share)})`);
 }
 
-function summarizeCountStats(title: string, items: DashboardTemplateCountStat[], max = 6): string[] {
-  if (!items.length) return [`${title}: No entries recorded.`];
-  const lines = [`${title}:`];
-  items.slice(0, max).forEach((item, index) => {
-    lines.push(`  ${index + 1}. ${item.label} — ${item.count.toLocaleString()} (${formatPercent(item.share, 1)})`);
-  });
-  return lines;
-}
+function buildDetailedSummaryText(snapshot: SnapshotBase): string {
+  const overview = snapshot.overview;
+  const profile = snapshot.profile;
+  const attention = snapshot.attention;
+  const vernacular = snapshot.vernacular;
+  const time = snapshot.time;
+  const lines: string[] = [`Dashboard write-up for ${snapshot.datasetLabel} (${snapshot.scopeLabel}), generated ${new Date(snapshot.snapshotTs).toISOString().slice(0, 16).replace('T', ' ')} UTC`, ''];
 
-function summarizeAttentionColumn(column: DashboardTemplateColumn): string[] {
-  if (!column.available) {
-    return [
-      `${column.title}: unavailable`,
-      `  Missing fields: ${(column.missingFields ?? []).join(', ') || 'unknown'}`,
-    ];
+  lines.push('OVERVIEW');
+  if (profile) {
+    lines.push(...profile.summary, '');
+    lines.push(`Videos: ${profile.videos.toLocaleString('en-US')} · channels: ${profile.channels.toLocaleString('en-US')} · total views: ${formatCompact(profile.totalViews)} · median views: ${formatCompact(profile.medianViews)} (middle 80%: ${formatCompact(profile.p10Views)}–${formatCompact(profile.p90Views)})`);
+    lines.push(`Length: ${profile.lengths.map((bucket) => `${bucket.label} ${formatPercent(bucket.share, 0)}`).join(', ') || 'n/a'}`);
+    lines.push(`Views per video: ${profile.views.map((bucket) => `${bucket.label} ${formatPercent(bucket.share, 0)}`).join(', ') || 'n/a'}`);
+    lines.push(`Categories: ${profile.categories.map((entry) => `${entry.label} ${formatPercent(entry.share, 0)}`).join(', ') || 'n/a'}`);
+    lines.push(`Languages (${profile.languageSource}): ${profile.languages.map((entry) => `${entry.label} ${formatPercent(entry.share, 0)}`).join(', ') || 'n/a'}`);
+  }
+  lines.push(`Data health: ${overview.overallStatus} (${overview.statusReason})`);
+  lines.push(`Coverage: ${overview.coverage.map((metric) => `${metric.label} ${formatPercent(metric.presentShare, 0)}`).join(', ')}`);
+  lines.push(`Duplicate videos: ${overview.duplicateCount.toLocaleString('en-US')} · unreadable dates: ${overview.malformedDateCount.toLocaleString('en-US')}`);
+  overview.caveats.forEach((caveat) => lines.push(`  [${caveat.severity}] ${caveat.text}`));
+
+  if (attention) {
+    lines.push('', 'ATTENTION');
+    (['videos', 'channels'] as const).forEach((unit) => {
+      (['views', 'likes', 'comments'] as const).forEach((metric) => {
+        const curve = attention.curves[unit][metric];
+        if (!curve.count) return;
+        lines.push(`${unit} by ${metric}: top 1% hold ${formatPercent(curve.top1)}, top 10% ${formatPercent(curve.top10)}, top 20% ${formatPercent(curve.top20)} · Gini ${curve.gini.toFixed(2)} (n = ${curve.count.toLocaleString('en-US')})`);
+      });
+    });
+    lines.push(`Median engagement: ${attention.medianEngagement === null ? 'n/a' : attention.medianEngagement.toFixed(1)} likes and comments per 1,000 views (videos with ${attention.minViewsForEngagement.toLocaleString('en-US')}+ views)`);
+    lines.push(`Breakout videos (3× or more their channel's median views): ${attention.breakoutCount.toLocaleString('en-US')} (channels with a norm: ${attention.channelsWithNorm.toLocaleString('en-US')})`);
+    const top = (score: (video: (typeof attention.ranked)[number]) => number | null) => [...attention.ranked].filter((video) => score(video) !== null).sort((a, b) => (score(b) as number) - (score(a) as number)).slice(0, 10);
+    lines.push('Most viewed:', ...top((video) => video.views).map((video, index) => `  ${index + 1}. ${video.title} (${video.channel}): ${formatCompact(video.views)} views`));
+    lines.push('Most engaging per view:', ...top((video) => video.engagement).map((video, index) => `  ${index + 1}. ${video.title}: ${video.engagement?.toFixed(1)} per 1K views`));
+    lines.push('Best against their channel:', ...top((video) => video.vsChannel).map((video, index) => `  ${index + 1}. ${video.title} (${video.channel}): ${video.vsChannel?.toFixed(1)}× channel median`));
   }
 
-  const concentration = column.concentration
-    .map((segment) => `${segment.label} ${formatPercent(segment.share, 1)}`)
-    .join(' | ');
-  const topRanking = column.ranking
-    .slice(0, 5)
-    .map((item) => `${item.rank}. ${item.fullLabel} (${formatPercent(item.share, 1)})`)
-    .join(' | ');
+  if (vernacular) {
+    lines.push('', 'VERNACULAR');
+    lines.push(`Stopwords: ${vernacular.stopwordLanguages.map((code) => languageName(code)).join(', ')}${vernacular.exclusions.length ? ` · hidden terms: ${vernacular.exclusions.join(', ')}` : ''}`);
+    ([['words', 'Title words'], ['phrases', 'Title phrases'], ['hashtags', 'Hashtags'], ['tags', 'Tags'], ['topics', 'Topics']] as const).forEach(([unit, label]) => {
+      const terms = vernacular.terms[unit];
+      lines.push(`${label} (in ${formatPercent(vernacular.videos ? vernacular.coverage[unit] / vernacular.videos : 0, 0)} of videos):`, ...(terms.length ? topList(terms, 15) : ['  none']));
+    });
+    const labels = new Map(vernacular.network.nodes.map((node) => [node.id, node.label]));
+    lines.push('Strongest tag/hashtag pairs:', ...vernacular.network.edges.slice(0, 10).map((edge, index) => `  ${index + 1}. ${labels.get(edge.source)} + ${labels.get(edge.target)}: ${edge.weight} videos`));
+  }
 
-  return [
-    `${column.title}:`,
-    `  Metric: ${column.metricLabel}`,
-    `  Entity count: ${column.boxStats.sampleSize ?? 0}`,
-    `  Concentration checkpoints: ${concentration || 'n/a'}`,
-    `  Distribution (log band): min ${formatCompact(column.boxStats.min)}, p10 ${formatCompact(column.boxStats.p10)}, q1 ${formatCompact(column.boxStats.q1)}, median ${formatCompact(column.boxStats.median)}, q3 ${formatCompact(column.boxStats.q3)}, p90 ${formatCompact(column.boxStats.p90)}, max ${formatCompact(column.boxStats.max)}`,
-    `  Top ranking: ${topRanking || 'n/a'}`,
-  ];
-}
-
-function buildDetailedSummaryText(snapshot: Omit<DashboardTemplateSnapshot, 'summaryText' | 'detailedSummaryText'>): string {
-  const overview = snapshot.overview;
-  const provenance = snapshot.provenance;
-  const caveatLines = overview.caveats.length
-    ? overview.caveats.map((caveat, index) => `  ${index + 1}. [${caveat.severity}] ${caveat.text}`)
-    : ['  No caveats generated.'];
-
-  const overviewSection = [
-    'SECTION 1 — OVERVIEW',
-    `Dataset label: ${snapshot.datasetLabel}`,
-    `Scope: ${snapshot.scopeLabel}`,
-    `Snapshot timestamp: ${formatDateLabel(snapshot.snapshotTs)}`,
-    '',
-    'Corpus scale and completeness:',
-    `  Total rows: ${overview.totalRows.toLocaleString()}`,
-    `  Video rows: ${overview.totalVideos.toLocaleString()}`,
-    `  Unique video IDs: ${overview.uniqueVideoIds.toLocaleString()}`,
-    `  Unique channels: ${overview.uniqueChannels.toLocaleString()}`,
-    `  Total views: ${formatCompact(overview.totalViews)}`,
-    `  Total comments: ${formatCompact(overview.totalComments)}`,
-    `  Total likes: ${formatCompact(overview.totalLikes)}`,
-    `  Valid publish dates: ${overview.validPublishCount.toLocaleString()} (${formatPercent(overview.validPublishCount / Math.max(1, overview.totalVideos), 1)})`,
-    `  Malformed publish dates: ${overview.malformedDateCount.toLocaleString()}`,
-    `  Publish range: ${formatDateLabel(overview.oldestPublishTs)} → ${formatDateLabel(overview.newestPublishTs)}`,
-    `  Median publish timestamp: ${formatDateLabel(overview.medianPublishTs)}`,
-    '',
-    'Quality checks and caveats:',
-    `  Overall status: ${overview.overallStatus}`,
-    `  Status reason: ${overview.statusReason}`,
-    `  Duplicate videos: ${formatPercent(overview.duplicateRate, 1)} (${overview.duplicateCount.toLocaleString()} rows)`,
-    `  Duplicate rows: ${formatPercent(overview.exactDuplicateRowRate, 1)} (${overview.exactDuplicateRowCount.toLocaleString()} rows)`,
-    `  Zero-view rows: ${formatPercent(overview.zeroViewRate, 1)}`,
-    `  Zero-comment rows: ${formatPercent(overview.zeroCommentRate, 1)}`,
-    `  Zero-like rows: ${formatPercent(overview.zeroLikeRate, 1)}`,
-    `  Channels appearing once: ${overview.oneVideoChannelCount.toLocaleString()} (${formatPercent(overview.oneVideoChannelShare, 1)})`,
-    ...caveatLines,
-    '',
-    'Coverage metrics:',
-    ...overview.coverage.map((metric) => `  - ${metric.label}: present ${formatPercent(metric.presentShare, 1)} (${metric.presentCount.toLocaleString()}), missing ${formatPercent(metric.missingShare, 1)} (${metric.missingCount.toLocaleString()})`),
-    '',
-    'Timeline and language diagnostics:',
-    `  Upload binning: ${provenance.overview.upload.binning}`,
-    `  Upload bins: ${provenance.overview.upload.totalBins.toLocaleString()}`,
-    `  Upload peak bins: ${provenance.overview.upload.peakCount.toLocaleString()}`,
-    `  Upload max bin count: ${provenance.overview.upload.maxBinCount.toLocaleString()}`,
-    `  Upload span: ${provenance.overview.upload.rangeDays.toLocaleString()} days`,
-    `  First upload label: ${provenance.overview.upload.firstLabel}`,
-    `  Last upload label: ${provenance.overview.upload.lastLabel}`,
-    `  Channel-age binning: ${provenance.overview.channelAge.binning}`,
-    `  Channel-age bins: ${provenance.overview.channelAge.totalBins.toLocaleString()}`,
-    `  Channel-age peak bins: ${provenance.overview.channelAge.peakCount.toLocaleString()}`,
-    `  Channel-age max bin count: ${provenance.overview.channelAge.maxBinCount.toLocaleString()}`,
-    `  Channel-age span: ${provenance.overview.channelAge.rangeDays.toLocaleString()} days`,
-    `  First channel label: ${provenance.overview.channelAge.firstLabel}`,
-    `  Last channel label: ${provenance.overview.channelAge.lastLabel}`,
-    ...provenance.languageRows.slice(0, 8).map((row) => (
-      `  - ${row.label}: declared ${row.declaredCount.toLocaleString()} (${formatPercent(row.declaredShare, 1)}), audio ${row.audioCount.toLocaleString()} (${formatPercent(row.audioShare, 1)})`
-    )),
-  ];
-
-  const attentionSection = [
-    'SECTION 2 — ATTENTION',
-    'This section mirrors the three inequality columns used in the dashboard attention view.',
-    '',
-    ...snapshot.columns.flatMap((column, index) => (
-      index === 0 ? summarizeAttentionColumn(column) : ['', ...summarizeAttentionColumn(column)]
-    )),
-  ];
-
-  const content = snapshot.content;
-  const shorts = content.shortsEstimate;
-  const contentSection = [
-    'SECTION 3 — CONTENT',
-    'Content composition, durations, intent cues, and keyword clouds from the content dashboard view.',
-    '',
-    `Content overview: videos ${content.overview.videos.toLocaleString()}, with category ${content.overview.withCategory.toLocaleString()}, with tags ${content.overview.withTags.toLocaleString()}, with descriptions ${content.overview.withDescription.toLocaleString()}, with topics ${content.overview.withTopics.toLocaleString()}, avg tags/tagged video ${content.overview.avgTagsPerTaggedVideo.toFixed(2)}`,
-    '',
-    ...summarizeCountStats('Top categories', content.categories, 8),
-    '',
-    ...summarizeCountStats('Top topics', content.topics, 8),
-    '',
-    ...summarizeCountStats('Duration buckets', content.durations, 8),
-    '',
-    ...summarizeCountStats('Intent cues', content.intent, 8),
-    '',
-    'Estimated shorts share:',
-    `  Short count: ${shorts.shortCount.toLocaleString()} (${formatPercent(shorts.shortShare, 1)})`,
-    `  Long count: ${shorts.longCount.toLocaleString()} (${formatPercent(shorts.longShare, 1)})`,
-    `  Score threshold: ${shorts.scoreThreshold}`,
-    `  Signal hits — hashtag ${shorts.hashtagSignalHits.toLocaleString()}, tag ${shorts.tagSignalHits.toLocaleString()}, keyword ${shorts.keywordSignalHits.toLocaleString()}, duration ${shorts.durationSignalHits.toLocaleString()}`,
-    '',
-    ...summarizeCountStats('Title keywords', content.keywords.titleKeywords, 12),
-    '',
-    ...summarizeCountStats('Description keywords', content.keywords.descriptionKeywords, 12),
-    '',
-    ...summarizeCountStats('Tag keywords', content.keywords.tagKeywords, 12),
-  ];
-
-  return [
-    `Dashboard calculations write-up for ${snapshot.datasetLabel} (${snapshot.scopeLabel})`,
-    '',
-    ...overviewSection,
-    '',
-    ...attentionSection,
-    '',
-    ...contentSection,
-  ].join('\n');
+  if (time && time.datedVideos) {
+    lines.push('', 'TIME');
+    const dayTotals = time.rhythm.utc.map((hours) => hours.reduce((total, value) => total + value, 0));
+    const hourTotals = Array.from({ length: 24 }, (_, hour) => time.rhythm.utc.reduce((total, hours) => total + hours[hour], 0));
+    lines.push(`Busiest weekday (UTC): ${DAY_NAMES[dayTotals.indexOf(Math.max(...dayTotals))]} · busiest hour (UTC): ${String(hourTotals.indexOf(Math.max(...hourTotals))).padStart(2, '0')}:00`);
+    lines.push(`Median views by ${time.periodUnit}: ${time.viewsByDate.medians.map((entry) => `${time.periods.find((period) => period.startTs === entry.startTs)?.label}: ${formatCompact(entry.median)}`).join(', ') || 'n/a'}`);
+    if (time.channelCount > 1) lines.push(`Most active channels: ${time.channels.slice(0, 5).map((channel) => `${channel.label} (${channel.videos})`).join(', ')}`);
+    (['hashtags', 'tags', 'words'] as const).forEach((unit) => {
+      const rows = time.terms[unit];
+      if (!rows.length) return;
+      lines.push(`${unit} over time (${time.periods.map((period) => period.label).join(' | ')}):`, ...rows.map((row) => `  ${row.label}: ${row.shares.map((share) => formatPercent(share, 0)).join(' | ')}`));
+    });
+  }
+  return lines.join('\n');
 }
 
 export function buildDashboardTemplateSnapshot(args: {
@@ -1174,19 +520,23 @@ export function buildDashboardTemplateSnapshot(args: {
   datasetLabel?: string | null;
   scope: DashboardScope;
   scopeLabel?: string;
+  /** Terms the project excludes from vernacular analysis. */
+  vernacularExclusions?: string[];
 }): DashboardTemplateSnapshot {
   const normalized = normalizeTemplateRows(args.rows, args.annotations, args.importedChannelMetadata);
-  const baseSnapshot = {
+  // Extract every video's terms once; the vernacular and time profiles both use them.
+  const terms = termIndex(normalized, args.vernacularExclusions);
+  const baseSnapshot: SnapshotBase = {
     datasetLabel: args.datasetLabel?.trim() || 'Untitled dataset',
     sourceLabel: 'Playlist Surfer',
     scopeLabel: args.scopeLabel || (args.scope === 'full' ? 'full dataset' : 'filtered subset'),
     snapshotTs: Date.now(),
     validVideoRows: normalized.filter((row) => row.title && row.viewCount !== null).length,
-    columns: deriveColumns(normalized),
-    content: deriveContentInsights(normalized),
     overview: deriveOverviewInsights(normalized),
-    provenance: deriveProvenanceInsights(normalized),
     profile: buildOverviewProfile(normalized),
+    attention: buildAttentionProfile(normalized),
+    vernacular: buildVernacularProfile(normalized, { index: terms }),
+    time: buildTimeProfile(normalized, { index: terms }),
   };
 
   return {

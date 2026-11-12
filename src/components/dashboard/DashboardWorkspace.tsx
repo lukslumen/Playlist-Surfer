@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Filter, Maximize2, Minimize2, RefreshCw, Rows3, X } from 'lucide-react';
 import { DashboardScope, DashboardTemplateTab, DatasetDashboardSnapshot } from '../../types';
-import type { OverviewDrilldown } from '../../lib/dashboardTemplateTypes';
-import TemplateDashboard from './TemplateDashboard';
+import type { DashboardTemplateVideoRecord, OverviewDrilldown } from '../../lib/dashboardTemplateTypes';
+import TemplateDashboard, { type DashboardCompare } from './TemplateDashboard';
 import LinkingDashboard from './LinkingDashboard';
 import type { ExplorerFilterModel } from '../../lib/filterCoordinator';
 
-type Props = {
+export type DashboardWorkspaceProps = {
   isOpen: boolean;
   scope: DashboardScope;
   onScopeChange: (scope: DashboardScope) => void;
@@ -18,9 +18,16 @@ type Props = {
   onActiveTabChange: (tab: DashboardTemplateTab) => void;
   onDocumentSizeChange?: (size: { width: number; height: number }) => void;
   onNavigateToVideo?: (videoId: string) => void;
-  onNavigateToChannel?: (channel: { channelId?: string | null; channelName?: string }) => void;
-  onApplyContentFilter?: (kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => void;
   onOverviewDrilldown?: (drilldown: OverviewDrilldown) => void;
+  /** "none", "full" or "view:<id>". */
+  compareValue: string;
+  compareOptions: Array<{ value: string; label: string }>;
+  onCompareChange: (value: string) => void;
+  compare?: DashboardCompare;
+  scopeLabel: string;
+  getScopeRecords?: () => DashboardTemplateVideoRecord[];
+  vernacularExclusions: string[];
+  onVernacularExclusionsChange?: (exclusions: string[]) => void;
   linkingProps: {
     rows: any[];
     state: any;
@@ -83,11 +90,17 @@ export default function DashboardWorkspace({
   onActiveTabChange,
   onDocumentSizeChange,
   onNavigateToVideo,
-  onNavigateToChannel,
-  onApplyContentFilter,
   onOverviewDrilldown,
+  compareValue,
+  compareOptions,
+  onCompareChange,
+  compare,
+  scopeLabel,
+  getScopeRecords,
+  vernacularExclusions,
+  onVernacularExclusionsChange,
   linkingProps,
-}: Props) {
+}: DashboardWorkspaceProps) {
   const fitContentWidth = DASHBOARD_CANVAS_WIDTH;
   const [copied, setCopied] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -211,78 +224,52 @@ export default function DashboardWorkspace({
 
   const controls = (
     <>
-      <div className="inline-flex h-8 items-center overflow-hidden rounded-sm border border-[var(--line)] bg-[var(--surface)]" role="group" aria-label="Dashboard scope">
-        <button
-          type="button"
-          onClick={() => onScopeChange('full')}
-          className={`inline-flex h-full items-center gap-1.5 border-r border-[var(--line)] px-3 text-[11px] font-medium transition-colors ${scope === 'full' ? 'bg-[var(--accent-soft)] text-[var(--text)]' : 'bg-transparent text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]'}`}
-          title="Show whole database dashboard"
-          aria-label="Show whole database dashboard"
-        >
-          <Rows3 size={13} strokeWidth={1.8} />
-          <span>Whole database</span>
+      <div className="dash-segmented is-toolbar" role="group" aria-label="Dashboard scope">
+        <button type="button" onClick={() => onScopeChange('full')} className={scope === 'full' ? 'is-active' : undefined} aria-pressed={scope === 'full'} title="Show whole database dashboard" aria-label="Show whole database dashboard">
+          <Rows3 size={13} strokeWidth={1.8} /> Whole database
         </button>
-        <button
-          type="button"
-          onClick={() => onScopeChange('filtered')}
-          className={`inline-flex h-full items-center gap-1.5 px-3 text-[11px] font-medium transition-colors ${scope === 'filtered' ? 'bg-[var(--accent-soft)] text-[var(--text)]' : 'bg-transparent text-[var(--muted)] hover:bg-[var(--surface-3)] hover:text-[var(--text)]'}`}
-          title="Show filtered-view dashboard"
-          aria-label="Show filtered-view dashboard"
-        >
-          <Filter size={13} strokeWidth={1.8} />
-          <span>Filtered view</span>
+        <button type="button" onClick={() => onScopeChange('filtered')} className={scope === 'filtered' ? 'is-active' : undefined} aria-pressed={scope === 'filtered'} title="Show filtered-view dashboard" aria-label="Show filtered-view dashboard">
+          <Filter size={13} strokeWidth={1.8} /> Filtered view
         </button>
       </div>
-      <span className={`exactdash-status-dot ${stale ? 'is-stale' : 'is-fresh'} ${!snapshot ? 'is-empty' : ''}`} title={freshnessLabel} aria-label={freshnessLabel} />
-      <button type="button" onClick={onRefresh} className="exactdash-control" title="Regenerate dashboard" aria-label="Regenerate dashboard">
+      <label className="dash-compare-select">
+        <span>Compare</span>
+        <select value={compareValue} onChange={(event) => onCompareChange(event.target.value)} aria-label="Compare with">
+          {compareOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+      <span className={`dash-status-dot ${!snapshot ? 'is-empty' : stale ? 'is-stale' : 'is-fresh'}`} title={freshnessLabel} aria-label={freshnessLabel} />
+      <button type="button" onClick={onRefresh} className="dash-icon-button" title="Regenerate dashboard" aria-label="Regenerate dashboard">
         <RefreshCw size={14} strokeWidth={1.8} />
       </button>
-      <button type="button" onClick={handleCopy} disabled={!canCopy} className={`exactdash-control ${copied ? 'is-copied' : ''}`} title={copied ? 'Write-up copied' : copyLabel} aria-label={copied ? 'Write-up copied' : copyLabel}>
+      <button type="button" onClick={handleCopy} disabled={!canCopy} className={`dash-icon-button ${copied ? 'is-copied' : ''}`} title={copied ? 'Write-up copied' : copyLabel} aria-label={copied ? 'Write-up copied' : copyLabel}>
         <Copy size={14} strokeWidth={1.8} />
       </button>
-      <button type="button" onClick={onClose} className="exactdash-control" title="Close dashboard" aria-label="Close dashboard">
+      <button type="button" onClick={onClose} className="dash-icon-button" title="Close dashboard" aria-label="Close dashboard">
         <X size={14} strokeWidth={1.8} />
       </button>
     </>
   );
 
   const toolbarCenter = (
-    <div className="exactdash-toolbar-pill" role="group" aria-label="Dashboard fullscreen controls">
-      <button
-        type="button"
-        onClick={() => void handleToggleFullscreen()}
-        className={`exactdash-control ${isFullscreen ? 'is-active' : ''}`}
-        title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Enter fullscreen (F)'}
-        aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-      >
-        {isFullscreen ? <Minimize2 size={14} strokeWidth={1.8} /> : <Maximize2 size={14} strokeWidth={1.8} />}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => void handleToggleFullscreen()}
+      className={`dash-icon-button ${isFullscreen ? 'is-active' : ''}`}
+      title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Enter fullscreen (F)'}
+      aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+    >
+      {isFullscreen ? <Minimize2 size={14} strokeWidth={1.8} /> : <Maximize2 size={14} strokeWidth={1.8} />}
+    </button>
   );
 
   const emptyStateContent = (
-    <div className="exactdash-empty-card exactdash-empty-card-hero">
-      <div className="exactdash-empty-eyebrow">Dashboard</div>
-      <div className="exactdash-empty-hero-row">
-        <div className="exactdash-empty-hero-copy">
-          <div className="exactdash-empty-card-title">No snapshot yet</div>
-          <p>
-            Generate a dashboard snapshot for the current {scope === 'full' ? 'full dataset' : 'filtered view'} to populate all tabs.
-          </p>
-        </div>
-        <button type="button" onClick={onRefresh} className="exactdash-tab is-active exactdash-empty-primary">Generate dashboard</button>
-      </div>
-      <div className="exactdash-empty-support">Snapshots are cached and reused until source/row state changes.</div>
-    </div>
+    <section className="dash-card dash-outdated">
+      <strong>No snapshot yet</strong>
+      <span>Generate a dashboard for the {scope === 'full' ? 'whole dataset' : 'filtered view'}. It is kept until the data changes.</span>
+      <button type="button" onClick={onRefresh} className="dash-button">Generate dashboard</button>
+    </section>
   );
-
-  const navigateToItem = (item: any) => {
-    if (item.kind === 'channel') {
-      onNavigateToChannel?.({ channelId: item.channelId, channelName: item.channelName || item.label });
-      return;
-    }
-    if (item.videoId) onNavigateToVideo?.(item.videoId);
-  };
 
   const dashboardTemplate = (
     <TemplateDashboard
@@ -294,10 +281,14 @@ export default function DashboardWorkspace({
       onTabChange={onActiveTabChange}
       linkingContent={<LinkingDashboard {...linkingProps} />}
       emptyStateContent={emptyStateContent}
-      onApplyContentFilter={onApplyContentFilter}
-      onNavigateToItem={navigateToItem}
-      onOverviewDrilldown={onOverviewDrilldown}
+      onDrilldown={onOverviewDrilldown}
+      onNavigateToVideo={onNavigateToVideo}
       onRegenerate={onRefresh}
+      compare={compare}
+      scopeLabel={scopeLabel}
+      getScopeRecords={getScopeRecords}
+      vernacularExclusions={vernacularExclusions}
+      onVernacularExclusionsChange={onVernacularExclusionsChange}
     />
   );
 

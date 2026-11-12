@@ -1835,6 +1835,7 @@ export function createProjectManifest(args: {
   channelVisibleColumns?: string[];
   videoColumnWidths?: Record<string, number>;
   channelColumnWidths?: Record<string, number>;
+  vernacularExclusions?: string[];
   savedViews: ProjectArchiveManifest['savedViews'];
   activeViewId: string | null;
   annotations: Record<string, Annotation>;
@@ -1876,6 +1877,7 @@ export function createProjectManifest(args: {
     channelVisibleColumns: args.channelVisibleColumns || [],
     videoColumnWidths: args.videoColumnWidths || {},
     channelColumnWidths: args.channelColumnWidths || {},
+    vernacularExclusions: args.vernacularExclusions || [],
     savedViews: args.savedViews,
     activeViewId: args.activeViewId,
     annotations: args.annotations,

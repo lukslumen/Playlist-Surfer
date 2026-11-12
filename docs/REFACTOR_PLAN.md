@@ -156,7 +156,26 @@ Totals: 68 unit tests and 17 e2e tests.
     - Range filters (`from..to`) now parse dates and durations, so drill-downs show as `2024-03-01..2024-04-01`, and the column filter popup has a Between option.
     - Removed: the channel-age timeline, the copy-all-channel-IDs button (the explorer's batch copy does this), `TimelineChart`, and about 26 KB of unused dashboard CSS.
 
-Tests: 407 unit and 31 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
+28. **The other dashboards were rebuilt for digital methods research** (decisions and rationale in [DASHBOARD_PLAN.md](DASHBOARD_PLAN.md)).
+    - **Tabs by research question:**
+      - Attention: concentration curve with Gini; views vs engagement; one ranked table sortable by views, engagement or × channel median.
+      - Vernacular: words, phrases, hashtags, tags, topics; cleaned-up word cloud; co-occurrence network with GEXF and CSV export; per-language stopwords; hidden terms saved with the project.
+      - Time: weekday × hour rhythm in UTC or local time; views by publish date with a median line; channel lanes; terms over time.
+      - Links: same ecology model, simpler view, "Edit buckets" sorter.
+    - **Compare** the current scope with the whole dataset or any saved view: side-by-side shares, a ratio, and Dunning's log-likelihood, with noise greyed out. Terms are counted exactly on both sides when the rows are available.
+    - **Every panel** has a plain headline, a method popover (how it's computed, how to read it, what to watch out for), and CSV, PNG and SVG export, through a small exporter of our own (no new dependency).
+    - **One style:** the app's fonts and accent across the tab bar and toolbar, in light and dark themes.
+    - **Removed as redundant or not defensible:**
+      - the content tab: categories and durations (in the overview), the Shorts estimate, the keyword-rule "intent cues";
+      - the old attention columns and box plots;
+      - the category × ecology matrix;
+      - the unused text-dashboard document and the old stats builder (about 3,000 lines).
+    - **Link sources are ranked live,** never suggesting the videos' own URLs or thumbnails or the app's generated `linking_*` columns.
+    - **Speed at 100k rows:**
+      - generating the snapshot takes about 6.5 s (from 11.7 s on the first version), after sharing term extraction, using numeric/dense pair counts and hashing descriptions in the duplicate key;
+      - switching tabs takes 0.1–0.3 s.
+
+Tests: 366 unit and 37 e2e (fewer unit tests than before because those for the removed code are gone). Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
 - **Review findings not yet fixed:**

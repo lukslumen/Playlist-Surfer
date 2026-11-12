@@ -10,6 +10,7 @@ import {
   buildLinkingStageBAsync,
   detectLinkingColumnCandidates,
   normalizeLinkingDomainKey,
+  profileLinkingColumnCandidates,
   revertLinkingDomainOverride,
 } from '../linkingDashboard';
 import type { LinkingDomainOverride } from '../../types';
@@ -442,5 +443,18 @@ describe('aggregateChannelLinkingFromVideoRows', () => {
     expect(snapshot.datasetFingerprint).toBe('4:3');
     expect(snapshot.byChannelKey).toEqual(aggregate);
     expect(Number.isNaN(Date.parse(snapshot.generatedAt))).toBe(false);
+  });
+});
+
+describe('profileLinkingColumnCandidates', () => {
+  test("ranks descriptions above the videos' own watch links and thumbnails", () => {
+    const rows = Array.from({ length: 20 }, (_, index) => ({
+      videoUrl: `https://www.youtube.com/watch?v=video${index}`,
+      thumbnail_maxres: `https://i.ytimg.com/vi/video${index}/maxresdefault.jpg`,
+      videoDescription: `Follow us https://instagram.com/natgeo and https://www.patreon.com/show${index}`,
+    }));
+    const ranked = profileLinkingColumnCandidates(rows).map((candidate) => candidate.column);
+    expect(ranked[0]).toBe('videoDescription');
+    expect(profileLinkingColumnCandidates(rows).find((candidate) => candidate.column === 'videoUrl')?.reason).toContain("videos' own YouTube addresses");
   });
 });

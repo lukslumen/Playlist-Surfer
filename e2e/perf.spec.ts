@@ -126,6 +126,20 @@ for (const size of SIZES) {
       await expect(page.locator(`.thumbnail-tile[data-thumbnail-index="${size - 1}"]`)).toBeVisible();
     });
 
+    // Dashboards: generating the snapshot builds every tab's profile; then open the heaviest tabs.
+    await page.getByRole('button', { name: 'Show videos as a table' }).click();
+    await page.getByTitle('Dataset Dashboard').click();
+    await timed('dashboard: generate snapshot', results, async () => {
+      await page.getByRole('button', { name: 'Generate dashboard', exact: true }).click();
+      await expect(page.getByText(/Uploads per/)).toBeVisible({ timeout: 5 * 60_000 });
+    });
+    for (const tab of ['Attention', 'Vernacular', 'Time'] as const) {
+      await timed(`dashboard: open ${tab}`, results, async () => {
+        await page.getByRole('tab', { name: tab }).click();
+        await expect(page.locator('.dash-panel').first()).toBeVisible({ timeout: 60_000 });
+      });
+    }
+
     const heapMb = await page.evaluate(() => {
       const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
       return memory ? Math.round(memory.usedJSHeapSize / 1e6) : null;

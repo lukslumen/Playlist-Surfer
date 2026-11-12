@@ -10,7 +10,7 @@ import type {
   OverviewDrilldown,
 } from '../../../lib/dashboardTemplateTypes';
 import { DATE_FMT, displayScopeLabel } from './format';
-import './overview.css';
+import '../dashboard.css';
 
 const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
 const compactShort = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 0 });
@@ -112,7 +112,7 @@ function UploadTimeline({ uploads, datedCount, totalVideos, onDrilldown }: {
   }, [bins, drag, onDrilldown]);
 
   if (!bins.length) {
-    return <div className="ov-empty">No valid publish dates in this scope.</div>;
+    return <div className="dash-empty">No valid publish dates in this scope.</div>;
   }
 
   const selection = drag ? [Math.min(drag.anchor, drag.current), Math.max(drag.anchor, drag.current)] as const : null;
@@ -128,27 +128,27 @@ function UploadTimeline({ uploads, datedCount, totalVideos, onDrilldown }: {
   })();
 
   return (
-    <div className="ov-timeline">
-      <div className="ov-timeline-axis-y" aria-hidden="true">
+    <div className="dash-timeline">
+      <div className="dash-timeline-axis-y" aria-hidden="true">
         <span>{whole.format(top)}</span>
         <span>{whole.format(top / 2)}</span>
         <span>0</span>
       </div>
-      <div className="ov-timeline-body">
+      <div className="dash-timeline-body">
         <div
-          className={`ov-timeline-plot ${bins.length > 160 ? 'is-dense' : ''}`}
+          className={`dash-timeline-plot ${bins.length > 160 ? 'is-dense' : ''}`}
           role="group"
           aria-label={`Uploads per ${UNIT_LABEL[unit]}`}
           onPointerLeave={() => setHoverIndex(null)}
         >
-          <div className="ov-gridline" style={{ bottom: '50%' }} />
-          <div className="ov-gridline" style={{ bottom: '100%' }} />
+          <div className="dash-gridline" style={{ bottom: '50%' }} />
+          <div className="dash-gridline" style={{ bottom: '100%' }} />
           {bins.map((bin, index) => {
             const isSelected = selection ? index >= selection[0] && index <= selection[1] : false;
             return (
               <div
                 key={bin.startTs}
-                className={`ov-bar-column ${isSelected ? 'is-selected' : ''} ${hoverIndex === index ? 'is-hover' : ''}`}
+                className={`dash-bar-column ${isSelected ? 'is-selected' : ''} ${hoverIndex === index ? 'is-hover' : ''}`}
                 onPointerEnter={() => {
                   setHoverIndex(index);
                   if (drag) setDrag({ ...drag, current: index });
@@ -160,13 +160,13 @@ function UploadTimeline({ uploads, datedCount, totalVideos, onDrilldown }: {
                   setDrag({ anchor: index, current: index });
                 }}
               >
-                <div className="ov-bar" style={{ height: bin.count ? `max(2px, ${(bin.count / top) * 100}%)` : 0 }} />
+                <div className="dash-bar" style={{ height: bin.count ? `max(2px, ${(bin.count / top) * 100}%)` : 0 }} />
               </div>
             );
           })}
           {tooltip ? (
             <div
-              className="ov-tooltip"
+              className="dash-tooltip"
               style={{ left: `${((tooltip.index + 0.5) / bins.length) * 100}%` }}
               role="status"
             >
@@ -175,14 +175,14 @@ function UploadTimeline({ uploads, datedCount, totalVideos, onDrilldown }: {
             </div>
           ) : null}
         </div>
-        <div className="ov-timeline-axis-x" aria-hidden="true">
+        <div className="dash-timeline-axis-x" aria-hidden="true">
           {ticks.map((tick) => (
             <span key={tick.index} style={{ left: `${(tick.index / bins.length) * 100}%` }}>{tick.label}</span>
           ))}
         </div>
       </div>
       {datedCount < totalVideos ? (
-        <p className="ov-footnote">{whole.format(totalVideos - datedCount)} videos have no valid publish date and are not shown.</p>
+        <p className="dash-footnote">{whole.format(totalVideos - datedCount)} videos have no valid publish date and are not shown.</p>
       ) : null}
     </div>
   );
@@ -197,17 +197,17 @@ interface BarRow {
 }
 
 function BarList({ rows, emptyText, footnote }: { rows: BarRow[]; emptyText: string; footnote?: string }) {
-  if (!rows.length) return <div className="ov-empty">{emptyText}</div>;
+  if (!rows.length) return <div className="dash-empty">{emptyText}</div>;
   const maxShare = Math.max(...rows.map((row) => row.share), 0.0001);
   return (
     <>
-      <ul className="ov-bar-list">
+      <ul className="dash-bar-list">
         {rows.map((row) => {
           const content = (
             <>
-              <span className="ov-bar-label" title={row.label}>{row.label}</span>
-              <span className="ov-bar-track"><span className="ov-bar-fill" style={{ width: `${(row.share / maxShare) * 100}%` }} /></span>
-              <span className="ov-bar-value">
+              <span className="dash-bar-label" title={row.label}>{row.label}</span>
+              <span className="dash-bar-track"><span className="dash-bar-fill" style={{ width: `${(row.share / maxShare) * 100}%` }} /></span>
+              <span className="dash-bar-value">
                 <strong>{percent(row.share)}</strong>
                 <span>{whole.format(row.count)}</span>
               </span>
@@ -216,17 +216,17 @@ function BarList({ rows, emptyText, footnote }: { rows: BarRow[]; emptyText: str
           return (
             <li key={row.key}>
               {row.onSelect ? (
-                <button type="button" className="ov-bar-row is-interactive" onClick={row.onSelect} title={`Show these ${whole.format(row.count)} videos in the explorer`}>
+                <button type="button" className="dash-bar-row is-interactive" onClick={row.onSelect} title={`Show these ${whole.format(row.count)} videos in the explorer`}>
                   {content}
                 </button>
               ) : (
-                <div className="ov-bar-row">{content}</div>
+                <div className="dash-bar-row">{content}</div>
               )}
             </li>
           );
         })}
       </ul>
-      {footnote ? <p className="ov-footnote">{footnote}</p> : null}
+      {footnote ? <p className="dash-footnote">{footnote}</p> : null}
     </>
   );
 }
@@ -259,25 +259,25 @@ function DataHealth({ overview }: { overview: DashboardTemplateOverviewInsights 
     overview.malformedDateCount ? `${whole.format(overview.malformedDateCount)} unreadable dates` : 'All dates readable',
   ];
   return (
-    <section className={`ov-card ov-health ${issues.length ? 'has-issues' : ''}`} aria-label="Data health">
-      <div className="ov-health-status">
+    <section className={`dash-card dash-health ${issues.length ? 'has-issues' : ''}`} aria-label="Data health">
+      <div className="dash-health-status">
         {issues.length ? <AlertTriangle size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}
         <div>
           <strong>{issues.length ? `${issues.length} ${issues.length === 1 ? 'thing' : 'things'} to check` : 'No problems found'}</strong>
           <span>{checks.join(' · ')}</span>
         </div>
       </div>
-      <div className="ov-coverage" aria-label="Field coverage">
+      <div className="dash-coverage" aria-label="Field coverage">
         {overview.coverage.map((metric) => (
-          <div className="ov-coverage-item" key={metric.key} title={`${whole.format(metric.presentCount)} of ${whole.format(metric.presentCount + metric.missingCount)} videos have ${metric.label}`}>
-            <span className="ov-coverage-label">{metric.label}</span>
-            <span className="ov-coverage-meter"><span style={{ width: `${metric.presentShare * 100}%` }} /></span>
-            <span className="ov-coverage-value">{percent(metric.presentShare)}</span>
+          <div className="dash-coverage-item" key={metric.key} title={`${whole.format(metric.presentCount)} of ${whole.format(metric.presentCount + metric.missingCount)} videos have ${metric.label}`}>
+            <span className="dash-coverage-label">{metric.label}</span>
+            <span className="dash-coverage-meter"><span style={{ width: `${metric.presentShare * 100}%` }} /></span>
+            <span className="dash-coverage-value">{percent(metric.presentShare)}</span>
           </div>
         ))}
       </div>
       {issues.length ? (
-        <ul className="ov-issues">
+        <ul className="dash-issues">
           {issues.map((issue) => (
             <li key={issue.text} className={`is-${issue.severity}`}>{issue.text}</li>
           ))}
@@ -287,31 +287,34 @@ function DataHealth({ overview }: { overview: DashboardTemplateOverviewInsights 
   );
 }
 
-function Kpi({ label, value, detail }: { label: string; value: string; detail?: string }) {
+function Kpi({ label, value, detail, comparison }: { label: string; value: string; detail?: string; comparison?: string }) {
   return (
-    <div className="ov-kpi">
-      <span className="ov-kpi-label">{label}</span>
-      <strong className="ov-kpi-value" title={value}>{value}</strong>
-      {detail ? <span className="ov-kpi-detail" title={detail}>{detail}</span> : null}
+    <div className="dash-kpi">
+      <span className="dash-kpi-label">{label}</span>
+      <strong className="dash-kpi-value" title={value}>{value}</strong>
+      {comparison ? <span className="dash-kpi-compare" title={comparison}>{comparison}</span> : null}
+      {detail ? <span className="dash-kpi-detail" title={detail}>{detail}</span> : null}
     </div>
   );
 }
 
-export function OverviewTab({ snapshot, calculatedAt, onDrilldown, onRegenerate }: {
+export function OverviewTab({ snapshot, calculatedAt, compare, onDrilldown, onRegenerate }: {
   snapshot: DashboardTemplateSnapshot;
   calculatedAt: string;
+  /** In comparison mode, the headline numbers also show the comparison set's values. */
+  compare?: { snapshot: DashboardTemplateSnapshot; label: string };
   onDrilldown?: (drilldown: OverviewDrilldown) => void;
   onRegenerate?: () => void;
 }) {
   const profile = snapshot.profile;
   if (!profile) {
     return (
-      <main className="ov">
-        <section className="ov-card ov-outdated">
+      <main className="dash">
+        <section className="dash-card dash-outdated">
           <strong>This snapshot was made by an earlier version of the overview.</strong>
           <span>Regenerate it to see the new summary.</span>
           {onRegenerate ? (
-            <button type="button" className="ov-button" onClick={onRegenerate}><RefreshCw size={14} aria-hidden="true" /> Regenerate</button>
+            <button type="button" className="dash-button" onClick={onRegenerate}><RefreshCw size={14} aria-hidden="true" /> Regenerate</button>
           ) : null}
         </section>
       </main>
@@ -330,66 +333,69 @@ export function OverviewTab({ snapshot, calculatedAt, onDrilldown, onRegenerate 
     return { value: `${firstYear}–${lastYear}`, detail: `${months} · ${formatSpan(first, last)}` };
   })();
   const engagement = profile.medianEngagementPerThousand;
+  const other = compare?.snapshot.profile;
+  const vs = (value: string | null) => (other && value !== null ? `${compare!.label}: ${value}` : undefined);
   const languageSourceLabel = profile.languageSource === 'audio' ? 'audio language' : 'declared language';
 
   return (
-    <main className="ov">
-      <header className="ov-head">
-        <div className="ov-head-line">
-          <h2 className="ov-title" title={snapshot.datasetLabel}>{snapshot.datasetLabel}</h2>
-          <span className="ov-chip">{displayScopeLabel(snapshot)}</span>
-          <span className="ov-meta">Snapshot {DATE_FMT.format(new Date(calculatedAt || snapshot.snapshotTs).getTime())}</span>
+    <main className="dash">
+      <header className="dash-head">
+        <div className="dash-head-line">
+          <h2 className="dash-title" title={snapshot.datasetLabel}>{snapshot.datasetLabel}</h2>
+          <span className="dash-chip">{displayScopeLabel(snapshot)}</span>
+          <span className="dash-meta">Snapshot {DATE_FMT.format(new Date(calculatedAt || snapshot.snapshotTs).getTime())}</span>
         </div>
-        <p className="ov-summary">{profile.summary.join(' ')}</p>
+        <p className="dash-summary">{profile.summary.join(' ')}</p>
       </header>
 
-      <section className="ov-kpis" aria-label="Key numbers">
-        <Kpi label="Videos" value={whole.format(profile.videos)} detail={overview.totalRows !== profile.videos ? `${whole.format(overview.totalRows)} rows` : undefined} />
-        <Kpi label={profile.channels === 1 ? 'Channel' : 'Channels'} value={whole.format(profile.channels)} detail={profile.singleChannelName ?? undefined} />
+      <section className="dash-kpis" aria-label="Key numbers">
+        <Kpi label="Videos" value={whole.format(profile.videos)} comparison={vs(other ? whole.format(other.videos) : null)} detail={overview.totalRows !== profile.videos ? `${whole.format(overview.totalRows)} rows` : undefined} />
+        <Kpi label={profile.channels === 1 ? 'Channel' : 'Channels'} value={whole.format(profile.channels)} comparison={vs(other ? whole.format(other.channels) : null)} detail={profile.singleChannelName ?? undefined} />
         <Kpi label="Published" value={published.value} detail={published.detail} />
-        <Kpi label="Total views" value={compact.format(profile.totalViews)} detail={`${compactShort.format(overview.totalLikes)} likes · ${compactShort.format(overview.totalComments)} comments`} />
+        <Kpi label="Total views" value={compact.format(profile.totalViews)} comparison={vs(other ? compact.format(other.totalViews) : null)} detail={`${compactShort.format(overview.totalLikes)} likes · ${compactShort.format(overview.totalComments)} comments`} />
         <Kpi
           label="Typical views"
           value={profile.medianViews === null ? '—' : compact.format(profile.medianViews)}
+          comparison={vs(other?.medianViews != null ? compact.format(other.medianViews) : null)}
           detail={profile.p10Views !== null && profile.p90Views !== null ? `middle 80%: ${compact.format(profile.p10Views)}–${compact.format(profile.p90Views)}` : undefined}
         />
-        <Kpi label="Typical length" value={formatDuration(profile.medianDurationSec)} detail={engagement === null ? undefined : `${engagement < 10 ? engagement.toFixed(1) : Math.round(engagement)} likes and comments per 1K views`} />
+        <Kpi label="Typical length" value={formatDuration(profile.medianDurationSec)} comparison={vs(other ? formatDuration(other.medianDurationSec) : null)} detail={engagement === null ? undefined : `${engagement < 10 ? engagement.toFixed(1) : Math.round(engagement)} likes and comments per 1K views`} />
       </section>
 
-      <section className="ov-card ov-timeline-card">
-        <div className="ov-card-head">
+      <section className="dash-card dash-timeline-card">
+        <div className="dash-card-head">
           <h3>Uploads per {UNIT_LABEL[profile.uploads.unit]}</h3>
           {profile.uploads.busiest && profile.uploads.busiest.count > 1 ? (
-            <span className="ov-card-note">Busiest: {profile.uploads.busiest.label} ({whole.format(profile.uploads.busiest.count)})</span>
+            <span className="dash-card-note">Busiest: {profile.uploads.busiest.label} ({whole.format(profile.uploads.busiest.count)})</span>
           ) : null}
-          {onDrilldown ? <span className="ov-hint">Click a bar or drag across bars to filter the explorer</span> : null}
+          {onDrilldown ? <span className="dash-hint">Click a bar or drag across bars to filter the explorer</span> : null}
         </div>
         <UploadTimeline uploads={profile.uploads} datedCount={profile.datedCount} totalVideos={profile.videos} onDrilldown={onDrilldown} />
       </section>
 
-      <section className="ov-grid">
-        <article className="ov-card">
-          <div className="ov-card-head"><h3>Length</h3></div>
+      <section className="dash-grid">
+        <article className="dash-card">
+          <div className="dash-card-head"><h3>Length</h3></div>
           <BarList
             rows={bucketRows(profile.lengths, 'length', onDrilldown)}
             emptyText="No durations in this scope."
             footnote={profile.lengthUnknownCount ? `${whole.format(profile.lengthUnknownCount)} without a duration.` : undefined}
           />
         </article>
-        <article className="ov-card">
-          <div className="ov-card-head"><h3>Views per video</h3></div>
+        <article className="dash-card">
+          <div className="dash-card-head"><h3>Views per video</h3></div>
           <BarList
             rows={bucketRows(profile.views, 'views', onDrilldown)}
             emptyText="No view counts in this scope."
             footnote={profile.viewsUnknownCount ? `${whole.format(profile.viewsUnknownCount)} without a view count.` : undefined}
           />
         </article>
-        <article className="ov-card">
-          <div className="ov-card-head"><h3>Categories</h3></div>
+        <article className="dash-card">
+          <div className="dash-card-head"><h3>Categories</h3></div>
           <BarList rows={shareRows(profile.categories, (value) => ({ kind: 'category', value }), onDrilldown)} emptyText="No categories in this scope." />
         </article>
-        <article className="ov-card">
-          <div className="ov-card-head"><h3>Languages</h3><span className="ov-card-note">{languageSourceLabel}</span></div>
+        <article className="dash-card">
+          <div className="dash-card-head"><h3>Languages</h3><span className="dash-card-note">{languageSourceLabel}</span></div>
           <BarList
             rows={shareRows(profile.languages, (value) => ({ kind: 'language', value, source: profile.languageSource }), onDrilldown)}
             emptyText="No language fields in this scope."

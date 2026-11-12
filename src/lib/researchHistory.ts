@@ -82,6 +82,8 @@ export function resolveEditViewFilterKind(columnName: string, columnType: string
 
 export function summarizeDashboardSnapshot(snapshot: DatasetDashboardSnapshot | SavedViewDashboardSnapshot | undefined) {
   if (!snapshot) return 'No entries recorded';
+  if (snapshot.template?.summaryText) return snapshot.template.summaryText;
+  if (!snapshot.stats) return 'No entries recorded';
   const views = snapshot.stats.attention.medianViews ?? 0;
   const comments = snapshot.stats.comments.totalVideoComments ?? 0;
   const warnings = snapshot.stats.warnings.slice(0, 2);

@@ -31,7 +31,7 @@ for (const dialog of cases) {
 
 test('overview dashboard opens', async ({ page }) => {
   await page.keyboard.press('Alt+Shift+KeyO');
-  const prompt = page.getByText('Generate a dashboard snapshot for the current full dataset');
+  const prompt = page.getByText('Generate a dashboard for the whole dataset');
   await expect(prompt).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(prompt).toBeHidden();

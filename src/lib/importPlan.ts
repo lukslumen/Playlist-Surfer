@@ -249,7 +249,7 @@ export function buildMergedSourceState(args: {
 
 /** The current project, as far as a merge needs to keep it. */
 export type MergeBaseProject = Required<Pick<HydrateProjectArgs,
-  | 'videoColumnWidths' | 'channelColumnWidths' | 'annotations' | 'notesByVideoId' | 'channelNotesById' | 'channelTagsById'
+  | 'videoColumnWidths' | 'channelColumnWidths' | 'vernacularExclusions' | 'annotations' | 'notesByVideoId' | 'channelNotesById' | 'channelTagsById'
   | 'savedViews' | 'activeViewId' | 'projectOverview' | 'projectNotes' | 'researchLogSectionComments' | 'researchHistory'
   | 'watchHistoryByVideoId' | 'specialMappings' | 'deletedColumns' | 'excludedVideoIds' | 'excludedVideoMetaById'
   | 'inclusionView' | 'savedViewDashboardSnapshots' | 'savedViewsVersion' | 'importedChannelMetadata' | 'viewScope'

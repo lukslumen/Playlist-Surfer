@@ -9,7 +9,7 @@ Playlist Surfer is a React/TS research tool for analyzing CSV-based video and ch
 - Filter, sort, and compare rows quickly
 - Switch between video view and channel view
 - Switch the videos explorer between a table and a thumbnail grid
-- Open dashboards for overview, content, attention, and linking
+- Dashboards organised by research question: Overview, Attention, Vernacular, Time and Links
 - Add notes, tags, and quotes while reviewing data
 - Review links, domains, and channel metadata
 - Save your work and export the project as a zip archive
@@ -72,7 +72,13 @@ Enter Playlist Surfer, a lightweight browser application for inspecting CSV-base
 - Video and channel views with linked navigation between rows, detail panels, and dashboards
 - Notes, tags, transcript quotes, description quotes, and channel-level annotations for close reading alongside quantitative analysis
 - Linking analysis that extracts and classifies URLs/domains from source columns, supports domain overrides, and produces ecology-focused summaries
-- Overview, attention, content, and linking dashboards that can switch between whole-dataset and filtered scopes
+- Dashboards for the whole dataset or the filtered view, each comparable with the whole dataset or a saved view (shares side by side, ratio and log-likelihood significance):
+  - **Overview**: summary, headline numbers, uploads, length, views, categories, languages, data health
+  - **Attention**: concentration curves and Gini, views vs engagement, breakout videos against their channel's norm
+  - **Vernacular**: title words and phrases, hashtags, tags and topics, with per-language stopwords, project-level hidden terms, word clouds and a tag/hashtag co-occurrence network (GEXF export for Gephi)
+  - **Time**: publishing rhythm (UTC or local), views by publish date, channel activity and terms over time
+  - **Links**: link ecology of descriptions, top sites, linking strategies, editable domain buckets
+- Every dashboard panel has a method note (how it is computed, how to read it, what to watch out for) and exports to CSV, PNG and SVG
 - A thumbnail view of the explorer: the table's filtered and sorted rows as a zoomable image grid, sharing its selection, Delete/undo and keyboard navigation
 - Channel metadata aggregation, channel age timelines, and channel-level batch actions
 - Research log and project history tracking so analytic steps, comments, and exports remain auditable

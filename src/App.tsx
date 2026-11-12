@@ -12,8 +12,7 @@ import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChann
 import { createStoredZip, readStoredZip } from './lib/archive';
 import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
-import { buildDatasetDashboardStats } from './lib/datasetDashboard';
-import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
+import { buildDashboardTemplateSnapshot, inferIntentFromText, normalizeTemplateRows } from './lib/dashboardTemplate';
 import { aggregateChannelLinkingFromVideoRows } from './lib/linkingDashboard';
 import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
 import { normalizeThumbnailTileWidth, sortRowsLikeGrid } from './lib/videoThumbnails';
@@ -149,6 +148,10 @@ export default function App() {
   const [isAppFullscreen, setIsAppFullscreen] = useState(false);
   const [dashboardScope, setDashboardScope] = useState<DashboardScope>('full');
   const [dashboardActiveTab, setDashboardActiveTab] = useState<DashboardTemplateTab>('overview');
+  // What the dashboard compares the current scope with: 'none', 'full' or 'view:<saved view id>'.
+  const [dashboardCompareTarget, setDashboardCompareTarget] = useState('none');
+  // Terms the project hides from vernacular analysis (e.g. the channel's own name).
+  const [vernacularExclusions, setVernacularExclusions] = useState<string[]>(() => (Array.isArray(persisted.vernacularExclusions) ? persisted.vernacularExclusions : []));
   const [dashboardSnapshots, setDashboardSnapshots] = useState<Partial<Record<DashboardScope, DatasetDashboardSnapshot>>>(() => {
     return persisted.dashboardSnapshots ?? {};
   });
@@ -753,6 +756,7 @@ export default function App() {
     selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
     videoColumnWidths,
     channelColumnWidths,
+    vernacularExclusions,
     explorerLayout,
     thumbnailTileWidth,
     sourceRegistry,
@@ -1040,6 +1044,7 @@ export default function App() {
     setVisibleColumns(nextVisibleColumns);
     setChannelVisibleColumns(nextChannelVisibleColumns);
     setVideoColumnWidths(args.videoColumnWidths ?? {});
+    setVernacularExclusions(args.vernacularExclusions ?? []);
     setChannelColumnWidths(args.channelColumnWidths ?? {});
     setInclusionState({
       excludedVideoIds: nextExcludedVideoIds,
@@ -1283,6 +1288,7 @@ export default function App() {
               fileName: state.fileName,
               videoColumnWidths,
               channelColumnWidths,
+              vernacularExclusions,
               annotations: mergeAnnotationsWithUserTags(state.annotations, userTagsByVideoId),
               notesByVideoId,
               channelNotesById,
@@ -1322,6 +1328,7 @@ export default function App() {
     });
   }, [
     activeBaseRows,
+    vernacularExclusions,
     appendResearchHistory,
     channelColumnWidths,
     channelLinkingState,
@@ -1582,7 +1589,7 @@ export default function App() {
     selectPrevious: () => moveActiveSelectionByDirection(-1),
     toggleThumbnailView: () => handleToggleExplorerLayout(),
     openAttentionDashboard: () => handleOpenDatasetDashboardTab('attention'),
-    openContentDashboard: () => handleOpenDatasetDashboardTab('content'),
+    openVernacularDashboard: () => handleOpenDatasetDashboardTab('vernacular'),
     openOverviewDashboard: () => handleOpenDatasetDashboardTab('overview'),
     openColumns: () => setIsColumnsOpen(true),
     openExport: () => setIsExportOpen(true),
@@ -2291,6 +2298,7 @@ export default function App() {
       channelVisibleColumns,
       videoColumnWidths,
       channelColumnWidths,
+      vernacularExclusions,
       savedViews: state.savedViews,
       activeViewId: state.activeViewId,
       annotations: archiveAnnotations,
@@ -2603,65 +2611,6 @@ export default function App() {
     setDashboardScope('filtered');
   }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, displaySchema, filterModel, setIsDashboardOpen, updateExternalFilterModel, viewScope]);
 
-  const handleApplyDashboardContentFilter = useCallback((kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => {
-    if (!label.trim()) return;
-    const nextFilterModel = kind === 'category'
-      ? (() => {
-          const column = findDashboardCategoryColumn(displaySchema);
-          if (!column) return null;
-          return {
-            [column]: {
-              values: [label],
-              matchMode: 'any',
-            },
-          } as ExplorerFilterModel;
-        })()
-      : kind === 'topic'
-        ? (() => {
-            const column = findDashboardTopicColumn(displaySchema);
-            if (!column) return null;
-            return {
-              [column]: {
-                values: [label],
-                matchMode: 'any',
-              },
-            } as ExplorerFilterModel;
-          })()
-        : kind === 'duration'
-        ? (() => {
-            const column = findDashboardDurationColumn(displaySchema);
-            if (!column) return null;
-            let model: ExplorerFilterModel[string] = null;
-            if (label === '<1m') {
-              model = { filterKind: 'duration', operator: 'lt' as any, value: '60' };
-            } else if (label == '1-5m') {
-              model = { filterKind: 'duration', operator: 'between' as any, value: '60..300' };
-            } else if (label == '5-15m') {
-              model = { filterKind: 'duration', operator: 'between' as any, value: '300..900' };
-            } else if (label == '15-30m') {
-              model = { filterKind: 'duration', operator: 'between' as any, value: '900..1800' };
-            } else if (label == '30m+') {
-              model = { filterKind: 'duration', operator: 'gte' as any, value: '1800' };
-            } else if (label == 'unknown') {
-              model = { filterKind: 'duration', operator: 'eq' as any, value: '' };
-            }
-            return model ? ({ [column]: model } as ExplorerFilterModel) : null;
-          })()
-        : (() => {
-            const column = findDashboardIntentColumn(displaySchema);
-            if (!column) return null;
-            return {
-              [column]: {
-                values: [label],
-                matchMode: 'any',
-              },
-            } as ExplorerFilterModel;
-          })();
-
-    if (!nextFilterModel) return;
-    applyDashboardDrilldown({ filters: nextFilterModel, visibleColumns: Object.keys(nextFilterModel) });
-  }, [applyDashboardDrilldown, displaySchema]);
-
   const handleOverviewDrilldown = useCallback((drilldown: OverviewDrilldown) => {
     const filters = buildOverviewDrilldownFilter(drilldown, displaySchema);
     if (!filters) {
@@ -2710,12 +2659,19 @@ ${heading}
         onSelect: () => handleOpenDatasetDashboardTab('attention'),
       },
       {
-        id: 'dashboard-content',
-        label: 'Open content dashboard',
-        description: 'Open the content tab in the dataset dashboard.',
-        keywords: ['content dashboard dataset'],
+        id: 'dashboard-vernacular',
+        label: 'Open vernacular dashboard',
+        description: 'Words, phrases, hashtags, tags and topics, and which tags appear together.',
+        keywords: ['vernacular content keywords hashtags tags topics network dashboard'],
         shortcut: 'Alt/Option + Shift + C',
-        onSelect: () => handleOpenDatasetDashboardTab('content'),
+        onSelect: () => handleOpenDatasetDashboardTab('vernacular'),
+      },
+      {
+        id: 'dashboard-time',
+        label: 'Open time dashboard',
+        description: 'Publishing rhythm, views by publish date, channel activity and terms over time.',
+        keywords: ['time rhythm weekday hour trend dashboard'],
+        onSelect: () => handleOpenDatasetDashboardTab('time'),
       },
       {
         id: 'dashboard-linking',
@@ -2919,32 +2875,6 @@ ${heading}
     }
     setPendingViewerTarget({ kind: 'video', videoId });
   }, [clearAllExplorerFilters, requestSelectionScroll, rows, setIsDashboardOpen]);
-
-  const handleDashboardNavigateToChannel = useCallback((channel: { channelId?: string | null; channelName?: string }) => {
-    setIsDashboardOpen(false);
-    requestSelectionScroll('middle');
-    clearChannelDrilldownState();
-    clearChannelScopedVideoUniverse();
-    setChannelFilterModel({});
-    const hasMatchingChannelRow = channelRowsWithLinking.some((row) => {
-      const rowChannelId = String(row?.channel_id || '').trim();
-      const rowChannelName = String(row?.channel_name || '').trim();
-      return (channel.channelId && rowChannelId === String(channel.channelId).trim())
-        || (channel.channelName && rowChannelName === String(channel.channelName).trim());
-    });
-    if (!hasMatchingChannelRow) {
-      const hasMatchingVideoRow = rows.some((row) => {
-        const rowChannelId = resolveChannelId(row);
-        const rowChannelName = resolveChannelName(row);
-        return (channel.channelId && rowChannelId === channel.channelId)
-          || (channel.channelName && rowChannelName === channel.channelName);
-      });
-      if (!hasMatchingVideoRow) {
-        clearAllExplorerFilters();
-      }
-    }
-    setPendingViewerTarget({ kind: 'channel', channelId: channel.channelId, channelName: channel.channelName });
-  }, [channelRowsWithLinking, clearAllExplorerFilters, clearChannelDrilldownState, clearChannelScopedVideoUniverse, requestSelectionScroll, rows, setIsDashboardOpen]);
 
   useEffect(() => {
     if (!pendingViewerTarget) return;
@@ -3152,19 +3082,19 @@ ${heading}
   );
   const createScopeDashboardSnapshot = useCallback((scope: DashboardScope, scopedRows: any[]): DatasetDashboardSnapshot => ({
     scope,
-    stats: buildDatasetDashboardStats(scopedRows),
     template: buildDashboardTemplateSnapshot({
       rows: scopedRows,
       annotations: state.annotations,
       importedChannelMetadata,
       datasetLabel: state.fileName,
       scope,
+      vernacularExclusions,
     }),
     rowCount: scopedRows.length,
     calculatedAt: new Date().toISOString(),
     datasetVersionAtCalculation: datasetVersion,
     filteredViewVersionAtCalculation: scope === 'filtered' ? filteredViewVersion : undefined,
-  }), [datasetVersion, filteredViewVersion, importedChannelMetadata, state.annotations, state.fileName]);
+  }), [datasetVersion, filteredViewVersion, importedChannelMetadata, state.annotations, state.fileName, vernacularExclusions]);
 
   const createSavedViewDashboardSnapshot = useCallback((view: SavedView): SavedViewDashboardSnapshot => {
     const savedViewFilterState = buildUnifiedFilterState({
@@ -3178,7 +3108,6 @@ ${heading}
     return {
       savedViewId: view.id,
       savedViewName: view.name,
-      stats: buildDatasetDashboardStats(scopedRows),
       template: buildDashboardTemplateSnapshot({
         rows: scopedRows,
         annotations: state.annotations,
@@ -3186,13 +3115,14 @@ ${heading}
         datasetLabel: state.fileName,
         scope: 'filtered',
         scopeLabel: `saved view: ${view.name}`,
+        vernacularExclusions,
       }),
       rowCount: scopedRows.length,
       calculatedAt: new Date().toISOString(),
       datasetVersionAtCalculation: datasetVersion,
       savedViewsVersionAtCalculation: savedViewsVersion,
     };
-  }, [datasetVersion, displaySchema, importedChannelMetadata, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns, savedViewsVersion, state.annotations, state.fileName]);
+  }, [datasetVersion, displaySchema, importedChannelMetadata, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns, savedViewsVersion, state.annotations, state.fileName, vernacularExclusions]);
 
 
   const currentLinkingRows = useMemo(
@@ -3303,6 +3233,73 @@ ${heading}
       updateLongTaskProgress(null);
     }
   }, [createScopeDashboardSnapshot, dashboardScope, includedDisplayRows, rows, updateLongTaskProgress]);
+
+  const savedViewRows = useCallback((view: SavedView) => buildUnifiedFilterState({
+    rows: includedDisplayRows,
+    schema: displaySchema,
+    filterModel: view.filterModel,
+    listLikeColumns: includedListLikeColumns,
+    booleanMapColumns: includedBooleanMapColumns,
+  }).filteredRows, [displaySchema, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns]);
+
+  const toDashboardRecords = useCallback(
+    (scopedRows: any[]) => normalizeTemplateRows(scopedRows, state.annotations, importedChannelMetadata),
+    [importedChannelMetadata, state.annotations],
+  );
+  const getDashboardScopeRecords = useCallback(
+    () => toDashboardRecords(dashboardScope === 'full' ? includedDisplayRows : rows),
+    [dashboardScope, includedDisplayRows, rows, toDashboardRecords],
+  );
+
+  const dashboardCompareOptions = useMemo(() => [
+    { value: 'none', label: 'Nothing' },
+    ...(dashboardScope === 'filtered' ? [{ value: 'full', label: 'Whole dataset' }] : []),
+    ...state.savedViews.map((view) => ({ value: `view:${view.id}`, label: `Saved view: ${view.name}` })),
+  ], [dashboardScope, state.savedViews]);
+  const effectiveCompareTarget = dashboardCompareOptions.some((option) => option.value === dashboardCompareTarget) ? dashboardCompareTarget : 'none';
+
+  const dashboardCompare = useMemo(() => {
+    if (effectiveCompareTarget === 'full') {
+      const template = dashboardSnapshots.full?.template;
+      return template ? { snapshot: template, label: 'whole dataset', getRecords: () => toDashboardRecords(includedDisplayRows) } : undefined;
+    }
+    if (effectiveCompareTarget.startsWith('view:')) {
+      const view = state.savedViews.find((entry) => entry.id === effectiveCompareTarget.slice(5));
+      const template = view ? savedViewDashboardSnapshots[view.id]?.template : undefined;
+      return view && template ? { snapshot: template, label: `saved view “${view.name}”`, getRecords: () => toDashboardRecords(savedViewRows(view)) } : undefined;
+    }
+    return undefined;
+  }, [dashboardSnapshots.full, effectiveCompareTarget, includedDisplayRows, savedViewDashboardSnapshots, savedViewRows, state.savedViews, toDashboardRecords]);
+
+  // Choosing a comparison builds its snapshot when it is missing or out of date.
+  const handleDashboardCompareChange = useCallback(async (target: string) => {
+    setDashboardCompareTarget(target);
+    const fullStale = !dashboardSnapshots.full || dashboardSnapshots.full.datasetVersionAtCalculation !== datasetVersion;
+    const view = target.startsWith('view:') ? state.savedViews.find((entry) => entry.id === target.slice(5)) : undefined;
+    const needsWork = (target === 'full' && fullStale) || (view && savedViewSnapshotStaleById[view.id]);
+    if (!needsWork) return;
+    updateLongTaskProgress({ title: 'Preparing comparison', detail: 'Building the comparison snapshot', completed: 1, total: 2, indeterminate: true });
+    try {
+      await waitForNextPaint();
+      if (target === 'full') {
+        const snapshot = createScopeDashboardSnapshot('full', includedDisplayRows);
+        setDashboardSnapshots((previous) => ({ ...previous, full: snapshot }));
+      } else if (view) {
+        const snapshot = createSavedViewDashboardSnapshot(view);
+        setSavedViewDashboardSnapshots((previous) => ({ ...previous, [view.id]: snapshot }));
+      }
+    } finally {
+      updateLongTaskProgress(null);
+    }
+  }, [createSavedViewDashboardSnapshot, createScopeDashboardSnapshot, dashboardSnapshots.full, datasetVersion, includedDisplayRows, savedViewSnapshotStaleById, state.savedViews, updateLongTaskProgress]);
+
+  // Hidden terms change the vernacular numbers: rebuild the open dashboard right away.
+  const exclusionsAtLastBuildRef = useRef(vernacularExclusions);
+  useEffect(() => {
+    if (exclusionsAtLastBuildRef.current === vernacularExclusions) return;
+    exclusionsAtLastBuildRef.current = vernacularExclusions;
+    if (isDashboardOpen && currentDashboardSnapshot) void handleRefreshDashboard();
+  }, [currentDashboardSnapshot, handleRefreshDashboard, isDashboardOpen, vernacularExclusions]);
 
   const recalculateAllDashboardSnapshots = useCallback(async () => {
     const totalSteps = Math.max(3, state.savedViews.length + 2);
@@ -3986,9 +3983,15 @@ ${heading}
             activeTab={dashboardActiveTab}
             onActiveTabChange={setDashboardActiveTab}
             onNavigateToVideo={handleDashboardNavigateToVideo}
-            onNavigateToChannel={handleDashboardNavigateToChannel}
-            onApplyContentFilter={handleApplyDashboardContentFilter}
             onOverviewDrilldown={handleOverviewDrilldown}
+            compareValue={effectiveCompareTarget}
+            compareOptions={dashboardCompareOptions}
+            onCompareChange={(target) => void handleDashboardCompareChange(target)}
+            compare={dashboardCompare}
+            scopeLabel={dashboardScope === 'full' ? 'whole dataset' : 'filtered view'}
+            getScopeRecords={getDashboardScopeRecords}
+            vernacularExclusions={vernacularExclusions}
+            onVernacularExclusionsChange={setVernacularExclusions}
             linkingProps={{
               rows: currentLinkingRows,
               state: linkingState,

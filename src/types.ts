@@ -83,7 +83,7 @@ export interface ImportedChannelMetadataState {
 
 export type DashboardScope = 'full' | 'filtered';
 export type DashboardTabId = 'overview' | 'temporal' | 'inequality' | 'content' | 'locale' | 'reliability';
-export type DashboardTemplateTab = 'overview' | 'attention' | 'content' | 'linking';
+export type DashboardTemplateTab = 'overview' | 'attention' | 'vernacular' | 'time' | 'linking';
 
 /** How the videos explorer shows its rows. */
 export type ExplorerLayout = 'table' | 'thumbnails';
@@ -373,7 +373,8 @@ export interface DatasetDashboardStats {
 
 export interface DatasetDashboardSnapshot {
   scope: DashboardScope;
-  stats: DatasetDashboardStats;
+  /** Only in snapshots made before the dashboard redesign. */
+  stats?: DatasetDashboardStats;
   template?: DashboardTemplateSnapshot;
   rowCount: number;
   calculatedAt: string;
@@ -384,7 +385,8 @@ export interface DatasetDashboardSnapshot {
 export interface SavedViewDashboardSnapshot {
   savedViewId: string;
   savedViewName: string;
-  stats: DatasetDashboardStats;
+  /** Only in snapshots made before the dashboard redesign. */
+  stats?: DatasetDashboardStats;
   template?: DashboardTemplateSnapshot;
   rowCount: number;
   calculatedAt: string;
@@ -582,6 +584,8 @@ export interface ProjectArchiveManifest {
   channelVisibleColumns?: string[];
   videoColumnWidths?: Record<string, number>;
   channelColumnWidths?: Record<string, number>;
+  /** Terms hidden from vernacular analysis. */
+  vernacularExclusions?: string[];
   savedViews: SavedView[];
   activeViewId: string | null;
   annotations: Record<string, Annotation>;

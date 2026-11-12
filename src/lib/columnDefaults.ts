@@ -144,3 +144,11 @@ export function findDashboardLanguageColumn(schema: { column_name: string; }[], 
     ? findColumn(schema, ['defaultAudioLanguage', 'default_audio_language', 'audioLanguage'])
     : findColumn(schema, ['defaultLanguage', 'default_language', 'language']);
 }
+
+export function findDashboardTitleColumn(schema: { column_name: string; }[]) {
+  return findColumn(schema, ['videoTitle', 'video_title', 'title']);
+}
+
+export function findDashboardDescriptionColumn(schema: { column_name: string; }[]) {
+  return findColumn(schema, ['videoDescription', 'video_description', 'description']);
+}

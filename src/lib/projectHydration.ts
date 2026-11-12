@@ -32,6 +32,7 @@ export interface HydrateProjectArgs {
   visible?: string[];
   channelVisible?: string[];
   videoColumnWidths?: Record<string, number>;
+  vernacularExclusions?: string[];
   channelColumnWidths?: Record<string, number>;
   annotations?: Record<string, Annotation>;
   notesByVideoId?: Record<string, string>;

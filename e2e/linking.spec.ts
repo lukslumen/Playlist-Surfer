@@ -12,11 +12,14 @@ test('linking summary classifies links from the video descriptions', async ({ pa
   await page.locator('body').click({ position: { x: 5, y: 5 } });
 
   await page.keyboard.press('Alt+Shift+KeyO');
-  await page.getByRole('tab', { name: 'linking' }).click();
-  await page.getByText('videoDescription', { exact: true }).click();
+  await page.getByRole('tab', { name: 'Links' }).click();
+  // Descriptions are suggested first: the videos' own URLs and thumbnails are not outgoing links.
+  await expect(page.locator('.dash-choice').first()).toContainText('videoDescription');
+  await page.locator('.dash-choice').first().click();
   await page.getByRole('button', { name: /Generate linking summary/i }).click();
 
-  await expect(page.getByText(/Source column\s*videoDescription/i)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Links in videoDescription' })).toContainText('of videos link out', { timeout: 30_000 });
+  await expect(page.getByRole('region', { name: 'Where links point' })).toContainText('Other platforms');
   await expect(page.getByText('on.natgeo.com').first()).toBeVisible();
   await expect(page.getByText('Generating linking summary')).toBeHidden({ timeout: 30_000 });
 });
