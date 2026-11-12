@@ -5,12 +5,18 @@ export function getDefaultChannelVisibleColumns(columnNames: string[]) {
   const preferred = [
     'channel_name',
     'channel_id',
+    // Channel metadata, from a channel import or from YouTube Data Tools' per-video channel columns.
+    'channel_subscriber_count',
+    'channel_country',
     'video_count_in_dataset',
     'total_views_in_dataset',
     'total_likes_in_dataset',
     'total_comments_in_dataset',
     'earliest_publish_date',
     'latest_publish_date',
+    'channel_created_at',
+    'channel_video_count',
+    'channel_total_views',
     'channel_linked_video_count',
     'channel_unique_domains',
     'channel_top_domains',
@@ -151,4 +157,8 @@ export function findDashboardTitleColumn(schema: { column_name: string; }[]) {
 
 export function findDashboardDescriptionColumn(schema: { column_name: string; }[]) {
   return findColumn(schema, ['videoDescription', 'video_description', 'description']);
+}
+
+export function findDashboardShortColumn(schema: { column_name: string; }[]) {
+  return findColumn(schema, ['isShort', 'is_short', 'isShorts']);
 }

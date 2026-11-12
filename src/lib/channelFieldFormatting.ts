@@ -9,6 +9,7 @@ const FIELD_LABELS: Record<string, string> = {
   channel_id: 'Channel ID',
   channel_user_tags: 'Channel user tags',
   channel_created_at: 'Channel created',
+  channel_days_active: 'Days active',
   channel_subscriber_count: 'Subscribers',
   channel_video_count: 'Channel video count',
   channel_total_views: 'Channel total views',
@@ -35,6 +36,7 @@ export const SECTION_PRIORITY: Record<'publishing' | 'performance' | 'linking' |
     'earliest_publish_date',
     'latest_publish_date',
     'channel_created_at',
+    'channel_days_active',
     'video_count_in_dataset',
     'channel_video_count',
   ],
@@ -129,7 +131,7 @@ function isNumericFieldKey(key: string) {
 }
 
 function isDateFieldKey(key: string) {
-  return /(date|published|publish|created|updated|time)$/i.test(key);
+  return /(date|published|publish|created|updated|time|_at|At)$/.test(key) || /(date|published|created|updated)$/i.test(key);
 }
 
 function isListFieldKey(key: string) {
@@ -184,7 +186,8 @@ export function formatMetadataDisplay(key: string, value: unknown): string | str
   const list = parseArrayLikeValue(key, value);
   if (list.length) return list;
   if (value === null || value === undefined || value === '') return EMPTY_PLACEHOLDER;
-  if (isDateFieldKey(key)) return formatValue(value);
+  // Dates can arrive as epoch milliseconds when DuckDB parsed the column as a timestamp.
+  if (isDateFieldKey(key)) return typeof value === 'number' ? (formatDateDisplay(value) || EMPTY_PLACEHOLDER) : formatValue(value);
   const numeric = coerceNumericValue(value);
   if (numeric !== null && (isNumericFieldKey(key) || typeof value === 'number')) return numeric.toLocaleString();
   return String(value).trim() || EMPTY_PLACEHOLDER;

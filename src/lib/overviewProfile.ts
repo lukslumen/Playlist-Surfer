@@ -229,6 +229,8 @@ function buildSummary(profile: Omit<DashboardOverviewProfile, 'summary'>): strin
   }
   if (profile.medianViews !== null) parts.push(`the typical video has ${compact.format(profile.medianViews)} views`);
   if (parts.length) sentences.push(`${parts.join(', and ')}.`);
+  const shorts = profile.formats.find((entry) => entry.label === 'Shorts');
+  if (profile.formats.length) sentences.push(shorts ? `${percent(shorts.share)} are Shorts.` : 'None are Shorts.');
 
   const traits: string[] = [];
   const topCategory = profile.categories.find((entry) => entry.filterValue);
@@ -237,6 +239,38 @@ function buildSummary(profile: Omit<DashboardOverviewProfile, 'summary'>): strin
   if (topLanguage && topLanguage.share > 0.5) traits.push(`in ${topLanguage.label} (${percent(topLanguage.share)})`);
   if (traits.length) sentences.push(`Mostly ${traits.join(' and ')}.`);
   return sentences;
+}
+
+/** Shorts vs regular videos from the isShort flag, keeping the stored values for drill-downs. */
+export function buildFormats(records: DashboardTemplateVideoRecord[]): DashboardOverviewShare[] {
+  if (!records.some((record) => record.isShort !== null && record.isShort !== undefined)) return [];
+  const tally = { short: 0, regular: 0, unknown: 0 };
+  const raw: { short?: string; regular?: string } = {};
+  records.forEach((record) => {
+    if (record.isShort === true) {
+      tally.short += 1;
+      raw.short ??= String(record.isShortRaw ?? 'yes');
+    } else if (record.isShort === false) {
+      tally.regular += 1;
+      raw.regular ??= String(record.isShortRaw ?? 'no');
+    } else tally.unknown += 1;
+  });
+  const total = records.length;
+  return [
+    { label: 'Shorts', filterValue: raw.short, count: tally.short, share: tally.short / total },
+    { label: 'Regular videos', filterValue: raw.regular, count: tally.regular, share: tally.regular / total },
+    ...(tally.unknown ? [{ label: 'Not flagged', count: tally.unknown, share: tally.unknown / total }] : []),
+  ].filter((entry) => entry.count > 0);
+}
+
+/** Median subscriber count over the set's channels (each channel once). */
+function medianChannelSubscribers(records: DashboardTemplateVideoRecord[]): number | null {
+  const byChannel = new Map<string, number>();
+  records.forEach((record) => {
+    const key = record.channelId || record.channelTitle;
+    if (key && record.channelSubscribers !== null && record.channelSubscribers !== undefined && !byChannel.has(key)) byChannel.set(key, record.channelSubscribers);
+  });
+  return median([...byChannel.values()]);
 }
 
 export function buildOverviewProfile(records: DashboardTemplateVideoRecord[]): DashboardOverviewProfile {
@@ -302,6 +336,8 @@ export function buildOverviewProfile(records: DashboardTemplateVideoRecord[]): D
       languageName,
     ),
     languageSource,
+    formats: buildFormats(records),
+    medianChannelSubscribers: medianChannelSubscribers(records),
   } satisfies Omit<DashboardOverviewProfile, 'summary'>;
   return { ...base, summary: buildSummary(base) };
 }

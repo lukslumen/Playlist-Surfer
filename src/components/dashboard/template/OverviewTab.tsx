@@ -350,7 +350,12 @@ export function OverviewTab({ snapshot, calculatedAt, compare, onDrilldown, onRe
 
       <section className="dash-kpis" aria-label="Key numbers">
         <Kpi label="Videos" value={whole.format(profile.videos)} comparison={vs(other ? whole.format(other.videos) : null)} detail={overview.totalRows !== profile.videos ? `${whole.format(overview.totalRows)} rows` : undefined} />
-        <Kpi label={profile.channels === 1 ? 'Channel' : 'Channels'} value={whole.format(profile.channels)} comparison={vs(other ? whole.format(other.channels) : null)} detail={profile.singleChannelName ?? undefined} />
+        <Kpi
+          label={profile.channels === 1 ? 'Channel' : 'Channels'}
+          value={whole.format(profile.channels)}
+          comparison={vs(other ? whole.format(other.channels) : null)}
+          detail={profile.singleChannelName ?? (profile.medianChannelSubscribers != null ? `median ${compact.format(profile.medianChannelSubscribers)} subscribers` : undefined)}
+        />
         <Kpi label="Published" value={published.value} detail={published.detail} />
         <Kpi label="Total views" value={compact.format(profile.totalViews)} comparison={vs(other ? compact.format(other.totalViews) : null)} detail={`${compactShort.format(overview.totalLikes)} likes · ${compactShort.format(overview.totalComments)} comments`} />
         <Kpi
@@ -373,7 +378,7 @@ export function OverviewTab({ snapshot, calculatedAt, compare, onDrilldown, onRe
         <UploadTimeline uploads={profile.uploads} datedCount={profile.datedCount} totalVideos={profile.videos} onDrilldown={onDrilldown} />
       </section>
 
-      <section className="dash-grid">
+      <section className={`dash-grid ${profile.formats?.length ? 'is-5' : ''}`}>
         <article className="dash-card">
           <div className="dash-card-head"><h3>Length</h3></div>
           <BarList
@@ -390,6 +395,12 @@ export function OverviewTab({ snapshot, calculatedAt, compare, onDrilldown, onRe
             footnote={profile.viewsUnknownCount ? `${whole.format(profile.viewsUnknownCount)} without a view count.` : undefined}
           />
         </article>
+        {profile.formats?.length ? (
+          <article className="dash-card">
+            <div className="dash-card-head"><h3>Format</h3><span className="dash-card-note">from the export's Shorts flag</span></div>
+            <BarList rows={shareRows(profile.formats, (value) => ({ kind: 'format', value }), onDrilldown)} emptyText="No format information." />
+          </article>
+        ) : null}
         <article className="dash-card">
           <div className="dash-card-head"><h3>Categories</h3></div>
           <BarList rows={shareRows(profile.categories, (value) => ({ kind: 'category', value }), onDrilldown)} emptyText="No categories in this scope." />

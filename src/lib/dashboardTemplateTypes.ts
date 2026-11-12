@@ -22,6 +22,12 @@ export type DashboardTemplateVideoRecord = {
   videoId?: string;
   publishedAt?: string;
   channelCreatedAt?: string;
+  /** YouTube Data Tools' Shorts flag; null when the export has no isShort column. */
+  isShort?: boolean | null;
+  /** The flag as stored ("yes", "true", …), for drill-down filters. */
+  isShortRaw?: string;
+  /** The channel's subscriber count, from per-video channel columns or imported channel metadata. */
+  channelSubscribers?: number | null;
 };
 
 export type DashboardTemplateCoverageMetric = {
@@ -141,6 +147,10 @@ export type DashboardOverviewProfile = {
   viewsUnknownCount: number;
   categories: DashboardOverviewShare[];
   languages: DashboardOverviewShare[];
+  /** Shorts vs regular videos, from the export's isShort flag; empty when the export has none. */
+  formats: DashboardOverviewShare[];
+  /** Median subscribers of the channels in the set (from channel metadata), or null. */
+  medianChannelSubscribers: number | null;
   /** Which language field the languages were counted from. */
   languageSource: 'audio' | 'declared';
 };
@@ -152,5 +162,7 @@ export type OverviewDrilldown =
   | { kind: 'views'; min: number; max: number | null }
   | { kind: 'category'; value: string }
   | { kind: 'language'; value: string; source: 'audio' | 'declared' }
+  /** Shorts or regular videos; `value` is the isShort value as stored. */
+  | { kind: 'format'; value: string }
   /** A vernacular term; `value` is the spelling stored in the data (the raw value for topics). */
   | { kind: 'term'; unit: 'words' | 'phrases' | 'hashtags' | 'tags' | 'topics'; value: string };

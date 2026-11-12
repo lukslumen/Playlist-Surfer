@@ -9,6 +9,7 @@ import {
   findDashboardDurationColumn,
   findDashboardLanguageColumn,
   findDashboardPublishedColumn,
+  findDashboardShortColumn,
   findDashboardViewsColumn,
 } from './columnDefaults';
 import { formatDurationDisplay, resolveTagFilterColumn } from './data';
@@ -27,6 +28,7 @@ export function overviewDrilldownColumns(schema: ColumnSchema[]): string[] {
     findDashboardTopicColumn(schema),
     findDashboardTitleColumn(schema),
     findDashboardDescriptionColumn(schema),
+    findDashboardShortColumn(schema),
     resolveTagFilterColumn(schema),
   ].filter((column): column is string => Boolean(column));
 }
@@ -75,6 +77,11 @@ export function buildOverviewDrilldownFilter(drilldown: OverviewDrilldown, schem
       const column = drilldown.unit === 'hashtags' ? findDashboardDescriptionColumn(schema) : findDashboardTitleColumn(schema);
       if (!column) return null;
       return { [column]: { filterKind: 'text', operator: 'contains', value: drilldown.value } };
+    }
+    case 'format': {
+      const column = findDashboardShortColumn(schema);
+      if (!column) return null;
+      return { [column]: { filterKind: 'text', operator: 'equals', value: drilldown.value } };
     }
     case 'language': {
       const column = findDashboardLanguageColumn(schema, drilldown.source);

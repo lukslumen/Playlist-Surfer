@@ -175,7 +175,15 @@ Totals: 68 unit tests and 17 e2e tests.
       - generating the snapshot takes about 6.5 s (from 11.7 s on the first version), after sharing term extraction, using numeric/dense pair counts and hashing descriptions in the duplicate key;
       - switching tabs takes 0.1–0.3 s.
 
-Tests: 366 unit and 37 e2e (fewer unit tests than before because those for the removed code are gone). Lint: 0 problems, with hook dependencies and unused code enforced as errors.
+29. **Compatible with the November 2026 YouTube Data Tools video export.** It adds the Shorts flag and six channel metadata columns to each video row.
+    - The new columns get readable names and types.
+    - The Shorts flag drives a Format card and summary line in the overview, and clicking it filters the explorer.
+    - The channel fields fill the generated Channels view (subscribers, created, country, channel views and videos, days active), with no separate channel import.
+    - The Attention table gains a "Per subscriber" sort.
+    - Fixed: channel creation dates parsed as timestamps showed as epoch milliseconds in the channel panel.
+    - The tests use a synthetic fixture with the real export's header. The same e2e spec also passes on a real 446-video export (`YTDT_EXPORT=<file> YTDT_EXPORT_ROWS=<n>`).
+
+Tests: 373 unit and 40 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
 - **Review findings not yet fixed:**

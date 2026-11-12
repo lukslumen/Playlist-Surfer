@@ -9,6 +9,7 @@ Playlist Surfer is a React/TS research tool for analyzing CSV-based video and ch
 - Filter, sort, and compare rows quickly
 - Switch between video view and channel view
 - Switch the videos explorer between a table and a thumbnail grid
+- Reads YouTube Data Tools video exports including the Shorts flag (`isShort`) and the per-video channel metadata columns (`channel_subscriberCount`, `channel_publishedAt`, …): Shorts appear in the overview, channel fields fill the Channels view, and the Attention tab can rank views per subscriber
 - Dashboards organised by research question: Overview, Attention, Vernacular, Time and Links
 - Add notes, tags, and quotes while reviewing data
 - Review links, domains, and channel metadata

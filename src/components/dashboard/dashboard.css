@@ -307,6 +307,10 @@
   gap: 10px;
 }
 
+.dash-grid.is-5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .dash-bar-list {
   display: flex;
   flex-direction: column;

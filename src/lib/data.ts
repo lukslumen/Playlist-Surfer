@@ -127,7 +127,21 @@ const YOUTUBE_DATA_TOOLS_VIDEOLIST_MAPPING: Record<string, string> = {
   caption: 'Has Captions',
   defaultLanguage: 'Default Language',
   defaultLAudioLanguage: 'Default Audio Language',
+  defaultAudioLanguage: 'Default Audio Language',
   thumbnail_maxres: 'Thumbnail URL',
+  videoUrl: 'Video URL',
+  isShort: 'Is Short',
+  liveBroadcastContent: 'Live Broadcast',
+  regionRestrictionAllowed: 'Allowed Regions',
+  regionRestrictionBlocked: 'Blocked Regions',
+  madeForKids: 'Made For Kids',
+  // Channel metadata that YouTube Data Tools can add to each video row.
+  channel_publishedAt: 'Channel Created',
+  channel_daysActive: 'Channel Days Active',
+  channel_country: 'Channel Country',
+  channel_viewCount: 'Channel Views',
+  channel_subscriberCount: 'Channel Subscribers',
+  channel_videoCount: 'Channel Videos',
   licensedContent: 'Licensed Content',
   hasPaidProductPlacement: 'Paid Product Placement',
   locationDescription: 'Location Description',
@@ -164,7 +178,17 @@ const SHARED_SEMANTIC_HINTS: Record<string, ColumnSchema['semantic_type']> = {
   country: 'country',
   defaultLanguage: 'language',
   defaultLAudioLanguage: 'language',
+  defaultAudioLanguage: 'language',
   caption: 'boolean',
+  isShort: 'boolean',
+  madeForKids: 'boolean',
+  videoUrl: 'url',
+  channel_publishedAt: 'date-time',
+  channel_daysActive: 'count',
+  channel_country: 'country',
+  channel_viewCount: 'count',
+  channel_subscriberCount: 'count',
+  channel_videoCount: 'count',
   licensedContent: 'boolean',
   hasPaidProductPlacement: 'boolean',
   definition: 'short-text',
@@ -191,6 +215,11 @@ const SHARED_WIDTH_HINTS: Record<string, NonNullable<ColumnSchema['width_hint']>
   hasPaidProductPlacement: 'small',
   defaultLanguage: 'small',
   defaultLAudioLanguage: 'small',
+  defaultAudioLanguage: 'small',
+  isShort: 'small',
+  madeForKids: 'small',
+  channel_country: 'small',
+  channel_daysActive: 'small',
   latitude: 'small',
   longitude: 'small',
   publishedAt: 'medium',
@@ -950,6 +979,28 @@ function parseTimestampMs(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Channel fields that YouTube Data Tools can add to every video row (channel_subscriberCount, …),
+ * under the names the channel table uses. Snake- and camel-case spellings are both accepted.
+ */
+const VIDEO_ROW_CHANNEL_FIELDS: Array<{ target: string; sources: string[] }> = [
+  { target: 'channel_created_at', sources: ['channel_publishedAt', 'channel_published_at', 'channelPublishedAt'] },
+  { target: 'channel_days_active', sources: ['channel_daysActive', 'channel_days_active', 'channelDaysActive'] },
+  { target: 'channel_country', sources: ['channel_country', 'channelCountry'] },
+  { target: 'channel_total_views', sources: ['channel_viewCount', 'channel_view_count', 'channelViewCount'] },
+  { target: 'channel_subscriber_count', sources: ['channel_subscriberCount', 'channel_subscriber_count', 'channelSubscriberCount'] },
+  { target: 'channel_video_count', sources: ['channel_videoCount', 'channel_video_count', 'channelVideoCount'] },
+];
+
+export function channelFieldsFromVideoRow(row: any): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  VIDEO_ROW_CHANNEL_FIELDS.forEach(({ target, sources }) => {
+    const source = sources.find((name) => !valueIsEmpty(row?.[name]));
+    if (source) fields[target] = row[source];
+  });
+  return fields;
+}
+
 export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannelMetadataState | null): ChannelMetadataRow[] {
   type ChannelAccumulator = {
     channel_key: string;
@@ -963,6 +1014,7 @@ export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannel
     commentsValuePresent: boolean;
     earliest_publish_ms: number | null;
     latest_publish_ms: number | null;
+    channel_fields: Record<string, unknown>;
   };
 
   const byChannel = new Map<string, ChannelAccumulator>();
@@ -988,8 +1040,13 @@ export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannel
       commentsValuePresent: false,
       earliest_publish_ms: null,
       latest_publish_ms: null,
+      channel_fields: {},
     };
 
+    // Keep the first value seen for each channel field (they are the same on every video of a channel).
+    Object.entries(channelFieldsFromVideoRow(row)).forEach(([field, value]) => {
+      if (existing.channel_fields[field] === undefined) existing.channel_fields[field] = value;
+    });
     existing.video_count_in_dataset += 1;
     existing.total_views_in_dataset += views;
     if (likes !== null) {
@@ -1024,6 +1081,7 @@ export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannel
       total_comments_in_dataset: channel.commentsValuePresent ? channel.total_comments_in_dataset : null,
       earliest_publish_date: channel.earliest_publish_ms ? new Date(channel.earliest_publish_ms).toISOString() : null,
       latest_publish_date: channel.latest_publish_ms ? new Date(channel.latest_publish_ms).toISOString() : null,
+      ...channel.channel_fields,
     }))
     .sort((a, b) => {
       if (b.video_count_in_dataset !== a.video_count_in_dataset) return b.video_count_in_dataset - a.video_count_in_dataset;

@@ -5,11 +5,11 @@ import type { DashboardTabProps } from '../TemplateDashboard';
 import { ConcentrationChart, ScatterChart } from './charts';
 import { compact, METRIC_LABEL, percent, rate, times, whole } from './format';
 
-type SortKey = 'views' | 'engagement' | 'vsChannel';
+type SortKey = 'views' | 'engagement' | 'vsChannel' | 'perSubscriber';
 
 const videoCsv = (videos: AttentionVideo[]) => ({
-  columns: ['videoId', 'title', 'channel', 'views', 'likes', 'comments', 'likes_and_comments_per_1k_views', 'views_vs_channel_median'],
-  rows: videos.map((video) => [video.videoId, video.title, video.channel, video.views, video.likes, video.comments, video.engagement?.toFixed(2), video.vsChannel?.toFixed(3)]),
+  columns: ['videoId', 'title', 'channel', 'views', 'likes', 'comments', 'likes_and_comments_per_1k_views', 'views_vs_channel_median', 'views_per_channel_subscriber'],
+  rows: videos.map((video) => [video.videoId, video.title, video.channel, video.views, video.likes, video.comments, video.engagement?.toFixed(2), video.vsChannel?.toFixed(3), video.perSubscriber?.toFixed(4)]),
 });
 
 export function AttentionTab({ snapshot, compare, scopeLabel, onNavigateToVideo, getScopeRecords }: DashboardTabProps) {
@@ -29,7 +29,7 @@ export function AttentionTab({ snapshot, compare, scopeLabel, onNavigateToVideo,
   const allVideos = () => (getScopeRecords ? attentionVideos(getScopeRecords()).videos : attention.ranked);
 
   const ranked = useMemo(() => {
-    const score = (video: AttentionVideo) => (sort === 'views' ? video.views : sort === 'engagement' ? video.engagement : video.vsChannel);
+    const score = (video: AttentionVideo) => (sort === 'views' ? video.views : sort === 'engagement' ? video.engagement : sort === 'vsChannel' ? video.vsChannel : (video.perSubscriber ?? null));
     return attention.ranked.filter((video) => score(video) !== null).sort((a, b) => (score(b) as number) - (score(a) as number));
   }, [attention.ranked, sort]);
 
@@ -132,12 +132,18 @@ export function AttentionTab({ snapshot, compare, scopeLabel, onNavigateToVideo,
         context={scopeLabel}
         headline={sort === 'vsChannel'
           ? (attention.channelsWithNorm ? `Videos that did best against their own channel's typical views (${whole.format(attention.channelsWithNorm)} channels with ${MIN_CHANNEL_VIDEOS}+ videos).` : `No channel has ${MIN_CHANNEL_VIDEOS} or more videos here, so there is no channel norm to compare against.`)
-          : sort === 'engagement' ? `Videos with the most likes and comments per 1,000 views (at least ${whole.format(MIN_VIEWS_FOR_ENGAGEMENT)} views).` : 'The most viewed videos.'}
+          : sort === 'engagement' ? `Videos with the most likes and comments per 1,000 views (at least ${whole.format(MIN_VIEWS_FOR_ENGAGEMENT)} views).`
+            : sort === 'perSubscriber' ? "Videos that reached far beyond their channel's subscriber base (views ÷ subscribers)." : 'The most viewed videos.'}
         controls={(
-          <Segmented label="Sort" value={sort} onChange={(next) => { setSort(next); setLimit(25); }} options={[{ value: 'views', label: 'Views' }, { value: 'engagement', label: 'Engagement' }, { value: 'vsChannel', label: '× channel' }]} />
+          <Segmented label="Sort" value={sort} onChange={(next) => { setSort(next); setLimit(25); }} options={[
+            { value: 'views', label: 'Views' },
+            { value: 'engagement', label: 'Engagement' },
+            { value: 'vsChannel', label: '× channel' },
+            ...(attention.hasSubscribers ? [{ value: 'perSubscriber' as const, label: 'Per subscriber' }] : []),
+          ]} />
         )}
         method={{
-          computed: `Views, likes and comments as collected. Engagement = (likes + comments) ÷ views × 1,000, for videos with at least ${whole.format(MIN_VIEWS_FOR_ENGAGEMENT)} views. "× channel" = the video's views ÷ the median views of its channel's videos in this set, for channels with at least ${MIN_CHANNEL_VIDEOS} videos. The table holds the top 200 for each sort; the CSV has every video.`,
+          computed: `Views, likes and comments as collected. Engagement = (likes + comments) ÷ views × 1,000, for videos with at least ${whole.format(MIN_VIEWS_FOR_ENGAGEMENT)} views. "× channel" = the video's views ÷ the median views of its channel's videos in this set, for channels with at least ${MIN_CHANNEL_VIDEOS} videos. ${attention.hasSubscribers ? ' "Per subscriber" = views ÷ the channel\'s subscriber count from the export\'s channel metadata; above 1 means the video reached more people than the channel has subscribers.' : ''} The table holds the top 200 for each sort; the CSV has every video.`,
           read: '"× channel" finds breakout videos: 5× means five times the channel\'s typical video, which matters more for a small channel than raw views do. Click a row to open the video.',
           caveats: [
             'The channel norm only uses that channel\'s videos in this dataset, not its whole catalogue.',
@@ -156,6 +162,7 @@ export function AttentionTab({ snapshot, compare, scopeLabel, onNavigateToVideo,
                 <th>Views</th>
                 <th title="likes + comments per 1,000 views">Engagement</th>
                 <th title="views ÷ channel median views">× channel</th>
+                {attention.hasSubscribers ? <th title="views ÷ channel subscribers">Per subscriber</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -167,6 +174,7 @@ export function AttentionTab({ snapshot, compare, scopeLabel, onNavigateToVideo,
                   <td>{video.views === null ? '—' : compact.format(video.views)}</td>
                   <td>{rate(video.engagement)}</td>
                   <td className={video.vsChannel !== null && video.vsChannel >= BREAKOUT_RATIO ? 'dash-up' : undefined}>{times(video.vsChannel)}</td>
+                  {attention.hasSubscribers ? <td className={video.perSubscriber != null && video.perSubscriber >= 1 ? 'dash-up' : undefined}>{video.perSubscriber == null ? '—' : video.perSubscriber >= 10 ? times(video.perSubscriber) : video.perSubscriber.toFixed(2)}</td> : null}
                 </tr>
               ))}
             </tbody>

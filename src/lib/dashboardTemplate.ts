@@ -382,6 +382,7 @@ function resolveImportedChannelMetadataRow(row: any, importedChannelMetadata?: I
 function resolveChannelCreatedAt(row: any, importedChannelMetadata?: ImportedChannelMetadataState | null): string {
   const importedRow = resolveImportedChannelMetadataRow(row, importedChannelMetadata);
   const value = row?.channel_created_at
+    ?? row?.channel_publishedAt
     ?? row?.channelCreatedAt
     ?? row?.channel_joined
     ?? row?.channelJoined
@@ -395,6 +396,23 @@ function resolveChannelCreatedAt(row: any, importedChannelMetadata?: ImportedCha
     ?? importedRow?.creation_date
     ?? '';
   return toText(value);
+}
+
+function resolveChannelSubscribers(row: any, importedChannelMetadata?: ImportedChannelMetadataState | null): number | null {
+  const direct = parseNumber(row?.channel_subscriberCount ?? row?.channel_subscriber_count ?? row?.channelSubscriberCount);
+  if (direct !== null) return direct;
+  const importedRow = resolveImportedChannelMetadataRow(row, importedChannelMetadata);
+  return parseNumber(importedRow?.channel_subscriber_count ?? importedRow?.subscriberCount);
+}
+
+/** YouTube Data Tools' isShort flag ("yes"/"no"); also accepts true/false and 1/0. Null when absent. */
+export function parseShortFlag(value: unknown): boolean | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'boolean') return value;
+  const text = String(value).trim().toLowerCase();
+  if (['yes', 'true', '1', 'y'].includes(text)) return true;
+  if (['no', 'false', '0', 'n'].includes(text)) return false;
+  return null;
 }
 
 /** Rows as the dashboard's normalized video records (also used for on-demand exports). */
@@ -422,6 +440,9 @@ export function normalizeTemplateRows(rows: any[], annotations: Record<string, A
       likeCount: parseNumber(row?.likeCount ?? row?.likes),
       videoId,
       publishedAt: toText(resolvePublishedAt(row)),
+      isShort: parseShortFlag(row?.isShort ?? row?.is_short),
+      isShortRaw: row?.isShort ?? row?.is_short ?? undefined,
+      channelSubscribers: resolveChannelSubscribers(row, importedChannelMetadata),
     };
   });
 }

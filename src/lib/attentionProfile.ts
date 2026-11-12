@@ -31,6 +31,8 @@ export interface AttentionVideo {
   engagement: number | null;
   /** Views ÷ the channel's median views; null for channels with fewer than MIN_CHANNEL_VIDEOS videos. */
   vsChannel: number | null;
+  /** Views ÷ the channel's subscribers, when the export has channel metadata. */
+  perSubscriber?: number | null;
 }
 
 export interface AttentionProfile {
@@ -43,6 +45,8 @@ export interface AttentionProfile {
   medianEngagement: number | null;
   breakoutCount: number;
   channelsWithNorm: number;
+  /** Whether views per subscriber can be shown (the export has channel subscriber counts). */
+  hasSubscribers?: boolean;
   minViewsForEngagement: number;
 }
 
@@ -134,6 +138,7 @@ export function attentionVideos(records: DashboardTemplateVideoRecord[]) {
       comments: record.commentCount,
       engagement,
       vsChannel: views !== null && norm ? views / norm : null,
+      perSubscriber: views !== null && record.channelSubscribers ? views / record.channelSubscribers : null,
     });
   });
 
@@ -159,7 +164,8 @@ export function buildAttentionProfile(records: DashboardTemplateVideoRecord[]): 
   const byViews = topBy((video) => video.views);
   const byEngagement = topBy((video) => video.engagement);
   const byChannel = topBy((video) => video.vsChannel);
-  const ranked = [...new Map([...byViews, ...byEngagement, ...byChannel].map((video) => [video.videoId, video])).values()];
+  const bySubscriber = topBy((video) => video.perSubscriber ?? null);
+  const ranked = [...new Map([...byViews, ...byEngagement, ...byChannel, ...bySubscriber].map((video) => [video.videoId, video])).values()];
 
   // Scatter: every video when few; otherwise an even sample across the view range plus all stand-outs.
   const plottable = videos.filter((video) => video.views !== null && video.views > 0 && video.engagement !== null);
@@ -186,6 +192,7 @@ export function buildAttentionProfile(records: DashboardTemplateVideoRecord[]): 
     medianEngagement: median(videos.map((video) => video.engagement).filter((value): value is number => value !== null)),
     breakoutCount: videos.filter((video) => video.vsChannel !== null && video.vsChannel >= BREAKOUT_RATIO).length,
     channelsWithNorm: channelMedian.size,
+    hasSubscribers: videos.some((video) => video.perSubscriber !== null && video.perSubscriber !== undefined),
     minViewsForEngagement: MIN_VIEWS_FOR_ENGAGEMENT,
   };
 }
