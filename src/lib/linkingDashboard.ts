@@ -520,10 +520,14 @@ function applyDomainOverride(
   };
 }
 
+/** One YouTube watch link, short link or thumbnail URL and nothing else: the video's own address. */
+const SELF_REFERENCE_REGEX = /^https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:watch|shorts\/)|youtu\.be\/|i\.ytimg\.com\/|yt3\.ggpht\.com\/)\S*$/i;
+
 export function profileLinkingColumnCandidates(rows: any[]): LinkingSourceCandidateProfile[] {
   if (!rows.length) return [];
   const sampleRows = rows.slice(0, 300);
-  const columnNames = unique(sampleRows.flatMap((row) => Object.keys(row || {})));
+  // The linking_* columns are this analysis's own output, never a source.
+  const columnNames = unique(sampleRows.flatMap((row) => Object.keys(row || {}))).filter((column) => !/^linking_/i.test(column));
 
   const candidates = columnNames.map((column) => {
     const normalized = normalizeColumnName(column);
@@ -545,6 +549,7 @@ export function profileLinkingColumnCandidates(rows: any[]): LinkingSourceCandid
 
     let nonEmptyRows = 0;
     let urlishRows = 0;
+    let selfReferenceRows = 0;
     let estimatedUrlMentions = 0;
     const samples: string[] = [];
     for (const row of sampleRows) {
@@ -554,6 +559,7 @@ export function profileLinkingColumnCandidates(rows: any[]): LinkingSourceCandid
       nonEmptyRows += 1;
       if (URLISH_VALUE_REGEX.test(text)) {
         urlishRows += 1;
+        if (SELF_REFERENCE_REGEX.test(text)) selfReferenceRows += 1;
         estimatedUrlMentions += Math.max(1, extractUrlsFromConfiguredColumn(row, column).length);
         score += text.length > 180 ? 4 : 8;
       }
@@ -566,6 +572,11 @@ export function profileLinkingColumnCandidates(rows: any[]): LinkingSourceCandid
     if (urlishRows > 0) {
       reasons.push(`${urlishRows} sampled rows looked URL-like`);
       score += Math.min(72, urlishRows * 6);
+    }
+    // A column of the videos' own watch links or thumbnails says nothing about where creators link to.
+    if (urlishRows > 0 && selfReferenceRows / urlishRows >= 0.8) {
+      score = Math.max(1, Math.round(score * 0.05));
+      reasons.unshift("holds the videos' own YouTube addresses or thumbnails, not outgoing links");
     }
     if (nonEmptyRows === 0) score = 0;
 

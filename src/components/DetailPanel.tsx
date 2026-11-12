@@ -1,31 +1,17 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Youtube, Tag, X, Search, Plus, Pencil, Save, Ban, Copy, ChevronDown, Clock3, Trash2 } from 'lucide-react';
-import { Annotation, QuoteRef, TimestampRef } from '../types';
-import {
-  BatchCopyExportMode,
-  resolvePublishedAt,
-  resolveTranscript,
-  resolveVideoDescription,
-  resolveVideoId,
-  resolveVideoTags,
-  resolveVideoTitle,
-  resolveViews,
-  sortQuoteRefs,
-  TRANSCRIPT_COLUMN,
-} from '../lib/data';
-import {
-  buildMarkerPreview,
-  insertAtPlayhead,
-  parseTimestampDocument,
-  removeById,
-} from '../lib/timestampNotes';
-
-declare global {
-  interface Window {
-    YT?: any;
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Youtube, Tag, X, Search, Plus, Pencil, Save, Ban, Clock3, Trash2 } from 'lucide-react';
+import { Annotation, InclusionView, QuoteRef, TimestampRef } from '../types';
+import { BatchCopyExportMode, parseDurationToSeconds, resolvePublishedAt, resolveTranscript, resolveVideoDescription, resolveVideoId, resolveVideoTags, resolveVideoTitle, resolveViews, sortQuoteRefs, TRANSCRIPT_COLUMN } from '../lib/data';
+import { buildMarkerPreview, insertAtPlayhead, parseTimestampDocument, removeById } from '../lib/timestampNotes';
+import { appendQuotedText, timestampRefsEqual } from '../lib/detailNotes';
+import { shouldIgnorePlayerShortcut } from '../lib/youtubeApi';
+import { useYouTubePlayer } from './detail/useYouTubePlayer';
+import { InputRow } from './detail/InputRow';
+import { TimestampMarkerRail } from './detail/TimestampMarkerRail';
+import { TimestampText } from './detail/TimestampText';
+import { TranscriptViewer } from './detail/TranscriptViewer';
+import { NotesPreview } from './detail/NotesPreview';
+import { BatchSelectionPanel } from './detail/BatchSelectionPanel';
 
 interface DetailPanelProps {
   row: any | null;
@@ -49,6 +35,8 @@ interface DetailPanelProps {
     message: string;
   }>;
   onBatchExclude?: () => void;
+  /** In the Excluded view the batch action restores instead of excluding. */
+  inclusionView?: InclusionView;
   onBatchCopySelection?: (mode: BatchCopyExportMode) => Promise<{
     status: 'success' | 'empty' | 'error';
     copiedCount: number;
@@ -68,428 +56,6 @@ interface DetailPanelProps {
 }
 
 type DetailMode = 'description' | 'annotate' | 'transcript';
-type BatchCopyFeedbackStatus = 'success' | 'empty' | 'error';
-
-const BATCH_COPY_OPTIONS: Array<{ mode: BatchCopyExportMode; label: string }> = [
-  { mode: 'videoIds', label: 'Copy video IDs' },
-  { mode: 'videoUrls', label: 'Copy video URLs' },
-  { mode: 'channelIds', label: 'Copy channel IDs' },
-  { mode: 'channelUrls', label: 'Copy channel URLs' },
-];
-
-type TranscriptSelection = {
-  text: string;
-  startIndex: number;
-  endIndex: number;
-  top: number;
-  left: number;
-};
-
-let ytApiPromise: Promise<any> | null = null;
-const YT_API_TIMEOUT_MS = 12000;
-
-function loadYouTubeApi(): Promise<any> {
-  if (typeof window === 'undefined') {
-    return Promise.reject(new Error('YouTube API can only load in the browser.'));
-  }
-
-  if (window.YT?.Player) return Promise.resolve(window.YT);
-  if (ytApiPromise) return ytApiPromise;
-
-  ytApiPromise = new Promise((resolve, reject) => {
-    let settled = false;
-    let timeoutId: number | null = null;
-    const existingScript = document.querySelector('script[data-yt-api="true"]') as HTMLScriptElement | null;
-    const script = existingScript || document.createElement('script');
-
-    const settleSuccess = () => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      script.removeEventListener('error', handleScriptError);
-      resolve(window.YT);
-    };
-
-    const settleFailure = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
-      script.removeEventListener('error', handleScriptError);
-      ytApiPromise = null;
-      reject(error);
-    };
-
-    const handleScriptError = () => {
-      settleFailure(new Error('Failed to load YouTube iframe API script.'));
-    };
-
-    if (!existingScript) {
-      script.src = 'https://www.youtube.com/iframe_api';
-      script.async = true;
-      script.dataset.ytApi = 'true';
-      document.body.appendChild(script);
-    }
-
-    script.addEventListener('error', handleScriptError, { once: true });
-
-    const previous = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => {
-      previous?.();
-      if (window.YT?.Player) {
-        settleSuccess();
-      }
-    };
-
-    const waitForApi = () => {
-      if (settled) return;
-      if (window.YT?.Player) {
-        settleSuccess();
-      } else {
-        window.setTimeout(waitForApi, 50);
-      }
-    };
-
-    timeoutId = window.setTimeout(() => {
-      settleFailure(new Error(`Timed out loading YouTube player API after ${YT_API_TIMEOUT_MS}ms.`));
-    }, YT_API_TIMEOUT_MS);
-
-    waitForApi();
-  });
-
-  return ytApiPromise;
-}
-
-function renderQueryHighlights(text: string, query: string) {
-  const normalizedQuery = query.trim();
-  if (!normalizedQuery) return text;
-
-  const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`(${escapedQuery})`, 'ig');
-  const parts = text.split(regex);
-
-  return parts.map((part, index) => (
-    index % 2 === 1
-      ? <mark key={`${part}-${index}`} className="bg-amber-300/70 px-0.5 text-stone-900">{part}</mark>
-      : <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
-  ));
-}
-
-function appendQuotedText(existing: string, heading: string, text: string) {
-  const cleaned = text.replace(/\s+/g, ' ').trim();
-  if (!cleaned) return existing;
-  const entry = `- "${cleaned.replace(/"/g, '\\"')}"`;
-  const sectionHeader = `## ${heading}`;
-  const trimmed = existing.replace(/\s+$/, '');
-  if (!trimmed) return `${sectionHeader}\n${entry}\n`;
-
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`(^|\\n)## ${escapedHeading}\\n([\\s\\S]*?)(?=\\n## |$)`, 'm');
-  const match = pattern.exec(trimmed);
-  if (!match) return `${trimmed}\n\n${sectionHeader}\n${entry}\n`;
-
-  const prefix = trimmed.slice(0, match.index + match[1].length);
-  const suffix = trimmed.slice(match.index + match[0].length);
-  const existingEntries = match[2]
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (!existingEntries.includes(entry)) existingEntries.push(entry);
-  const rebuiltSection = `${sectionHeader}\n${existingEntries.join('\n')}`;
-  return `${prefix}${rebuiltSection}${suffix ? suffix : ''}`.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-}
-
-function getTextOffset(root: HTMLElement, node: Node, offset: number) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let currentOffset = 0;
-
-  while (walker.nextNode()) {
-    const textNode = walker.currentNode;
-    const length = textNode.textContent?.length || 0;
-
-    if (textNode === node) {
-      return currentOffset + offset;
-    }
-
-    currentOffset += length;
-  }
-
-  return currentOffset;
-}
-
-function shouldIgnorePlayerShortcut(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) return false;
-  const tagName = target.tagName.toLowerCase();
-  return target.isContentEditable || ['input', 'textarea', 'select', 'button'].includes(tagName);
-}
-
-function normalizeTimestampRefList(refs: TimestampRef[]) {
-  return [...refs]
-    .map((ref) => ({
-      id: String(ref.id || ''),
-      seconds: Number.isFinite(ref.seconds) ? Math.max(0, Math.floor(ref.seconds)) : 0,
-      label: String(ref.label || '').trim(),
-      createdAt: Number.isFinite(ref.createdAt) ? Math.floor(ref.createdAt) : 0,
-    }))
-    .sort((a, b) => (a.seconds - b.seconds) || (a.createdAt - b.createdAt) || a.id.localeCompare(b.id));
-}
-
-function timestampRefsEqual(left: TimestampRef[] = [], right: TimestampRef[] = []) {
-  const normalizedLeft = normalizeTimestampRefList(left);
-  const normalizedRight = normalizeTimestampRefList(right);
-  if (normalizedLeft.length !== normalizedRight.length) return false;
-  return normalizedLeft.every((item, index) => {
-    const other = normalizedRight[index];
-    return item.id === other.id
-      && item.seconds === other.seconds
-      && item.label === other.label
-      && item.createdAt === other.createdAt;
-  });
-}
-
-function TimestampMarkerRail({
-  markers,
-  durationSeconds,
-  onDeleteMarker,
-}: {
-  markers: Array<{ id: string; time_seconds: number; time_label: string; preview: string }>;
-  durationSeconds: number;
-  onDeleteMarker: (markerId: string) => void;
-}) {
-  const safeDuration = Math.max(1, Math.floor(durationSeconds || 0));
-  return (
-    <div className="border-t border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2">
-      <div className="relative overflow-visible px-1 py-1">
-        <div className="relative h-4">
-          <div className="absolute inset-x-0 top-1/2 h-[2px] -translate-y-1/2 bg-[var(--border-color)]" />
-          {markers.map((marker) => {
-            const position = Math.min(100, Math.max(0, (marker.time_seconds / safeDuration) * 100));
-            return (
-              <div
-                key={marker.id}
-                className="group absolute top-1/2 -translate-x-1/2 -translate-y-1/2"
-                style={{ left: `${position}%` }}
-              >
-                <button
-                  type="button"
-                  onClick={(event) => event.preventDefault()}
-                  className="h-3 w-3 rounded-full border border-[var(--accent)] bg-[var(--accent)] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                  aria-label={`Timestamp ${marker.time_label}`}
-                  title={`Timestamp ${marker.time_label}`}
-                />
-                <div className="absolute bottom-[calc(100%+8px)] left-1/2 z-20 hidden w-56 -translate-x-1/2 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] p-2 shadow-xl group-hover:block group-focus-within:block">
-                  <div className="text-[11px] font-semibold text-[var(--text-main)]">{marker.time_label}</div>
-                  <div className="mt-1 line-clamp-3 text-[11px] text-[var(--text-muted)]">{marker.preview}</div>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteMarker(marker.id)}
-                    className="mt-2 inline-flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2 py-1 text-[11px] text-[var(--text-main)] hover:border-red-500 hover:text-red-600"
-                    aria-label={`Delete timestamp ${marker.time_label}`}
-                    title={`Delete timestamp ${marker.time_label}`}
-                  >
-                    <Trash2 size={11} />
-                    Delete
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function TranscriptViewer({
-  transcript,
-  query,
-  activeRange,
-  onAddQuote,
-}: {
-  transcript: string;
-  query: string;
-  activeRange: { startIndex: number; endIndex: number } | null;
-  onAddQuote: (selection: { text: string; startIndex: number; endIndex: number }) => void;
-}) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const activeRef = useRef<HTMLSpanElement | null>(null);
-  const [selection, setSelection] = useState<TranscriptSelection | null>(null);
-
-  useEffect(() => {
-    if (activeRef.current) {
-      activeRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
-  }, [activeRange]);
-
-  useEffect(() => {
-    setSelection(null);
-  }, [transcript, query, activeRange]);
-
-  const handleMouseUp = () => {
-    const container = containerRef.current;
-    const currentSelection = window.getSelection();
-    if (!container || !currentSelection || currentSelection.rangeCount === 0) {
-      setSelection(null);
-      return;
-    }
-
-    const selectedText = currentSelection.toString();
-    if (!selectedText.trim()) {
-      setSelection(null);
-      return;
-    }
-
-    const range = currentSelection.getRangeAt(0);
-    if (!container.contains(range.commonAncestorContainer)) {
-      setSelection(null);
-      return;
-    }
-
-    const rect = range.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
-    const startIndex = getTextOffset(container, range.startContainer, range.startOffset);
-    const endIndex = getTextOffset(container, range.endContainer, range.endOffset);
-
-    setSelection({
-      text: selectedText.trim(),
-      startIndex,
-      endIndex,
-      top: rect.top - containerRect.top + container.scrollTop - 34,
-      left: Math.max(0, rect.left - containerRect.left + container.scrollLeft),
-    });
-  };
-
-  const content = useMemo(() => {
-    if (!activeRange || activeRange.endIndex <= activeRange.startIndex) {
-      return renderQueryHighlights(transcript, query);
-    }
-
-    const before = transcript.slice(0, activeRange.startIndex);
-    const selected = transcript.slice(activeRange.startIndex, activeRange.endIndex);
-    const after = transcript.slice(activeRange.endIndex);
-
-    return (
-      <>
-        {renderQueryHighlights(before, query)}
-        <mark ref={activeRef} className="bg-[var(--accent)]/25 px-0.5 text-[var(--text-main)] ring-1 ring-[var(--accent)]">
-          {selected}
-        </mark>
-        {renderQueryHighlights(after, query)}
-      </>
-    );
-  }, [activeRange, query, transcript]);
-
-  return (
-    <div className="relative">
-      <div
-        ref={containerRef}
-        onMouseUp={handleMouseUp}
-        className="min-h-[14rem] whitespace-pre-wrap rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)]"
-      >
-        {content || <span className="text-[var(--text-muted)]">No transcript was imported for this video.</span>}
-      </div>
-
-      {selection && (
-        <button
-          type="button"
-          onClick={() => {
-            onAddQuote(selection);
-            setSelection(null);
-            window.getSelection()?.removeAllRanges();
-          }}
-          className="absolute z-20 inline-flex h-7 w-7 items-center justify-center border border-[var(--accent)] bg-[var(--accent)] text-white shadow-lg"
-          style={{ top: `${Math.max(0, selection.top)}px`, left: `${selection.left}px` }}
-          title="Add selected quote to notes"
-        >
-          <Plus size={14} />
-        </button>
-      )}
-    </div>
-  );
-}
-
-function InputRow({
-  icon,
-  value,
-  onChange,
-  placeholder,
-  onSubmit,
-  inputRef,
-  variant = 'boxed',
-}: {
-  icon: React.ReactNode;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-  onSubmit?: () => void;
-  inputRef?: React.RefObject<HTMLInputElement | null>;
-  variant?: 'boxed' | 'flat' | 'panel';
-}) {
-  const formClassName = variant === 'flat'
-    ? 'flex items-center gap-2 px-0 py-2'
-    : variant === 'panel'
-      ? 'flex min-w-0 flex-1 items-center gap-2 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2'
-      : 'flex items-center gap-2 border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2';
-
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        onSubmit?.();
-      }}
-      onMouseDownCapture={(event) => event.stopPropagation()}
-      onPointerDownCapture={(event) => event.stopPropagation()}
-      onClickCapture={(event) => event.stopPropagation()}
-      className={formClassName}
-    >
-      <span className="text-[var(--text-muted)]">{icon}</span>
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        onMouseDownCapture={(event) => event.stopPropagation()}
-        onPointerDownCapture={(event) => event.stopPropagation()}
-        onClickCapture={(event) => event.stopPropagation()}
-        placeholder={placeholder}
-        autoFocus={Boolean(inputRef)}
-        className="w-full bg-transparent text-[13px] leading-5 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
-      />
-    </form>
-  );
-}
-
-function NotesPreview({
-  quoteRefs,
-  onQuoteClick,
-}: {
-  quoteRefs: QuoteRef[];
-  onQuoteClick: (quote: QuoteRef) => void;
-}) {
-  if (quoteRefs.length === 0) return null;
-
-  return (
-    <div className="space-y-3 pt-2">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Interactive note links</div>
-
-      <div className="space-y-2">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">Quotes</div>
-        <div className="space-y-1.5">
-          {quoteRefs.map((quote) => (
-            <button
-              key={quote.id}
-              type="button"
-              onClick={() => onQuoteClick(quote)}
-              className="block w-full border-b border-[var(--border-color)]/60 px-0 py-1.5 text-left text-[13px] leading-5 text-[var(--text-main)] hover:text-[var(--accent)]"
-            >
-              {`"${quote.text}"`}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function DetailPanel({
   row,
   annotation,
@@ -504,6 +70,7 @@ export default function DetailPanel({
   onBatchRemoveTag,
   onBatchApplyNotes,
   onBatchExclude,
+  inclusionView = 'included',
   onBatchCopySelection,
   isBatchTagging = false,
   onWatchSession,
@@ -516,28 +83,18 @@ export default function DetailPanel({
   };
 
   const hasMultiSelection = selectedCount > 1;
+  const isExcludedView = inclusionView === 'excluded';
   const effectiveRow = hasMultiSelection ? null : row;
   const videoId = effectiveRow ? resolveVideoId(effectiveRow) : null;
   const [tagInput, setTagInput] = useState('');
-  const [batchTagInput, setBatchTagInput] = useState('');
-  const [batchNotesDraft, setBatchNotesDraft] = useState('');
-  const [isBatchCopyMenuOpen, setIsBatchCopyMenuOpen] = useState(false);
-  const [batchCopyFeedback, setBatchCopyFeedback] = useState<{ status: BatchCopyFeedbackStatus; message: string } | null>(null);
-  const [batchNotesFeedback, setBatchNotesFeedback] = useState<{ status: BatchCopyFeedbackStatus; message: string } | null>(null);
   const [detailMode, setDetailMode] = useState<DetailMode>('description');
   const [transcriptSearch, setTranscriptSearch] = useState('');
   const [isEditingTranscript, setIsEditingTranscript] = useState(false);
   const [transcriptEditValue, setTranscriptEditValue] = useState('');
   const [activeRange, setActiveRange] = useState<{ startIndex: number; endIndex: number } | null>(null);
-  const playerShellRef = useRef<HTMLDivElement | null>(null);
-  const playerFrameRef = useRef<HTMLDivElement | null>(null);
-  const playerRef = useRef<any>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionRef = useRef<HTMLDivElement | null>(null);
-  const [playerDuration, setPlayerDuration] = useState(0);
-  const [playerState, setPlayerState] = useState<number | null>(null);
-  const [playerLoadError, setPlayerLoadError] = useState<string | null>(null);
   const [notesDraft, setNotesDraft] = useState('');
   const [isNotesDirty, setIsNotesDirty] = useState(false);
   const [timestampUndoState, setTimestampUndoState] = useState<TimestampUndoState | null>(null);
@@ -560,27 +117,6 @@ export default function DetailPanel({
   const notesDraftRef = useRef('');
   const isNotesDirtyRef = useRef(false);
   const activeVideoIdRef = useRef<string | null>(null);
-  const watchSessionRef = useRef<{
-    videoId: string | null;
-    title: string;
-    startedAtMs: number | null;
-    accumulatedSeconds: number;
-    segmentStartedAtMs: number | null;
-    segmentStartedPlayerSeconds: number | null;
-    durationSeconds: number | null;
-  }>({
-    videoId: null,
-    title: '',
-    startedAtMs: null,
-    accumulatedSeconds: 0,
-    segmentStartedAtMs: null,
-    segmentStartedPlayerSeconds: null,
-    durationSeconds: null,
-  });
-  const batchTagInputRef = useRef<HTMLInputElement | null>(null);
-  const batchCopyMenuRef = useRef<HTMLDivElement | null>(null);
-  const batchCopyButtonRef = useRef<HTMLButtonElement | null>(null);
-  const previousMultiSelectionKeyRef = useRef(batchSelectionKey);
 
   useEffect(() => {
     setDetailMode('description');
@@ -589,64 +125,6 @@ export default function DetailPanel({
     setActiveRange(null);
     setIsEditingTranscript(false);
   }, [hasMultiSelection, videoId]);
-
-  useEffect(() => {
-    if (previousMultiSelectionKeyRef.current !== batchSelectionKey) {
-      setBatchTagInput('');
-      setBatchNotesDraft('');
-      setIsBatchCopyMenuOpen(false);
-      setBatchCopyFeedback(null);
-      setBatchNotesFeedback(null);
-      previousMultiSelectionKeyRef.current = batchSelectionKey;
-    }
-  }, [batchSelectionKey]);
-
-  useEffect(() => {
-    if (!hasMultiSelection) {
-      setBatchNotesDraft('');
-      setIsBatchCopyMenuOpen(false);
-      setBatchCopyFeedback(null);
-      setBatchNotesFeedback(null);
-    }
-  }, [hasMultiSelection]);
-
-  useEffect(() => {
-    if (!isBatchCopyMenuOpen) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      const insideMenu = !!batchCopyMenuRef.current && batchCopyMenuRef.current.contains(target);
-      const insideButton = !!batchCopyButtonRef.current && batchCopyButtonRef.current.contains(target);
-      if (!insideMenu && !insideButton) {
-        setIsBatchCopyMenuOpen(false);
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsBatchCopyMenuOpen(false);
-      }
-    };
-
-    window.addEventListener('mousedown', handlePointerDown);
-    window.addEventListener('keydown', handleEscape);
-    return () => {
-      window.removeEventListener('mousedown', handlePointerDown);
-      window.removeEventListener('keydown', handleEscape);
-    };
-  }, [isBatchCopyMenuOpen]);
-
-  useEffect(() => {
-    if (!batchCopyFeedback) return;
-    const timeout = window.setTimeout(() => setBatchCopyFeedback(null), 2500);
-    return () => window.clearTimeout(timeout);
-  }, [batchCopyFeedback]);
-
-  useEffect(() => {
-    if (!batchNotesFeedback) return;
-    const timeout = window.setTimeout(() => setBatchNotesFeedback(null), 2500);
-    return () => window.clearTimeout(timeout);
-  }, [batchNotesFeedback]);
 
   useEffect(() => {
     if (hasMultiSelection || !row || !openAnnotateRequestKey) return;
@@ -660,72 +138,29 @@ export default function DetailPanel({
     return base == null ? '' : String(base);
   }, [effectiveRow]);
   const videoTitle = useMemo(() => resolveVideoTitle(effectiveRow), [effectiveRow]);
+  const {
+    playerShellRef,
+    playerFrameRef,
+    playerRef,
+    playerState,
+    playerDuration,
+    playerLoadError,
+  } = useYouTubePlayer({ enabled: !hasMultiSelection, videoId, videoTitle, onWatchSession });
   const currentNotes = savedNotes || '';
+  // The player's duration once loaded; until then the row's, so clock times in descriptions aren't linked.
+  const videoLengthSeconds = playerDuration || parseDurationToSeconds(effectiveRow?.durationSec ?? effectiveRow?.duration) || null;
+  /** Jumps the embedded player to `seconds` and plays, e.g. from a timestamp in the description. */
+  const seekToSeconds = useCallback((seconds: number) => {
+    const player = playerRef.current;
+    if (!player?.seekTo) return;
+    player.seekTo(seconds, true);
+    player.playVideo?.();
+    playerShellRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [playerRef, playerShellRef]);
   const parsedTimestampDocument = useMemo(
     () => parseTimestampDocument(notesDraft, annotation?.timestampRefs || [], playerDuration),
     [annotation?.timestampRefs, notesDraft, playerDuration],
   );
-
-  const closeActiveWatchSegment = (player?: any) => {
-    const session = watchSessionRef.current;
-    if (session.segmentStartedAtMs === null) return;
-    const nowMs = Date.now();
-    const currentPlayerSeconds = Number(player?.getCurrentTime?.() ?? Number.NaN);
-    const hasPlayerDelta = Number.isFinite(currentPlayerSeconds) && session.segmentStartedPlayerSeconds !== null;
-    const delta = hasPlayerDelta
-      ? Math.max(0, currentPlayerSeconds - Number(session.segmentStartedPlayerSeconds))
-      : Math.max(0, (nowMs - session.segmentStartedAtMs) / 1000);
-    session.accumulatedSeconds += delta;
-    session.segmentStartedAtMs = null;
-    session.segmentStartedPlayerSeconds = null;
-  };
-
-  const flushWatchSession = (player?: any) => {
-    const session = watchSessionRef.current;
-    closeActiveWatchSegment(player);
-    if (!session.videoId || session.startedAtMs === null || session.accumulatedSeconds <= 0) {
-      watchSessionRef.current = {
-        videoId: null,
-        title: '',
-        startedAtMs: null,
-        accumulatedSeconds: 0,
-        segmentStartedAtMs: null,
-        segmentStartedPlayerSeconds: null,
-        durationSeconds: null,
-      };
-      return;
-    }
-
-    const durationSeconds = session.durationSeconds && session.durationSeconds > 0
-      ? session.durationSeconds
-      : null;
-    const watchedSeconds = Number(session.accumulatedSeconds.toFixed(1));
-    const qualifies = watchedSeconds > 30 || (
-      durationSeconds !== null
-      && durationSeconds <= 30
-      && watchedSeconds >= Math.max(durationSeconds * 0.9, durationSeconds - 1)
-    );
-
-    onWatchSession?.({
-      videoId: session.videoId,
-      title: session.title || 'Untitled Video',
-      startedAt: new Date(session.startedAtMs).toISOString(),
-      endedAt: new Date().toISOString(),
-      watchedSeconds,
-      durationSeconds,
-      qualifies,
-    });
-
-    watchSessionRef.current = {
-      videoId: null,
-      title: '',
-      startedAtMs: null,
-      accumulatedSeconds: 0,
-      segmentStartedAtMs: null,
-      segmentStartedPlayerSeconds: null,
-      durationSeconds: null,
-    };
-  };
 
   const setNotesDraftState = useCallback((nextNotes: string, dirty: boolean) => {
     setNotesDraft(nextNotes);
@@ -734,11 +169,11 @@ export default function DetailPanel({
     setIsNotesDirty(dirty);
   }, []);
 
-  const flushNotesDraft = (targetVideoId: string | null, nextValue?: string) => {
+  const flushNotesDraft = useCallback((targetVideoId: string | null, nextValue?: string) => {
     if (!targetVideoId) return;
     const value = nextValue ?? notesDraftRef.current;
     onUpdateNotes(targetVideoId, value);
-  };
+  }, [onUpdateNotes]);
 
   const clearTimestampUndo = useCallback(() => {
     if (timestampUndoTimeoutRef.current !== null) {
@@ -790,13 +225,7 @@ export default function DetailPanel({
     });
     clearTimestampUndo();
     applyTimestampMutation(result.notes, result.timestampRefs, { cursorPosition: result.cursorPosition });
-  }, [
-    applyTimestampMutation,
-    clearTimestampUndo,
-    parsedTimestampDocument.timestampRefs,
-    playerDuration,
-    videoId,
-  ]);
+  }, [applyTimestampMutation, clearTimestampUndo, parsedTimestampDocument.timestampRefs, playerDuration, playerRef, videoId]);
 
   const handleDeleteTimestamp = useCallback((entryId: string) => {
     if (!videoId) return;
@@ -844,7 +273,7 @@ export default function DetailPanel({
     }
 
     activeVideoIdRef.current = videoId;
-  }, [videoId, currentNotes, onUpdateNotes, setNotesDraftState]);
+  }, [videoId, currentNotes, flushNotesDraft, setNotesDraftState]);
 
   useEffect(() => {
     if (activeVideoIdRef.current === videoId && !isNotesDirtyRef.current && notesDraftRef.current !== currentNotes) {
@@ -887,13 +316,13 @@ export default function DetailPanel({
       setIsNotesDirty(false);
     }, 450);
     return () => window.clearTimeout(timeout);
-  }, [videoId, isNotesDirty, onUpdateNotes]);
+  }, [videoId, isNotesDirty, flushNotesDraft]);
 
   useEffect(() => () => {
     if (activeVideoIdRef.current && isNotesDirtyRef.current) {
       flushNotesDraft(activeVideoIdRef.current);
     }
-  }, [onUpdateNotes]);
+  }, [flushNotesDraft]);
 
   useEffect(() => {
     if (!isEditingTranscript) {
@@ -909,109 +338,6 @@ export default function DetailPanel({
     if (!isEditingTranscript) return;
     autoSizeTextarea(transcriptTextareaRef.current);
   }, [autoSizeTextarea, isEditingTranscript, transcriptEditValue, videoId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    flushWatchSession(playerRef.current);
-    setPlayerDuration(0);
-    setPlayerLoadError(null);
-
-    if (hasMultiSelection || !videoId || !playerShellRef.current) {
-      playerRef.current?.destroy?.();
-      playerRef.current = null;
-      setPlayerState(null);
-      setPlayerDuration(0);
-      return;
-    }
-
-    loadYouTubeApi().then((YT) => {
-      if (cancelled || !playerShellRef.current) return;
-
-      playerRef.current?.destroy?.();
-      playerRef.current = null;
-      playerShellRef.current.innerHTML = '';
-
-      const mountNode = document.createElement('div');
-      mountNode.style.width = '100%';
-      mountNode.style.height = '100%';
-      mountNode.className = 'yt-player-host';
-      playerShellRef.current.appendChild(mountNode);
-
-      playerRef.current = new YT.Player(mountNode, {
-        width: '100%',
-        height: '100%',
-        videoId,
-        playerVars: {
-          rel: 0,
-          modestbranding: 1,
-          playsinline: 1,
-        },
-        events: {
-          onReady: (event: any) => {
-            setPlayerLoadError(null);
-            const duration = Number(event.target?.getDuration?.() || 0);
-            setPlayerDuration(Number.isFinite(duration) ? Math.max(0, Math.floor(duration)) : 0);
-            setPlayerState(Number(event.target?.getPlayerState?.() ?? null));
-            watchSessionRef.current.durationSeconds = Number.isFinite(duration) ? duration : null;
-            const iframe = event.target?.getIframe?.();
-            if (iframe) {
-              iframe.style.width = '100%';
-              iframe.style.height = '100%';
-              iframe.style.position = 'absolute';
-              iframe.style.inset = '0';
-              iframe.style.border = '0';
-            }
-            playerFrameRef.current?.setAttribute('tabindex', '-1');
-          },
-          onStateChange: (event: any) => {
-            const duration = Number(event.target?.getDuration?.() || 0);
-            setPlayerDuration(Number.isFinite(duration) ? Math.max(0, Math.floor(duration)) : 0);
-            const nextState = Number(event?.data ?? event.target?.getPlayerState?.() ?? null);
-            setPlayerState(nextState);
-            watchSessionRef.current.durationSeconds = Number.isFinite(duration) ? duration : null;
-
-            const ytState = window.YT?.PlayerState;
-            const session = watchSessionRef.current;
-            if (nextState === ytState?.PLAYING) {
-              if (!session.videoId) {
-                session.videoId = videoId;
-                session.title = videoTitle;
-                session.startedAtMs = Date.now();
-                session.accumulatedSeconds = 0;
-              }
-              if (session.segmentStartedAtMs === null) {
-                session.segmentStartedAtMs = Date.now();
-                const playerSeconds = Number(event.target?.getCurrentTime?.() ?? Number.NaN);
-                session.segmentStartedPlayerSeconds = Number.isFinite(playerSeconds) ? playerSeconds : null;
-              }
-              window.setTimeout(() => playerFrameRef.current?.focus({ preventScroll: true }), 0);
-            } else {
-              closeActiveWatchSegment(event.target);
-              if (nextState === ytState?.PAUSED || nextState === ytState?.ENDED) {
-                flushWatchSession(event.target);
-              }
-            }
-
-            const iframe = event.target?.getIframe?.();
-            if (iframe) {
-              iframe.style.width = '100%';
-              iframe.style.height = '100%';
-            }
-          },
-        },
-      });
-    }).catch((error) => {
-      console.error('Failed to initialize YouTube player', error);
-      setPlayerLoadError('Unable to load the YouTube player. Check browser tracking/privacy settings and reload the page.');
-    });
-
-    return () => {
-      cancelled = true;
-      flushWatchSession(playerRef.current);
-      playerRef.current?.destroy?.();
-      playerRef.current = null;
-    };
-  }, [hasMultiSelection, onWatchSession, videoId, videoTitle]);
 
   useEffect(() => {
     if (hasMultiSelection || !videoId) return;
@@ -1082,184 +408,22 @@ export default function DetailPanel({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleAddTimestamp, hasMultiSelection, playerState, videoId]);
-
+  }, [handleAddTimestamp, hasMultiSelection, playerFrameRef, playerRef, playerState, videoId]);
 
   if (hasMultiSelection) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]">
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
-          <div className="space-y-6 p-6">
-            <section
-              className="space-y-3 border border-[var(--border-color)] bg-[var(--bg-primary)] p-4"
-              onMouseDownCapture={(event) => event.stopPropagation()}
-              onPointerDownCapture={(event) => event.stopPropagation()}
-              onMouseDown={(event) => event.stopPropagation()}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <div>
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Batch actions</div>
-                <div className="mt-1 text-sm font-medium text-[var(--text-main)]">{selectedCount.toLocaleString()} videos selected</div>
-                <p className="mt-2 text-xs text-[var(--text-muted)]">Tag selected videos, copy video or channel IDs/URLs, or exclude the current selection (Ctrl/Cmd + Delete).</p>
-              </div>
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_auto_auto]">
-                <InputRow
-                  icon={<Tag size={14} />}
-                  value={batchTagInput}
-                  onChange={setBatchTagInput}
-                  placeholder="Add tag to selected videos"
-                  onSubmit={submitBatchTag}
-                  inputRef={batchTagInputRef}
-                />
-                <button
-                  type="button"
-                  onClick={submitBatchTag}
-                  disabled={!batchTagInput.trim() || isBatchTagging}
-                  className="shrink-0 border border-[var(--accent)] bg-[var(--accent)] px-3 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                  title="Apply tag to selected videos"
-                >
-                  {isBatchTagging ? 'Applying…' : 'Apply tag'}
-                </button>
-                <button
-                  type="button"
-                  onClick={submitBatchExclude}
-                  disabled={selectedCount === 0 || !onBatchExclude}
-                  className="shrink-0 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 text-[12px] font-medium text-[var(--text-main)] transition-colors hover:border-red-500 hover:text-red-600 disabled:opacity-50"
-                  title="Exclude selected videos"
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <Ban size={13} />
-                    Exclude
-                  </span>
-                </button>
-                <div className="relative shrink-0">
-                  <button
-                    ref={batchCopyButtonRef}
-                    type="button"
-                    onClick={() => {
-                      if (selectedCount === 0 || !onBatchCopySelection) return;
-                      setIsBatchCopyMenuOpen((current) => !current);
-                    }}
-                    disabled={selectedCount === 0 || !onBatchCopySelection}
-                    className="inline-flex items-center gap-1.5 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-[12px] font-medium text-[var(--text-main)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
-                    title="Copy comma-separated values from current selection"
-                    aria-label="Copy selected values"
-                    aria-expanded={isBatchCopyMenuOpen}
-                  >
-                    <Copy size={13} />
-                    Copy
-                    <ChevronDown size={12} className={isBatchCopyMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                  </button>
-                  {isBatchCopyMenuOpen && (
-                    <div
-                      ref={batchCopyMenuRef}
-                      className="absolute right-0 top-full z-30 mt-1 w-48 border border-[var(--border-color)] bg-[var(--bg-primary)] p-1 shadow-xl"
-                    >
-                      {BATCH_COPY_OPTIONS.map((option) => (
-                        <button
-                          key={option.mode}
-                          type="button"
-                          onClick={() => {
-                            void submitBatchCopy(option.mode);
-                          }}
-                          className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
-                        >
-                          <Copy size={12} className="shrink-0 text-[var(--text-muted)]" />
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2 border-t border-[var(--border-color)] pt-3">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">
-                  Shared tags across selection
-                </div>
-                {batchSharedTags.length > 0 ? (
-                  <div className="flex min-h-[1.75rem] flex-wrap gap-2">
-                    {batchSharedTags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-secondary)] px-2.5 py-1 text-[11px] text-[var(--text-main)]"
-                      >
-                        <span>{tag}</span>
-                        <button
-                          type="button"
-                          onClick={() => onBatchRemoveTag?.(tag)}
-                          disabled={!onBatchRemoveTag || isBatchTagging}
-                          className="text-[var(--text-muted)] transition-colors hover:text-red-500 disabled:opacity-50"
-                          title={`Remove ${tag} from all selected rows`}
-                          aria-label={`Remove ${tag} from all selected rows`}
-                        >
-                          <X size={10} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-[var(--text-muted)]">
-                    No shared user tags across the current selection.
-                  </p>
-                )}
-              </div>
-              {batchCopyFeedback && (
-                <p
-                  className={[
-                    'text-[11px]',
-                    batchCopyFeedback.status === 'success'
-                      ? 'text-[var(--accent)]'
-                      : batchCopyFeedback.status === 'error'
-                        ? 'text-red-500'
-                        : 'text-[var(--text-muted)]',
-                  ].join(' ')}
-                >
-                  {batchCopyFeedback.message}
-                </p>
-              )}
-            </section>
-
-            <section className="space-y-3 border border-[var(--border-color)] bg-[var(--bg-primary)] p-4">
-              <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Batch video notes</div>
-              <p className="text-xs text-[var(--text-muted)]">Apply the same note block to all selected videos.</p>
-              <textarea
-                value={batchNotesDraft}
-                onChange={(event) => setBatchNotesDraft(event.target.value)}
-                placeholder="Apply the same note block to all selected videos..."
-                className="custom-scrollbar min-h-[9rem] w-full border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 font-mono text-[12px] leading-5 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:outline-none"
-              />
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={() => { void submitBatchNotes(); }}
-                  disabled={!batchNotesDraft.trim() || !onBatchApplyNotes}
-                  className="shrink-0 border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                >
-                  Apply to selected videos
-                </button>
-              </div>
-              {batchNotesFeedback ? (
-                <p
-                  className={[
-                    'text-[11px]',
-                    batchNotesFeedback.status === 'success'
-                      ? 'text-[var(--accent)]'
-                      : batchNotesFeedback.status === 'error'
-                        ? 'text-red-500'
-                        : 'text-[var(--text-muted)]',
-                  ].join(' ')}
-                >
-                  {batchNotesFeedback.message}
-                </p>
-              ) : null}
-            </section>
-
-            <div className="border border-[var(--border-color)] bg-[var(--bg-primary)] p-4 text-sm text-[var(--text-muted)]">
-              Select a single row to return to the video detail view.
-            </div>
-          </div>
-        </div>
-      </div>
+      <BatchSelectionPanel
+        selectedCount={selectedCount}
+        batchSelectionKey={batchSelectionKey}
+        isExcludedView={isExcludedView}
+        batchSharedTags={batchSharedTags}
+        isBatchTagging={isBatchTagging}
+        onBatchAddTag={onBatchAddTag}
+        onBatchRemoveTag={onBatchRemoveTag}
+        onBatchApplyNotes={onBatchApplyNotes}
+        onBatchExclude={onBatchExclude}
+        onBatchCopySelection={onBatchCopySelection}
+      />
     );
   }
 
@@ -1299,32 +463,9 @@ export default function DetailPanel({
     setDetailMode('annotate');
   };
 
-  function submitBatchTag() {
-    const trimmed = batchTagInput.trim();
-    if (!trimmed || selectedCount === 0 || !onBatchAddTag) return;
-    onBatchAddTag(trimmed);
-    setBatchTagInput('');
-    window.requestAnimationFrame(() => batchTagInputRef.current?.focus());
-  }
 
-  function submitBatchExclude() {
-    if (selectedCount === 0 || !onBatchExclude) return;
-    onBatchExclude();
-  }
 
-  async function submitBatchCopy(mode: BatchCopyExportMode) {
-    if (selectedCount === 0 || !onBatchCopySelection) return;
-    const result = await onBatchCopySelection(mode);
-    setBatchCopyFeedback({ status: result.status, message: result.message });
-    setIsBatchCopyMenuOpen(false);
-  }
 
-  async function submitBatchNotes() {
-    if (selectedCount === 0 || !onBatchApplyNotes) return;
-    const result = await onBatchApplyNotes(batchNotesDraft);
-    setBatchNotesFeedback({ status: result.status, message: result.message });
-    if (result.status === 'success') setBatchNotesDraft('');
-  }
 
   const removeTag = (tagToRemove: string) => {
     if (!videoId) return;
@@ -1422,6 +563,7 @@ export default function DetailPanel({
             markers={timestampEntries}
             durationSeconds={markerDurationSeconds}
             onDeleteMarker={handleDeleteTimestamp}
+            onSeekMarker={seekToSeconds}
           />
         )}
       </div>
@@ -1497,7 +639,9 @@ export default function DetailPanel({
                     ) : null}
                   </div>
                   <div ref={descriptionRef} className="min-h-[14rem] whitespace-pre-wrap rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)]">
-                    {description || <span className="text-[var(--text-muted)]">No video description was imported for this video.</span>}
+                    {description
+                      ? <TimestampText text={description} onSeek={seekToSeconds} maxSeconds={videoLengthSeconds} />
+                      : <span className="text-[var(--text-muted)]">No video description was imported for this video.</span>}
                   </div>
                 </div>
               </>
@@ -1558,6 +702,8 @@ export default function DetailPanel({
                     query={transcriptSearch}
                     activeRange={activeRange}
                     onAddQuote={addQuoteFromSelection}
+                    onSeek={seekToSeconds}
+                    maxSeconds={videoLengthSeconds}
                   />
                 )}
               </div>
@@ -1673,6 +819,8 @@ export default function DetailPanel({
                   <NotesPreview
                     quoteRefs={quoteRefs}
                     onQuoteClick={handleQuoteClick}
+                    timestamps={timestampEntries}
+                    onTimestampClick={seekToSeconds}
                   />
                 </div>
               </div>

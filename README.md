@@ -8,7 +8,9 @@ Playlist Surfer is a React/TS research tool for analyzing CSV-based video and ch
 - Merge with metadata from your own analysis' CSV files, for example generated with [4CAT](https://4cat.digitalmethods.net/create-dataset/)
 - Filter, sort, and compare rows quickly
 - Switch between video view and channel view
-- Open dashboards for overview, content, attention, linking, and thumbnails
+- Switch the videos explorer between a table and a thumbnail grid
+- Reads YouTube Data Tools video exports including the Shorts flag (`isShort`) and the per-video channel metadata columns (`channel_subscriberCount`, `channel_publishedAt`, …): Shorts appear in the overview, channel fields fill the Channels view, and the Attention tab can rank views per subscriber
+- Dashboards organised by research question: Overview, Attention, Vernacular, Time and Links
 - Add notes, tags, and quotes while reviewing data
 - Review links, domains, and channel metadata
 - Save your work and export the project as a zip archive
@@ -71,10 +73,16 @@ Enter Playlist Surfer, a lightweight browser application for inspecting CSV-base
 - Video and channel views with linked navigation between rows, detail panels, and dashboards
 - Notes, tags, transcript quotes, description quotes, and channel-level annotations for close reading alongside quantitative analysis
 - Linking analysis that extracts and classifies URLs/domains from source columns, supports domain overrides, and produces ecology-focused summaries
-- Overview, attention, content, linking, and thumbnail dashboards that can switch between whole-dataset and filtered scopes
-- Thumbnail loading, zooming, and browsing for both filtered subsets and whole-dataset views
+- Dashboards for the whole dataset or the filtered view, each comparable with the whole dataset or a saved view (shares side by side, ratio and log-likelihood significance):
+  - **Overview**: summary, headline numbers, uploads, length, views, categories, languages, data health
+  - **Attention**: concentration curves and Gini, views vs engagement, breakout videos against their channel's norm
+  - **Vernacular**: title words and phrases, hashtags, tags and topics, with per-language stopwords, project-level hidden terms, word clouds and a tag/hashtag co-occurrence network (GEXF export for Gephi)
+  - **Time**: publishing rhythm (UTC or local), views by publish date, channel activity and terms over time
+  - **Links**: link ecology of descriptions, top sites, linking strategies, editable domain buckets
+- Every dashboard panel has a method note (how it is computed, how to read it, what to watch out for) and exports to CSV, PNG and SVG
+- A thumbnail view of the explorer: the table's filtered and sorted rows as a zoomable image grid, sharing its selection, Delete/undo and keyboard navigation
 - Channel metadata aggregation, channel age timelines, and channel-level batch actions
-- Research log and project history tracking so analytic steps, comments, and exports remain auditable
+- A research log: a timeline of what was done to the data (undone steps left out) next to your own notes, a watch summary, and a Markdown export for the methods section
 - Project export/import as a zip archive for reproducibility, sharing, and later restoration
 
 ## Getting Started
@@ -98,6 +106,49 @@ npm run dev
 
 The Vite dev server starts on port `3000` by default.
 
+### Checks and tests
+
+| Command | What it does |
+|---|---|
+| `npm run check` | Typecheck, lint, unit tests and production build: run before every commit |
+| `npm test` | Unit tests (Vitest), in `src/lib/__tests__/` |
+| `npm run test:e2e` | Browser tests (Playwright), in `e2e/`. Run `npx playwright install chromium` once first |
+| `npm run lint` | ESLint, including React hook dependency checks (enforced as errors) |
+
+GitHub Actions runs all of these on every pull request (`.github/workflows/ci.yml`).
+
+Performance measurements are opt-in. They use a production build and synthetic datasets:
+
+```bash
+node scripts/generate-perf-fixture.mjs 100000
+```
+
+```bash
+PERF=1 PERF_ROWS=10000,100000 npx playwright test --config playwright.perf.config.ts e2e/perf.spec.ts
+```
+
+## Where your data lives
+
+Everything stays in your browser; nothing is uploaded.
+
+- **The dataset** is saved in IndexedDB in 1,000-row chunks, and reopened automatically on your next visit.
+- **Your curation** (exclusions, notes, tags, saved views, research log) is saved in IndexedDB too.
+- **To keep or share a project**, use *Export → Full project backup*. The zip restores everything, including in another browser.
+
+Clearing site data in the browser deletes the autosave, so export a backup for anything you want to keep.
+
+## Project structure
+
+| Path | Contents |
+|---|---|
+| `src/App.tsx` | App shell: wires state slices to the layout |
+| `src/state/` | State hooks per domain: inclusion, import flow, persistence, navigation, channels, linking, dialogs, research history |
+| `src/lib/` | Pure, unit-tested logic: data pipeline, filters, import/merge plans, restore, linking, dashboards, shortcuts |
+| `src/components/` | UI: grid (`MetadataGrid`), panels (`DetailPanel`, `ChannelSummaryPanel`), `dialogs/`, `dashboard/`, `layout/`, `toast/` |
+| `src/worker/` | DuckDB-WASM worker used to parse CSV files |
+| `e2e/` | Playwright tests; `e2e/fixtures/playlist61.csv` is a real YouTube Data Tools export used as the fixture |
+| `docs/REFACTOR_PLAN.md` | Refactor history, the bugs found and fixed, and performance measurements |
+
 ## Tech Stack
 
 - React 19
@@ -108,3 +159,4 @@ The Vite dev server starts on port `3000` by default.
 - Motion
 - Lucide React
 - Tailwind CSS via `@tailwindcss/vite`
+- Vitest and Playwright

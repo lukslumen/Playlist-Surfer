@@ -1,1142 +1,84 @@
-import { useState, useCallback, useEffect, useRef, useMemo, useReducer, useTransition } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo, useReducer, useTransition } from 'react';
 import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
-import { motion, AnimatePresence } from 'motion/react';
 import { useDuckDB } from './hooks/useDuckDB';
-import {
-  AppState,
-  ChannelLinkingState,
-  ColumnSchema,
-  ColumnLineageState,
-  SavedView,
-  Annotation,
-  IncludeExcludeAction,
-  InclusionView,
-  ExportOptions,
-  ProjectArchiveManifest,
-  ImportSubmission,
-  SpecialMappings,
-  DashboardScope,
-  DashboardTemplateTab,
-  DashboardThumbnailArchiveEntry,
-  DashboardThumbnailCacheIndex,
-  DashboardThumbnailCacheSnapshot,
-  DashboardThumbnailLoadProgress,
-  DashboardThumbnailSortRule,
-  DatasetDashboardSnapshot,
-  ExcludedVideoMeta,
-  ChannelMetadataSnapshot,
-  ChannelMetadataRelationshipType,
-  ImportedChannelMetadataState,
-  ResearchHistoryEvent,
-  ResearchLogCommentSectionId,
-  ResearchLogMarkdownOptions,
-  SavedViewDashboardSnapshot,
-  ViewScope,
-  WatchHistoryEntry,
-  SourceRegistryState,
-  SourceVisibilityState,
-  RowLineageState,
-  GeneratedMetadataState,
-  LinkingDomainOverride,
-  LinkingState,
-  LinkingGeneratedRowMetadata,
-  LongTaskProgress,
-  SourceKind,
-} from './types';
-import {
-  EMPTY_EXPLORER_SELECTION,
-  EMPTY_SCOPE_SELECTION,
-  clearScopeSelectionAction,
-  getScopeSelection,
-  pruneScopeSelectionAction,
-  selectionReducer,
-  setScopeSelectionAction,
-  type ScopeSelectionState,
-  type ScopeSelectionUpdate,
-} from './lib/selectionState';
+import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, ExplorerLayout, GridSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
+import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import { ExportDialog, ColumnVisibilitySelector, ResearchLogDialog, ImportDialog, DatasetDashboardDialog, KeyboardShortcutsDialog, CommandPaletteDialog } from './components/Dialogs';
-import {
-  applyFriendlyColumnMappings,
-  applyMerge,
-  buildBatchCopyClipboardPayload,
-  buildChannelMetadataRows,
-  buildImportedChannelMetadataState,
-  buildDisplayRows,
-  buildDisplaySchema,
-  buildResearchLogMarkdown,
-  collectVideoIds,
-  convertRowsToCsv,
-  createProjectManifest,
-  deleteColumnFromProject,
-  deriveSchemaFromRows,
-  partitionRowsByInclusion,
-  detectSpecialMappings,
-  downloadBlob,
-  cleanupAutoSeededResearchDiary,
-  detectImportKind,
-  NOTES_COLUMN,
-  formatDateDisplay,
-  isDurationColumn,
-  resolveTagFilterColumn,
-  resolveChannelId,
-  resolveChannelName,
-  detectIncomingChannelIdColumn,
-  detectIncomingChannelTitleColumn,
-  resolveTranscript,
-  resolveVideoTitle,
-  resolveVideoId,
-  sanitizeFileName,
-  stripDeletedColumnsFromRows,
-  stripDeletedColumnsFromSchema,
-  mergeChannelMetadataRows,
-  buildGeneratedMetadataSchema,
-  overlayGeneratedMetadataRows,
-  TRANSCRIPT_COLUMN,
-  USER_TAGS_COLUMN,
-  VIDEO_DESCRIPTION_COLUMN,
-  type BatchCopyExportMode,
-} from './lib/data';
-import { createStoredZip, decodeTextFile, readStoredZip } from './lib/archive';
-import { parseListString } from './components/CustomFilters';
-import { BooleanMapSchema, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel, isTagLikeColumn } from './lib/filterCoordinator';
+import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, resolveTagFilterColumn, resolveChannelId, resolveChannelName, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
+import { createStoredZip, readStoredZip } from './lib/archive';
+import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
-import { buildDatasetDashboardStats } from './lib/datasetDashboard';
-import { buildDashboardTemplateSnapshot, inferIntentFromText } from './lib/dashboardTemplate';
-import {
-  aggregateChannelLinkingFromVideoRows,
-  applyLinkingDomainOverride,
-  buildChannelLinkingSnapshot,
-  buildLinkingStageA,
-  buildLinkingStageAAsync,
-  buildLinkingStageB,
-  buildLinkingStageBAsync,
-  profileLinkingColumnCandidates,
-  revertLinkingDomainOverride,
-  type LinkingStageAResult,
-} from './lib/linkingDashboard';
-import {
-  LAST_PROJECT_AUTOSAVE_VERSION,
-  loadLastProjectAutosaveSnapshot,
-  saveLastProjectAutosaveSnapshot,
-  shouldAttemptLastProjectRestore,
-} from './lib/projectAutosave';
-import {
-  THUMBNAIL_LIMIT,
-  buildSavedViewThumbnailScopeKey,
-  buildThumbnailSortSignature,
-  inferFileExtensionFromMimeType,
-  isPersistentThumbnailScopeKey,
-  isSavedViewThumbnailScopeKey,
-  resolveThumbnailCacheLabel,
-  sanitizeThumbnailPathSegment,
-  selectThumbnailCandidates,
-} from './lib/dashboardThumbnails';
+import { buildDashboardTemplateSnapshot, inferIntentFromText, normalizeTemplateRows } from './lib/dashboardTemplate';
+import { aggregateChannelLinkingFromVideoRows } from './lib/linkingDashboard';
+import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
+import { normalizeThumbnailTileWidth, sortRowsLikeGrid } from './lib/videoThumbnails';
+import { coveredSeconds, mergeRanges } from './lib/watchCoverage';
+import { diaryToNotes, netTimeline } from './lib/researchLogTimeline';
+import { buildResearchLogExport } from './lib/researchLogExport';
+import { buildOverviewDrilldownFilter, overviewDrilldownColumns } from './lib/overviewDrilldown';
+import type { OverviewDrilldown } from './lib/dashboardTemplateTypes';
 import { cn } from './lib/utils';
-
-const STORAGE_KEY = 'tubedata_explorer_state';
-const FILTERED_TEMP_THUMBNAIL_SCOPE = 'filtered-temp';
-const THUMBNAIL_ZOOM_STEPS = [88, 104, 128, 156, 192, 240, 320, 440, 620, 860, 1120];
-const GENERATED_SOURCE_ID = 'generated:metadata';
-const LINKING_GENERATED_COLUMNS = [
-  'linking_linked',
-  'linking_url_count',
-  'linking_domain_count',
-  'linking_base_labels',
-  'linking_recipe',
-  'linking_top_domains',
-  'linking_malformed_count',
-  'linking_shortener_count',
-  'linking_raw_links',
-  'linking_raw_domains',
-];
-const LINKING_FILTER_COLUMNS = new Set<string>([
-  ...LINKING_GENERATED_COLUMNS,
-]);
-
-function buildSourceId(prefix: string, label: string) {
-  const slug = sanitizeFileName(label || 'source', 'source')
-    .replace(/\.csv$/i, '')
-    .replace(/[^a-z0-9_-]+/gi, '-')
-    .replace(/^-+|-+$/g, '')
-    .toLowerCase();
-  return `${prefix}:${slug || 'source'}:${Date.now().toString(36)}`;
-}
-
-function createEmptySourceRegistry(): SourceRegistryState {
-  return {
-    byId: {},
-    orderedIds: [],
-    primarySourceId: null,
-  };
-}
-
-function createEmptySourceVisibility(): SourceVisibilityState {
-  return {
-    hiddenSourceIds: [],
-    hiddenColumnSourceIdsByScope: {
-      videos: [],
-      channels: [],
-    },
-  };
-}
-
-function createEmptyRowLineage(): RowLineageState {
-  return { byRowId: {} };
-}
-
-function createEmptyColumnLineage(): ColumnLineageState {
-  return { byColumn: {} };
-}
-
-function createEmptyGeneratedMetadata(): GeneratedMetadataState {
-  return { byVideoId: {} };
-}
-
-function createEmptyLinkingState(): LinkingState {
-  return {
-    selectedSourceColumn: null,
-    stale: false,
-    staleReason: undefined,
-    datasetFingerprint: undefined,
-    sourceVisibilityFingerprint: undefined,
-    overrideVersion: 0,
-    sourceCandidateProfiles: [],
-    parseCacheByKey: {},
-    overridesByDomain: {},
-    snapshot: null,
-  };
-}
-
-function createEmptyChannelLinkingState(): ChannelLinkingState {
-  return {
-    stale: false,
-    staleReason: undefined,
-    snapshot: null,
-  };
-}
-
-function resolveRowLineageKey(row: any, index: number) {
-  return resolveVideoId(row) || `row:${index}`;
-}
-
-function resolveChannelRowKey(row: any) {
-  return String(row?.channel_key || row?.channel_id || row?.channel_name || '').trim();
-}
-
-function getDefaultChannelVisibleColumns(columnNames: string[]) {
-  const preferred = [
-    'channel_name',
-    'channel_id',
-    'video_count_in_dataset',
-    'total_views_in_dataset',
-    'total_likes_in_dataset',
-    'total_comments_in_dataset',
-    'earliest_publish_date',
-    'latest_publish_date',
-    'channel_linked_video_count',
-    'channel_unique_domains',
-    'channel_top_domains',
-    'channel_linking_recipe_mix',
-    CHANNEL_USER_TAGS_COLUMN,
-  ];
-  const ordered = preferred.filter((column) => columnNames.includes(column));
-  return ordered.length ? ordered : columnNames.slice(0, Math.min(8, columnNames.length));
-}
-
-function shouldHideRedundantChannelIdentityColumn(column: ColumnSchema, schema: ColumnSchema[]) {
-  const columnName = column.column_name;
-  const rawName = column.source_column_name || columnName;
-  const displayName = (column.display_column_name || '').toLowerCase();
-  const semanticType = column.semantic_type || '';
-  const hasCanonicalChannelName = schema.some((entry) => entry.column_name === 'channel_name');
-  const hasCanonicalChannelId = schema.some((entry) => entry.column_name === 'channel_id');
-
-  if (columnName === 'channel_name' || columnName === 'channel_id') return false;
-
-  if (hasCanonicalChannelName) {
-    const isDuplicateChannelName = semanticType === 'channel-name'
-      || displayName.startsWith('channel name')
-      || ['channelTitle', 'channel_title'].includes(columnName)
-      || (rawName === 'title' && displayName.startsWith('channel name'));
-    if (isDuplicateChannelName) return true;
-  }
-
-  if (hasCanonicalChannelId) {
-    const isDuplicateChannelId = semanticType === 'channel-id'
-      || displayName.startsWith('channel id')
-      || ['channelId', 'Channel_ID', 'channelID', 'id'].includes(columnName);
-    if (isDuplicateChannelId) return true;
-  }
-
-  return false;
-}
-
-function getDefaultVideoVisibleColumns(schema: ColumnSchema[]) {
-  return schema
-    .filter((column) => !shouldHideRedundantChannelIdentityColumn(column, schema))
-    .map((column) => column.column_name);
-}
-
-function joinUnique(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
-
-function buildSourceVisibilityFingerprint(sourceVisibility: SourceVisibilityState) {
-  const hiddenRows = [...(sourceVisibility.hiddenSourceIds || [])].sort().join('|');
-  const hiddenVideoCols = [...(sourceVisibility.hiddenColumnSourceIdsByScope?.videos || [])].sort().join('|');
-  const hiddenChannelCols = [...(sourceVisibility.hiddenColumnSourceIdsByScope?.channels || [])].sort().join('|');
-  return `rows:${hiddenRows};videos:${hiddenVideoCols};channels:${hiddenChannelCols}`;
-}
-
-function buildDatasetFingerprint(args: {
-  datasetVersion: number;
-  inclusionView: InclusionView;
-  rowCount: number;
-  sourceVisibility: SourceVisibilityState;
-}) {
-  return [
-    `v${args.datasetVersion}`,
-    `inc:${args.inclusionView}`,
-    `rows:${args.rowCount}`,
-    buildSourceVisibilityFingerprint(args.sourceVisibility),
-  ].join(';');
-}
-
-function resolveRecoverableInclusionView(args: {
-  preferred: InclusionView;
-  includedRowCount: number;
-  excludedRowCount: number;
-}): InclusionView {
-  const { preferred, includedRowCount, excludedRowCount } = args;
-  if (preferred === 'included' && includedRowCount === 0 && excludedRowCount > 0) return 'excluded';
-  if (preferred === 'excluded' && excludedRowCount === 0 && includedRowCount > 0) return 'included';
-  return preferred;
-}
-
-function computeSourceVisibilityInclusionCounts(args: {
-  rows: any[];
-  rowLineage: RowLineageState;
-  sourceVisibility: SourceVisibilityState;
-  excludedVideoIds: string[];
-}) {
-  const hiddenSourceIdSet = new Set(args.sourceVisibility.hiddenSourceIds || []);
-  const sourceMaskedRows = hiddenSourceIdSet.size
-    ? args.rows.filter((row, index) => {
-        const rowId = resolveRowLineageKey(row, index);
-        const lineage = args.rowLineage.byRowId[rowId];
-        if (!lineage?.baseSourceId) return true;
-        return !hiddenSourceIdSet.has(lineage.baseSourceId);
-      })
-    : args.rows;
-
-  const partition = partitionRowsByInclusion(sourceMaskedRows, new Set(args.excludedVideoIds || []));
-  return {
-    includedRowCount: partition.included.length,
-    excludedRowCount: partition.excluded.length,
-  };
-}
-
-function flattenGeneratedMetadataForOverlay(entry: GeneratedMetadataState['byVideoId'][string] | undefined) {
-  if (!entry) return null;
-  const linking = entry.linking;
-  return {
-    content_intent: entry.content_intent || 'other',
-    linking_linked: linking?.linking_linked || 'no',
-    linking_url_count: linking?.linking_url_count ?? 0,
-    linking_domain_count: linking?.linking_domain_count ?? 0,
-    linking_base_labels: linking?.linking_base_labels ?? [],
-    linking_recipe: linking?.linking_recipe || 'none',
-    linking_top_domains: linking?.linking_top_domains ?? [],
-    linking_malformed_count: linking?.linking_malformed_count ?? 0,
-    linking_shortener_count: linking?.linking_shortener_count ?? 0,
-    linking_raw_links: linking?.linking_raw_links ?? [],
-    linking_raw_domains: linking?.linking_raw_domains ?? [],
-  };
-}
-
-function normalizeJoinKey(value: unknown) {
-  const text = String(value ?? '').trim();
-  return text ? text.toLowerCase() : '';
-}
-
-function ensureGeneratedColumnLineage(lineage: ColumnLineageState): ColumnLineageState {
-  const next = { ...lineage.byColumn };
-  if (!next.content_intent) {
-    next.content_intent = { column: 'content_intent', sourceId: GENERATED_SOURCE_ID, generated: true, scope: 'videos' };
-  }
-  LINKING_GENERATED_COLUMNS.forEach((column) => {
-    if (!next[column]) {
-      next[column] = { column, sourceId: GENERATED_SOURCE_ID, generated: true, scope: 'videos' };
-    }
-  });
-  const channelColumns = [
-    'channel_linked_video_count',
-    'channel_total_urls',
-    'channel_unique_domains',
-    'channel_top_domains',
-    'channel_linking_recipe_mix',
-    'channel_base_share_cross_platform',
-    'channel_base_share_intra_platform',
-    'channel_base_share_marketplace',
-    'channel_base_share_crowdfunding',
-    'channel_base_share_routing',
-    'channel_base_share_other',
-  ];
-  channelColumns.forEach((column) => {
-    if (!next[column]) {
-      next[column] = { column, sourceId: GENERATED_SOURCE_ID, generated: true, scope: 'channels' };
-    }
-  });
-  return { byColumn: next };
-}
-
-function withSourceRegistryCounts(args: {
-  sourceRegistry: SourceRegistryState;
-  rowLineage: RowLineageState;
-  defaultRowCount?: number;
-}) {
-  const counts = new Map<string, number>();
-  Object.values(args.rowLineage.byRowId).forEach((entry) => {
-    if (!entry.baseSourceId) return;
-    counts.set(entry.baseSourceId, (counts.get(entry.baseSourceId) || 0) + 1);
-  });
-  const byId: SourceRegistryState['byId'] = {};
-  Object.entries(args.sourceRegistry.byId).forEach(([sourceId, source]) => {
-    byId[sourceId] = {
-      ...source,
-      rowCount: counts.has(sourceId)
-        ? (counts.get(sourceId) || 0)
-        : (source.kind === 'base' ? (args.defaultRowCount ?? source.rowCount) : source.rowCount),
-    };
-  });
-  return {
-    ...args.sourceRegistry,
-    byId,
-  };
-}
-
-function buildDefaultProjectSourceState(args: {
-  rows: any[];
-  schema: Array<{ column_name: string }>;
-  fileName: string | null;
-}) {
-  const now = new Date().toISOString();
-  const baseSourceId = buildSourceId('source/base', args.fileName || 'dataset');
-  const sourceRegistry: SourceRegistryState = {
-    byId: {
-      [baseSourceId]: {
-        id: baseSourceId,
-        label: args.fileName || 'dataset.csv',
-        kind: 'base',
-        rowCount: args.rows.length,
-        contributedColumns: args.schema.map((column) => column.column_name),
-        createdAt: now,
-      },
-      [GENERATED_SOURCE_ID]: {
-        id: GENERATED_SOURCE_ID,
-        label: 'Generated metadata',
-        kind: 'generated',
-        rowCount: 0,
-        contributedColumns: ['content_intent', ...LINKING_GENERATED_COLUMNS],
-        createdAt: now,
-      },
-    },
-    orderedIds: [baseSourceId, GENERATED_SOURCE_ID],
-    primarySourceId: baseSourceId,
-  };
-  const rowLineage: RowLineageState = {
-    byRowId: Object.fromEntries(
-      args.rows.map((row, index) => {
-        const rowId = resolveRowLineageKey(row, index);
-        return [rowId, { rowId, baseSourceId, contributorSourceIds: [baseSourceId] }];
-      }),
-    ),
-  };
-  const columnLineage: ColumnLineageState = ensureGeneratedColumnLineage({
-    byColumn: Object.fromEntries(
-      args.schema.map((column) => ([
-        column.column_name,
-        {
-          column: column.column_name,
-          sourceId: baseSourceId,
-          generated: false,
-          scope: 'videos',
-        },
-      ])),
-    ),
-  });
-  return {
-    sourceRegistry,
-    sourceVisibility: createEmptySourceVisibility(),
-    rowLineage,
-    columnLineage,
-  };
-}
-
-function reconcileSourceVisibility(sourceVisibility: SourceVisibilityState, sourceRegistry: SourceRegistryState): SourceVisibilityState {
-  const validIds = new Set(sourceRegistry.orderedIds);
-  return {
-    hiddenSourceIds: (sourceVisibility.hiddenSourceIds || []).filter((id) => validIds.has(id)),
-    hiddenColumnSourceIdsByScope: {
-      videos: (sourceVisibility.hiddenColumnSourceIdsByScope?.videos || []).filter((id) => validIds.has(id)),
-      channels: (sourceVisibility.hiddenColumnSourceIdsByScope?.channels || []).filter((id) => validIds.has(id)),
-    },
-  };
-}
-
-function createObjectUrl(bytes: Uint8Array, mimeType = 'image/jpeg') {
-  return URL.createObjectURL(new Blob([bytes], { type: mimeType }));
-}
-
-function hashFingerprint(seed: number, value: string) {
-  let next = seed >>> 0;
-  for (let index = 0; index < value.length; index += 1) {
-    next ^= value.charCodeAt(index);
-    next = Math.imul(next, 16777619) >>> 0;
-  }
-  return next >>> 0;
-}
-
-function buildStableFingerprint(values: string[]) {
-  let hash = 2166136261;
-  values.forEach((value) => {
-    hash = hashFingerprint(hash, value);
-    hash = hashFingerprint(hash, '\n');
-  });
-  return `${values.length}:${(hash >>> 0).toString(36)}`;
-}
-
-function buildVideoCorpusFingerprint(rows: any[], schema: Array<{ column_name: string }>) {
-  const rowKeys = rows.map((row) => {
-    const videoId = resolveVideoId(row) || '';
-    const channelId = resolveChannelId(row) || '';
-    const views = row?.viewCount ?? row?.view_count ?? row?.views ?? row?.Views ?? '';
-    const likes = row?.likeCount ?? row?.like_count ?? row?.likes ?? row?.Likes ?? '';
-    const comments = row?.commentCount ?? row?.comment_count ?? row?.comments ?? row?.Comments ?? '';
-    const publishedAt = row?.publishedAt ?? row?.published_at ?? row?.publishDate ?? row?.publish_date ?? row?.upload_date ?? row?.date ?? '';
-    return `${videoId}|${channelId}|${views}|${likes}|${comments}|${publishedAt}`;
-  });
-  const schemaKey = schema.map((column) => column.column_name).join('|');
-  return `rows:${rows.length};schema:${schema.length}:${buildStableFingerprint([schemaKey, ...rowKeys])}`;
-}
-
-function buildExcludedMembershipFingerprint(videoIds: string[]) {
-  const uniqueSorted = Array.from(new Set(videoIds.filter(Boolean))).sort();
-  return `excluded:${uniqueSorted.length}:${buildStableFingerprint(uniqueSorted)}`;
-}
-
-function buildChannelMetadataCacheKey(args: {
-  videoCorpusFingerprint: string;
-  exclusionMembershipFingerprint: string;
-  inclusionView: InclusionView;
-}) {
-  return [
-    args.videoCorpusFingerprint,
-    args.exclusionMembershipFingerprint,
-    `inc:${args.inclusionView}`,
-  ].join(';');
-}
-
-function buildThumbnailEntriesFromCacheSeed(args: {
-  candidates: Array<{
-    videoId: string;
-    dedupeKey: string;
-    title: string;
-    rank: number;
-    sourceUrl: string;
-    candidateUrls?: string[];
-  }>;
-  seedSnapshot?: DashboardThumbnailCacheSnapshot;
-}): DashboardThumbnailCacheSnapshot['entries'] {
-  const seedByDedupe = new Map<string, DashboardThumbnailCacheSnapshot['entries'][number]>();
-  (args.seedSnapshot?.entries || []).forEach((entry) => {
-    if (!entry?.dedupeKey) return;
-    if (!seedByDedupe.has(entry.dedupeKey)) seedByDedupe.set(entry.dedupeKey, entry);
-  });
-  return args.candidates.map((candidate) => {
-    const candidateUrls = Array.from(new Set(
-      (candidate.candidateUrls || [])
-        .map((url) => String(url || '').trim())
-        .filter(Boolean),
-    ));
-    const initialUrl = candidateUrls[0] || candidate.sourceUrl || '';
-    const initialCandidateIndex = initialUrl ? 0 : -1;
-    const initialStatus: DashboardThumbnailCacheSnapshot['entries'][number]['status'] = initialUrl ? 'pending' : 'failed';
-    const baseEntry = {
-      videoId: candidate.videoId,
-      dedupeKey: candidate.dedupeKey,
-      title: candidate.title,
-      rank: candidate.rank,
-      sourceUrl: initialUrl,
-      candidateUrls,
-      activeUrl: initialUrl,
-      fallbackIndex: 0,
-      activeCandidateIndex: initialCandidateIndex,
-      status: initialStatus,
-      error: initialUrl ? undefined : 'No valid thumbnail URL',
-    };
-    const seededEntry = seedByDedupe.get(candidate.dedupeKey);
-    if (!seededEntry) return baseEntry;
-    const seededActiveUrl = String(seededEntry.activeUrl || seededEntry.sourceUrl || '').trim();
-    const seededActiveIndexFromUrl = seededActiveUrl ? candidateUrls.findIndex((url) => url === seededActiveUrl) : -1;
-    const seededFallbackIndex = seededEntry.fallbackIndex ?? (seededActiveIndexFromUrl >= 0 ? seededActiveIndexFromUrl : 0);
-    const seededIndex = Number.isFinite(seededEntry.activeCandidateIndex)
-      ? Number(seededEntry.activeCandidateIndex)
-      : Number(seededFallbackIndex);
-    const normalizedSeededIndex = Number.isFinite(seededIndex)
-      ? Math.max(0, Math.min(Math.floor(seededIndex), Math.max(candidateUrls.length - 1, 0)))
-      : 0;
-    if (seededEntry.status === 'loaded' && seededEntry.bytes?.length) {
-      const mimeType = seededEntry.mimeType || 'image/jpeg';
-      const bytes = new Uint8Array(seededEntry.bytes);
-      const seededUrl = seededActiveUrl || candidateUrls[normalizedSeededIndex] || initialUrl;
-      return {
-        ...baseEntry,
-        status: 'loaded' as const,
-        sourceUrl: seededUrl || baseEntry.sourceUrl,
-        activeUrl: seededUrl || baseEntry.activeUrl,
-        fallbackIndex: normalizedSeededIndex,
-        activeCandidateIndex: normalizedSeededIndex,
-        mimeType,
-        byteLength: seededEntry.byteLength ?? bytes.length,
-        bytes,
-        objectUrl: createObjectUrl(bytes, mimeType),
-      };
-    }
-    if (seededEntry.status === 'loaded' && seededActiveUrl) {
-      return {
-        ...baseEntry,
-        status: 'loaded' as const,
-        sourceUrl: seededActiveUrl,
-        activeUrl: seededActiveUrl,
-        fallbackIndex: normalizedSeededIndex,
-        activeCandidateIndex: normalizedSeededIndex,
-      };
-    }
-    if (seededEntry.status === 'failed' && candidateUrls.length > 0) {
-      return {
-        ...baseEntry,
-        status: 'failed' as const,
-        activeUrl: '',
-        fallbackIndex: Math.max(0, candidateUrls.length - 1),
-        activeCandidateIndex: Math.max(0, candidateUrls.length - 1),
-        error: seededEntry.error || 'Failed to load thumbnail',
-      };
-    }
-    return baseEntry;
-  });
-}
-
-function summarizeThumbnailProgress(entries: DashboardThumbnailCacheSnapshot['entries']) {
-  const total = entries.length;
-  const failed = entries.filter((entry) => entry.status === 'failed').length;
-  const completed = entries.filter((entry) => entry.status !== 'pending').length;
-  return {
-    total,
-    completed,
-    failed,
-    loading: completed < total,
-  };
-}
-
-function revokeThumbnailUrls(snapshot?: DashboardThumbnailCacheSnapshot) {
-  if (!snapshot) return;
-  snapshot.entries.forEach((entry) => {
-    if (entry.objectUrl) URL.revokeObjectURL(entry.objectUrl);
-  });
-}
-
-function revokeDroppedThumbnailUrls(previous?: DashboardThumbnailCacheSnapshot, next?: DashboardThumbnailCacheSnapshot) {
-  if (!previous) return;
-  const nextUrls = new Set((next?.entries || []).map((entry) => entry.objectUrl).filter((value): value is string => Boolean(value)));
-  previous.entries.forEach((entry) => {
-    if (entry.objectUrl && !nextUrls.has(entry.objectUrl)) {
-      URL.revokeObjectURL(entry.objectUrl);
-    }
-  });
-}
-
-function getArchiveEntry(files: Record<string, Uint8Array>, targetName: string) {
-  return files[targetName] || Object.entries(files).find(([name]) => name === targetName || name.endsWith(`/${targetName}`))?.[1];
-}
-
-function stripNotesFromAnnotations(annotations: Record<string, Annotation>) {
-  return Object.fromEntries(
-    Object.entries(annotations).map(([videoId, annotation]) => {
-      const { notes, ...rest } = annotation;
-      return [videoId, rest];
-    }),
-  ) as Record<string, Annotation>;
-}
-
-function buildLegacyNotesFromAnnotations(annotations: Record<string, Annotation>) {
-  const notesByVideoId: Record<string, string> = {};
-  Object.entries(annotations).forEach(([videoId, annotation]) => {
-    const notes = annotation?.notes;
-    if (typeof notes === 'string' && notes.trim().length > 0) {
-      notesByVideoId[videoId] = notes;
-    }
-  });
-  return notesByVideoId;
-}
-
-function buildNoteArchiveFiles(notesByVideoId: Record<string, string>, folder: string) {
-  return Object.entries(notesByVideoId)
-    .filter(([, notes]) => notes.trim().length > 0)
-    .map(([videoId, notes]) => ({
-      name: `${folder}/video_notes/${videoId}.txt`,
-      data: notes,
-    }));
-}
-
-function extractNotesFromArchive(files: Record<string, Uint8Array>) {
-  const notes: Record<string, string> = {};
-  Object.entries(files).forEach(([name, data]) => {
-    const match = name.match(/(?:^|\/)video_notes\/([^/]+)\.txt$/i);
-    if (!match) return;
-    notes[match[1]] = decodeTextFile(data);
-  });
-  return notes;
-}
-
-function extractAnnotationsFromRows(rows: any[], seed: Record<string, Annotation> = {}) {
-  const nextAnnotations: Record<string, Annotation> = { ...seed };
-
-  rows.forEach((row) => {
-    const videoId = resolveVideoId(row);
-    if (!videoId) return;
-
-    const tags = row[USER_TAGS_COLUMN] || row.User_Tags;
-
-    if (tags) {
-      nextAnnotations[videoId] = {
-        ...nextAnnotations[videoId],
-        tags: parseListString(tags),
-        transcriptOverride: nextAnnotations[videoId]?.transcriptOverride,
-        quoteRefs: nextAnnotations[videoId]?.quoteRefs || [],
-        timestampRefs: nextAnnotations[videoId]?.timestampRefs || [],
-      };
-    }
-  });
-
-  return nextAnnotations;
-}
-
-function applySupportMappings(
-  rows: any[],
-  mappings: Partial<SpecialMappings> = {},
-  options: {
-    previousMappings?: Partial<SpecialMappings>;
-    sourceSchemaColumns?: Set<string>;
-  } = {},
-) {
-  const previousMappings = options.previousMappings || {};
-  const sourceSchemaColumns = options.sourceSchemaColumns;
-  return rows.map((row) => {
-    const next = { ...row };
-    if (mappings.transcriptColumn && mappings.transcriptColumn in row) {
-      next[TRANSCRIPT_COLUMN] = row[mappings.transcriptColumn];
-    } else if (
-      previousMappings.transcriptColumn
-      && previousMappings.transcriptColumn !== TRANSCRIPT_COLUMN
-      && !sourceSchemaColumns?.has(TRANSCRIPT_COLUMN)
-    ) {
-      delete next[TRANSCRIPT_COLUMN];
-    }
-    if (mappings.descriptionColumn && mappings.descriptionColumn in row) {
-      next[VIDEO_DESCRIPTION_COLUMN] = row[mappings.descriptionColumn];
-    } else if (
-      previousMappings.descriptionColumn
-      && previousMappings.descriptionColumn !== VIDEO_DESCRIPTION_COLUMN
-      && !sourceSchemaColumns?.has(VIDEO_DESCRIPTION_COLUMN)
-    ) {
-      delete next[VIDEO_DESCRIPTION_COLUMN];
-    }
-    if (mappings.tagColumn && mappings.tagColumn in row) {
-      next.videoTags = parseListString(row[mappings.tagColumn]);
-    } else if (
-      previousMappings.tagColumn
-      && previousMappings.tagColumn !== 'videoTags'
-      && !sourceSchemaColumns?.has('videoTags')
-    ) {
-      delete next.videoTags;
-    }
-    return next;
-  });
-}
-
-function isEditableShortcutTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element) return false;
-  return !!element.closest([
-    'input',
-    'textarea',
-    'select',
-    '[contenteditable]',
-    '.ag-popup',
-    '.ag-popup-editor',
-    '.ag-cell-inline-editing',
-    '.ag-rich-select',
-    '.ag-large-text',
-    '.ag-menu',
-    '.ag-input-field-input',
-    '.ag-text-field-input',
-    '[data-markdown-editor]',
-  ].join(','));
-}
-
-function isGridShortcutTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  if (!element) return false;
-  return Boolean(element.closest('[data-metadata-grid-root="true"]'));
-}
-
-function hasShortcutModifier(event: KeyboardEvent) {
-  return event.ctrlKey || event.metaKey;
-}
-
-function matchesAltShiftShortcut(event: KeyboardEvent, key: string) {
-  return !hasShortcutModifier(event) && event.altKey && event.shiftKey && event.code === `Key${key.toUpperCase()}`;
-}
-
-function matchesStandardShortcut(event: KeyboardEvent, key: string) {
-  return hasShortcutModifier(event) && !event.shiftKey && !event.altKey && event.code === `Key${key.toUpperCase()}`;
-}
-
-function matchesStandardShiftShortcut(event: KeyboardEvent, key: string) {
-  return hasShortcutModifier(event) && event.shiftKey && !event.altKey && event.code === `Key${key.toUpperCase()}`;
-}
-
-function normalizeVideoIds(videoIds: string[], validIds: Set<string>) {
-  return Array.from(new Set(videoIds.filter((videoId) => validIds.has(videoId))));
-}
-
-async function copyTextToClipboard(text: string) {
-  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  if (typeof document === 'undefined') {
-    throw new Error('Clipboard is not available in this environment.');
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.top = '-9999px';
-  textarea.style.left = '-9999px';
-  textarea.style.opacity = '0';
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-
-  const copied = document.execCommand('copy');
-  document.body.removeChild(textarea);
-  if (!copied) {
-    throw new Error('Fallback clipboard copy failed.');
-  }
-}
-
-function buildScopeSelectionFromKeys(keys: string[], detailKey?: string | null): ScopeSelectionState {
-  const selectedKeys = Array.from(new Set((keys || []).map((key) => String(key || '').trim()).filter(Boolean)));
-  if (!selectedKeys.length) {
-    return {
-      ...EMPTY_SCOPE_SELECTION,
-      detailKey: detailKey ?? null,
-    };
-  }
-  const resolvedDetail = detailKey && selectedKeys.includes(detailKey)
-    ? detailKey
-    : selectedKeys[selectedKeys.length - 1];
-  return {
-    selectedKeys,
-    anchorKey: selectedKeys[0],
-    focusKey: selectedKeys[selectedKeys.length - 1],
-    detailKey: resolvedDetail,
-  };
-}
-
-type IncludeExcludeUndoEntry = IncludeExcludeAction & { historyEventId?: string };
-
-type AppNavigationEntry = {
-  viewScope: ViewScope;
-  inclusionView: InclusionView;
-  activeViewId: string | null;
-  filterModel: ExplorerFilterModel;
-  channelFilterModel: ExplorerFilterModel;
-  selectedVideoId: string | null;
-  channelId: string | null;
-  channelName: string | null;
-  videoScopeChannelKeys: string[] | null;
-  isChannelDrilldownFilterActive: boolean;
-  drilldownPreviousVideoFilter: ExplorerFilterModel | null;
-};
-
-function createHistoryId(prefix = 'event') {
-  return `${prefix}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
-}
-
-function formatDurationLabel(totalSeconds: number) {
-  const seconds = Math.max(0, Math.round(totalSeconds));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remainder = seconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${remainder}s`;
-  if (minutes > 0) return `${minutes}m ${remainder}s`;
-  return `${remainder}s`;
-}
-
-function summarizeFilterModel(filterModel: ExplorerFilterModel) {
-  const entries = Object.entries(filterModel || {});
-  if (!entries.length) return 'No active filters';
-  return entries.map(([column, model]) => {
-    const anyModel = model as any;
-    if (anyModel?.selections && typeof anyModel.selections === 'object') {
-      const parts = Object.entries(anyModel.selections).map(([key, state]) => `${key}:${state === 'true' ? 'yes' : 'no'}`).slice(0, 4);
-      const total = Object.keys(anyModel.selections).length;
-      const suffix = total > 4 ? ` (+${total - 4} more)` : '';
-      return `${column}: ${parts.join(', ')}${suffix}`;
-    }
-    if (Array.isArray(anyModel?.values)) {
-      const values = anyModel.values.map((value: any) => String(value)).slice(0, 4);
-      const suffix = anyModel.values.length > 4 ? ` (+${anyModel.values.length - 4} more)` : '';
-      return `${column}: [${values.join(', ')}]${suffix}`;
-    }
-    const operator = anyModel?.operator || anyModel?.type || 'contains';
-    const value = anyModel?.value ?? anyModel?.filter ?? '';
-    return `${column}: ${operator} ${String(value)}`;
-  }).join(' | ');
-}
-
-function formatVideoTitleChannelLabel(row: any) {
-  const title = resolveVideoTitle(row).trim() || 'Untitled video';
-  const channel = resolveChannelName(row).trim() || 'Unknown channel';
-  return `${title} — ${channel}`;
-}
-
-function buildAlphabetizedVideoTitleChannelList(rows: any[]) {
-  const byVideoId = new Map<string, string>();
-  rows.forEach((row) => {
-    const videoId = resolveVideoId(row);
-    if (!videoId || byVideoId.has(videoId)) return;
-    byVideoId.set(videoId, formatVideoTitleChannelLabel(row));
-  });
-  return Array.from(byVideoId.values()).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-}
-
-
-function describeFilterModelEntry(column: string, model: any) {
-  if (model?.selections && typeof model.selections === 'object') {
-    const parts = Object.entries(model.selections).map(([key, state]) => `${key}: ${state === 'true' ? 'Yes' : 'No'}`).slice(0, 4);
-    const total = Object.keys(model.selections).length;
-    const suffix = total > 4 ? ` (+${total - 4} more)` : '';
-    return `${parts.join(', ')}${suffix}`;
-  }
-  if (Array.isArray(model?.values)) {
-    const values = model.values.map((value: any) => String(value)).slice(0, 4);
-    const suffix = model.values.length > 4 ? ` (+${model.values.length - 4} more)` : '';
-    return `${values.join(', ')}${suffix}`;
-  }
-  const operator = model?.operator || model?.type || 'contains';
-  const value = model?.value ?? model?.filter ?? '';
-  return `${operator} ${String(value)}`.trim();
-}
-
-function resolveEditViewFilterKind(columnName: string, columnType: string, listLikeColumns: Set<string>, booleanMapColumns: Record<string, BooleanMapSchema> = {}) {
-  if (booleanMapColumns[columnName]) return 'booleanMap' as const;
-  if (isTagLikeColumn(columnName, columnType, listLikeColumns)) return 'tag' as const;
-  if (isDurationColumn(columnName)) return 'duration' as const;
-  const type = columnType.toLowerCase();
-  const isNumeric = type.includes('int') || type.includes('double') || type.includes('float') || type.includes('decimal') || type.includes('numeric');
-  return isNumeric ? 'number' as const : 'text' as const;
-}
-
-function summarizeDashboardSnapshot(snapshot: DatasetDashboardSnapshot | SavedViewDashboardSnapshot | undefined) {
-  if (!snapshot) return 'No entries recorded';
-  const views = snapshot.stats.attention.medianViews ?? 0;
-  const comments = snapshot.stats.comments.totalVideoComments ?? 0;
-  const warnings = snapshot.stats.warnings.slice(0, 2);
-  return [
-    `Median views: ${Math.round(views).toLocaleString()}`,
-    `Comments: ${Math.round(comments).toLocaleString()}`,
-    warnings.length ? `Warnings: ${warnings.join(', ')}` : 'Warnings: none',
-  ].join('\n');
-}
-
-function parseDateLabel(timestamp: string | number | null | undefined) {
-  if (!timestamp) return 'n/a';
-  return formatDateDisplay(new Date(timestamp).toISOString());
-}
-
-function buildTagUsageSummary(userTagsByVideoId: Record<string, string[]>) {
-  const counts = new Map<string, number>();
-  Object.values(userTagsByVideoId).forEach((tags) => {
-    const unique = new Set(tags || []);
-    unique.forEach((tag) => counts.set(tag, (counts.get(tag) ?? 0) + 1));
-  });
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, 12);
-}
-
-function appendNotesBlock(existingNotes: string | null | undefined, nextBlock: string | null | undefined) {
-  const incoming = String(nextBlock ?? '').trim();
-  const current = String(existingNotes ?? '').trimEnd();
-  if (!incoming) return current;
-  return current ? `${current}\n\n${incoming}` : incoming;
-}
-
-const CHANNEL_USER_TAGS_COLUMN = 'channel_user_tags';
-
-const CHANNEL_BASE_SCHEMA = [
-  { column_name: 'channel_name', column_type: 'VARCHAR' },
-  { column_name: 'channel_id', column_type: 'VARCHAR' },
-  { column_name: CHANNEL_USER_TAGS_COLUMN, column_type: 'VARCHAR[]' },
-  { column_name: 'video_count_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'total_views_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'total_likes_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'total_comments_in_dataset', column_type: 'BIGINT' },
-  { column_name: 'earliest_publish_date', column_type: 'TIMESTAMP' },
-  { column_name: 'latest_publish_date', column_type: 'TIMESTAMP' },
-];
-
-function findVideoChannelColumn(schema: { column_name: string }[]) {
-  const preferred = ['channel_name', 'channelTitle', 'channel', 'ChannelTitle'];
-  for (const candidate of preferred) {
-    if (schema.some((column) => column.column_name === candidate)) return candidate;
-  }
-  const fallback = schema.find((column) => column.column_name.toLowerCase().includes('channel'));
-  return fallback?.column_name ?? null;
-}
-
-function findVideoChannelIdColumn(schema: { column_name: string }[]) {
-  const preferred = ['channelId', 'channel_id', 'Channel_ID', 'channelID'];
-  for (const candidate of preferred) {
-    if (schema.some((column) => column.column_name === candidate)) return candidate;
-  }
-  const fallback = schema.find((column) => {
-    const normalized = column.column_name.toLowerCase();
-    return normalized.includes('channel') && normalized.includes('id');
-  });
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardCategoryColumn(schema: { column_name: string }[]) {
-  const preferred = ['video_category', 'video_category_label', 'category', 'categories'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() == candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => {
-    const normalized = column.column_name.toLowerCase();
-    return normalized.includes('category') && !normalized.includes('topic');
-  });
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardTopicColumn(schema: { column_name: string }[]) {
-  const preferred = ['topic_categories', 'topics', 'topic', 'topicCategories'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() == candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => column.column_name.toLowerCase().includes('topic'));
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardDurationColumn(schema: { column_name: string }[]) {
-  const preferred = ['duration', 'duration_seconds', 'length', 'runtime'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() === candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => isDurationColumn(column.column_name));
-  return fallback?.column_name ?? null;
-}
-
-function findDashboardIntentColumn(schema: { column_name: string }[]) {
-  const preferred = ['content_intent', 'intent'];
-  for (const candidate of preferred) {
-    const match = schema.find((column) => column.column_name.toLowerCase() === candidate.toLowerCase());
-    if (match) return match.column_name;
-  }
-  const fallback = schema.find((column) => column.column_name.toLowerCase().includes('intent'));
-  return fallback?.column_name ?? null;
-}
-
-function waitForNextPaint() {
-  return new Promise<void>((resolve) => {
-    if (typeof window === 'undefined') {
-      setTimeout(resolve, 0);
-      return;
-    }
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => resolve());
-    });
-  });
-}
-
-function readFileBufferWithProgress(file: File, onProgress?: (completed: number, total: number) => void) {
-  return new Promise<ArrayBuffer>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error(`Failed to read ${file.name}.`));
-    reader.onabort = () => reject(new Error(`Reading ${file.name} was cancelled.`));
-    reader.onprogress = (event) => {
-      if (event.lengthComputable) onProgress?.(event.loaded, event.total);
-    };
-    reader.onload = () => {
-      const result = reader.result;
-      if (!(result instanceof ArrayBuffer)) {
-        reject(new Error(`Failed to read ${file.name}.`));
-        return;
-      }
-      onProgress?.(file.size || result.byteLength, file.size || result.byteLength || 1);
-      resolve(result);
-    };
-    reader.readAsArrayBuffer(file);
-  });
-}
-
-function LongTaskOverlay({ progress }: { progress: LongTaskProgress | null }) {
-  if (!progress) return null;
-  const total = Math.max(progress.total, 1);
-  const completed = Math.min(Math.max(progress.completed, 0), total);
-  const ratio = completed / total;
-  const percent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
-
-  return (
-    <div className="pointer-events-none fixed inset-0 z-[140] flex items-center justify-center bg-black/18 px-4">
-      <div className="pointer-events-auto w-full max-w-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5 shadow-2xl">
-        <div className="text-[10px] font-bold uppercase tracking-[0.24em] text-[var(--text-muted)]">Working</div>
-        <div className="mt-2 text-lg font-semibold text-[var(--text-main)]">{progress.title}</div>
-        {progress.detail ? <div className="mt-1 text-sm text-[var(--text-muted)]">{progress.detail}</div> : null}
-        <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--bg-primary)]">
-          <div
-            className={cn('h-full rounded-full bg-[var(--accent)] transition-all duration-200', progress.indeterminate && 'animate-pulse')}
-            style={{ width: `${Math.max(ratio * 100, completed > 0 ? 6 : 2)}%` }}
-          />
-        </div>
-        <div className="mt-2 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
-          <span>{completed.toLocaleString()} / {total.toLocaleString()} steps</span>
-          <span>{percent}%</span>
-        </div>
-      </div>
-    </div>
-  );
-}
+import { getBootPersistedStateJson } from './lib/persistedState';
+import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
+import { applySupportMappings, buildDefaultProjectSourceState, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
+import { CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
+import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
+import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, extractAnnotationsFromRows, stripNotesFromAnnotations } from './lib/projectNotes';
+import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
+import { createHistoryId, describeFilterModelEntry, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
+import type { AppNavigationEntry } from './lib/navigation';
+import type { HydrateProjectArgs } from './lib/projectHydration';
+import { LongTaskOverlay } from './components/LongTaskOverlay';
+import { StatusFooter } from './components/layout/StatusFooter';
+import { ChannelMetadataEmptyState } from './components/layout/ChannelMetadataEmptyState';
+import { RightPanelShell } from './components/layout/RightPanelShell';
+import { useShortcuts } from './hooks/useShortcuts';
+import { useDialogs } from './state/useDialogs';
+import { useImportFlow } from './state/useImportFlow';
+import { addEnrichmentSource, importProgressTitle, planMergeImport, planReplaceImport } from './lib/importPlan';
+import { useResearchHistory } from './state/useResearchHistory';
+import { useInclusionActions, useInclusionState, type InclusionActionResult } from './state/useInclusion';
+import { useToast } from './components/toast/ToastProvider';
+import { autosaveRestoreFailedToast, describeInclusionResult, readFailedToast, restoreFailedToast, saveFailedToast } from './lib/feedbackMessages';
+import { usePersistence } from './state/usePersistence';
+import { useNavigationHistory } from './state/useNavigationHistory';
+import { useChannelAnnotations } from './state/useChannelAnnotations';
+import { useChannelRows } from './state/useChannelRows';
+import { useLinkingActions } from './state/useLinkingActions';
+import { planAutosaveRestore, planBackupRestore, unpackProjectBackup, type SavedAppState } from './lib/projectRestore';
+import { buildChannelMetadataSnapshot, isChannelMetadataSnapshotFresh } from './lib/channelMetadata';
+import { ExportDialog } from './components/dialogs/ExportDialog';
+import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
+import { ImportDialog } from './components/dialogs/ImportDialog';
+import { ThumbnailGrid } from './components/explorer/ThumbnailGrid';
+import { ExplorerViewPill } from './components/explorer/ExplorerViewPill';
+import { ExplorerNoRowsState } from './components/explorer/ExplorerNoRowsState';
+import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog';
+import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog';
+
+// The dashboards and research log are large and only needed once opened, so they load on demand.
+const DatasetDashboardDialog = lazy(() => import('./components/dialogs/DatasetDashboardDialog').then((module) => ({ default: module.DatasetDashboardDialog })));
+const ResearchLogDialog = lazy(() => import('./components/dialogs/ResearchLogDialog').then((module) => ({ default: module.ResearchLogDialog })));
+
+// Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
+const NO_SELECTED_KEYS: string[] = [];
+const NO_ROWS: any[] = [];
 
 export default function App() {
   const { isReady, isIngesting, error: dbError, readCSVBuffer } = useDuckDB();
+  const { showToast } = useToast();
   const persisted = useMemo(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    const initial = saved ? JSON.parse(saved) : {};
+    const saved = getBootPersistedStateJson();
+    let initial: any = {};
+    try {
+      initial = saved ? JSON.parse(saved) : {};
+    } catch (error) {
+      console.warn('[state] Saved state is not valid JSON; starting fresh.', error);
+    }
     return {
       ...initial,
       annotations: stripTagsFromAnnotations(stripNotesFromAnnotations(initial.annotations ?? {})),
@@ -1186,8 +128,17 @@ export default function App() {
   const [sourceRows, setSourceRows] = useState<any[]>([]);
   const [sourceSchema, setSourceSchema] = useState<any[]>([]);
   const [notesByVideoId, setNotesByVideoId] = useState<Record<string, string>>(persisted.notesByVideoId ?? {});
-  const [channelNotesById, setChannelNotesById] = useState<Record<string, string>>(persisted.channelNotesById ?? {});
-  const [channelTagsById, setChannelTagsById] = useState<Record<string, string[]>>(persisted.channelTagsById ?? {});
+  const {
+    channelNotesById,
+    setChannelNotesById,
+    channelTagsById,
+    setChannelTagsById,
+    handleUpdateChannelNotes,
+    handleReplaceChannelTags,
+    addTagToChannelKeys,
+    removeTagFromChannelKeys,
+    appendNotesToChannelKeys,
+  } = useChannelAnnotations({ notes: persisted.channelNotesById, tags: persisted.channelTagsById });
   const [userTagsByVideoId, dispatchUserTags] = useReducer(userTagsReducer, persisted.userTagsByVideoId ?? {});
   const [deletedColumns, setDeletedColumns] = useState<string[]>(() => {
     return persisted.deletedColumns ?? [];
@@ -1198,27 +149,30 @@ export default function App() {
   const [isLoadingRows, setIsLoadingRows] = useState(false);
   const [, startFilterTransition] = useTransition();
   const [isTagWritePending, startTagWriteTransition] = useTransition();
-  const [isExportOpen, setIsExportOpen] = useState(false);
-  const [isColumnsOpen, setIsColumnsOpen] = useState(false);
-  const [isResearchLogOpen, setIsResearchLogOpen] = useState(false);
-  const [isDashboardOpen, setIsDashboardOpen] = useState(false);
   const [isAppFullscreen, setIsAppFullscreen] = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(false);
   const [dashboardScope, setDashboardScope] = useState<DashboardScope>('full');
   const [dashboardActiveTab, setDashboardActiveTab] = useState<DashboardTemplateTab>('overview');
+  // What the dashboard compares the current scope with: 'none', 'full' or 'view:<saved view id>'.
+  const [dashboardCompareTarget, setDashboardCompareTarget] = useState('none');
+  // Terms the project hides from vernacular analysis (e.g. the channel's own name).
+  const [vernacularExclusions, setVernacularExclusions] = useState<string[]>(() => (Array.isArray(persisted.vernacularExclusions) ? persisted.vernacularExclusions : []));
   const [dashboardSnapshots, setDashboardSnapshots] = useState<Partial<Record<DashboardScope, DatasetDashboardSnapshot>>>(() => {
     return persisted.dashboardSnapshots ?? {};
   });
   const [savedViewDashboardSnapshots, setSavedViewDashboardSnapshots] = useState<Record<string, SavedViewDashboardSnapshot>>(() => {
     return persisted.savedViewDashboardSnapshots ?? {};
   });
-  const [videoSortRules, setVideoSortRules] = useState<DashboardThumbnailSortRule[]>([]);
-  const [thumbnailCaches, setThumbnailCaches] = useState<Record<string, DashboardThumbnailCacheSnapshot>>({});
-  const [thumbnailLoadProgress, setThumbnailLoadProgress] = useState<DashboardThumbnailLoadProgress | null>(null);
-  const [thumbnailZoomIndex, setThumbnailZoomIndex] = useState(2);
-  const [inclusionView, setInclusionView] = useState<InclusionView>(() => persisted.inclusionView === 'excluded' ? 'excluded' : 'included');
-  const [excludedVideoIds, setExcludedVideoIds] = useState<string[]>(() => persisted.excludedVideoIds ?? []);
-  const [excludedVideoMetaById, setExcludedVideoMetaById] = useState<Record<string, ExcludedVideoMeta>>(() => persisted.excludedVideoMetaById ?? {});
+  const [videoSortRules, setVideoSortRules] = useState<GridSortRule[]>([]);
+  const inclusion = useInclusionState(persisted);
+  const {
+    inclusionView,
+    setInclusionView,
+    inclusionStateRef,
+    setInclusionState,
+    excludedVideoIds,
+    excludedVideoMetaById,
+    resetInclusionHistory,
+  } = inclusion;
   const [selectionState, dispatchSelection] = useReducer(selectionReducer, EMPTY_EXPLORER_SELECTION, () => {
     const legacySelectedRow = (persisted as any)?.selectedRow;
     const legacyVideoId = String((persisted as any)?.selectedVideoId || resolveVideoId(legacySelectedRow) || '').trim();
@@ -1234,10 +188,6 @@ export default function App() {
       channels: buildScopeSelectionFromKeys(legacyChannelKey ? [legacyChannelKey] : [], legacyChannelKey || null),
     };
   });
-  const [includeExcludeUndoStack, setIncludeExcludeUndoStack] = useState<IncludeExcludeUndoEntry[]>([]);
-  const [includeExcludeRedoStack, setIncludeExcludeRedoStack] = useState<IncludeExcludeUndoEntry[]>([]);
-  const [isKeyboardHelpOpen, setIsKeyboardHelpOpen] = useState(false);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [openAnnotationsRequestKey, setOpenAnnotationsRequestKey] = useState(0);
   const [pendingViewerTarget, setPendingViewerTarget] = useState<
     | { kind: 'video'; videoId: string }
@@ -1246,7 +196,12 @@ export default function App() {
   >(null);
   const [saveViewRequestKey, setSaveViewRequestKey] = useState(0);
   const [importRequestKey, setImportRequestKey] = useState(0);
-  const [researchHistory, setResearchHistory] = useState<ResearchHistoryEvent[]>(() => persisted.researchHistory ?? []);
+  const {
+    researchHistory,
+    setResearchHistory,
+    appendResearchHistory,
+    markResearchHistoryEventReverted,
+  } = useResearchHistory(persisted.researchHistory ?? []);
   const [watchHistoryByVideoId, setWatchHistoryByVideoId] = useState<Record<string, WatchHistoryEntry>>(() => persisted.watchHistoryByVideoId ?? {});
   const [savedViewsVersion, setSavedViewsVersion] = useState<number>(() => persisted.savedViewsVersion ?? 0);
   const [researchLogMarkdownOptions, setResearchLogMarkdownOptions] = useState<ResearchLogMarkdownOptions>(() => persisted.researchLogMarkdownOptions ?? {
@@ -1258,10 +213,11 @@ export default function App() {
   const [importedChannelMetadata, setImportedChannelMetadata] = useState<ImportedChannelMetadataState | null>(() => persisted.importedChannelMetadata ?? null);
   const [channelFilterModel, setChannelFilterModel] = useState<ExplorerFilterModel>(() => persisted.channelFilterModel ?? {});
   const [videoColumnWidths, setVideoColumnWidths] = useState<Record<string, number>>(() => persisted.videoColumnWidths ?? {});
+  // The videos view shows either the table or the thumbnail grid; both use the same rows and selection.
+  const [explorerLayout, setExplorerLayout] = useState<ExplorerLayout>(() => (persisted.explorerLayout === 'thumbnails' ? 'thumbnails' : 'table'));
+  const [thumbnailTileWidth, setThumbnailTileWidth] = useState(() => normalizeThumbnailTileWidth(persisted.thumbnailTileWidth));
   const [channelColumnWidths, setChannelColumnWidths] = useState<Record<string, number>>(() => persisted.channelColumnWidths ?? {});
   const [videoScopeChannelKeys, setVideoScopeChannelKeys] = useState<string[] | null>(null);
-  const [navigationHistory, setNavigationHistory] = useState<AppNavigationEntry[]>([]);
-  const [navigationCursor, setNavigationCursor] = useState(-1);
   const [defaultGridResetStage, setDefaultGridResetStage] = useState<0 | 1>(0);
   const [sourceRegistry, setSourceRegistry] = useState<SourceRegistryState>(() => persisted.sourceRegistry ?? createEmptySourceRegistry());
   const [sourceVisibility, setSourceVisibility] = useState<SourceVisibilityState>(() => persisted.sourceVisibility ?? createEmptySourceVisibility());
@@ -1273,11 +229,6 @@ export default function App() {
   const [isGeneratingChannelMetadata, setIsGeneratingChannelMetadata] = useState(false);
   const [datasetVersion, setDatasetVersion] = useState(0);
   const [filteredViewVersion, setFilteredViewVersion] = useState(0);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [pendingSchema, setPendingSchema] = useState<any[]>([]);
-  const [pendingRows, setPendingRows] = useState<any[]>([]);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [isImportSubmitting, setIsImportSubmitting] = useState(false);
   const [longTaskProgress, setLongTaskProgress] = useState<LongTaskProgress | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
     return persisted.visibleColumns ?? [];
@@ -1288,17 +239,12 @@ export default function App() {
   const [gridReadyVersion, setGridReadyVersion] = useState(0);
   const [filterModel, setFilterModel] = useState<ExplorerFilterModel>({});
   const gridApiRef = useRef<GridApi | null>(null);
-  const thumbnailLoadTokenRef = useRef(0);
-  const thumbnailCachesRef = useRef<Record<string, DashboardThumbnailCacheSnapshot>>({});
   const drilldownPreviousVideoFilterRef = useRef<ExplorerFilterModel | null>(null);
   const selectionScrollModeRef = useRef<'none' | 'middle'>('none');
-  const latestPersistedStateRef = useRef<Record<string, any> | null>(persisted);
   const sourceRowsRef = useRef<any[]>([]);
   const sourceSchemaRef = useRef<any[]>([]);
   const isAutoRestoreInFlightRef = useRef(false);
   const [isChannelDrilldownFilterActive, setIsChannelDrilldownFilterActive] = useState(false);
-  const navigationRestoreInFlightRef = useRef(false);
-  const lastNavigationKeyRef = useRef<string | null>(null);
   const initialSelectionResolvedRef = useRef<{ videos: boolean; channels: boolean }>({ videos: false, channels: false });
   const videoSelection = selectionState.videos;
   const channelSelection = selectionState.channels;
@@ -1339,6 +285,46 @@ export default function App() {
       setLongTaskProgress(progress);
     });
   }, []);
+
+  const handleCsvReadError = useCallback((fileName: string, error: unknown) => {
+    showToast(readFailedToast(fileName, error));
+  }, [showToast]);
+  const {
+    isImportOpen,
+    pendingFile,
+    pendingSchema,
+    pendingRows,
+    importError,
+    setImportError,
+    isImportSubmitting,
+    closeImport,
+    openCsvForImport,
+    runImport,
+  } = useImportFlow({
+    readCSVBuffer,
+    updateLongTaskProgress,
+    setIsLoadingRows,
+    onReadError: handleCsvReadError,
+  });
+  const {
+    isCommandPaletteOpen, setIsCommandPaletteOpen,
+    isKeyboardHelpOpen, setIsKeyboardHelpOpen,
+    isDashboardOpen, setIsDashboardOpen,
+    isExportOpen, setIsExportOpen,
+    isColumnsOpen, setIsColumnsOpen,
+    isResearchLogOpen, setIsResearchLogOpen,
+    hasBlockingOverlay,
+    closeTopOverlay,
+  } = useDialogs({ isImportOpen, closeImport });
+  const isImportOpenRef = useRef(isImportOpen);
+  useEffect(() => {
+    isImportOpenRef.current = isImportOpen;
+  }, [isImportOpen]);
+  // Lazy dialogs mount on first open and then stay mounted, so their internal state survives closing.
+  const [hasOpenedDashboard, setHasOpenedDashboard] = useState(false);
+  const [hasOpenedResearchLog, setHasOpenedResearchLog] = useState(false);
+  if (isDashboardOpen && !hasOpenedDashboard) setHasOpenedDashboard(true);
+  if (isResearchLogOpen && !hasOpenedResearchLog) setHasOpenedResearchLog(true);
 
   const workingSchema = useMemo(() => stripDeletedColumnsFromSchema(sourceSchema, deletedColumns), [sourceSchema, deletedColumns]);
   const baseRows = useMemo(() => stripDeletedColumnsFromRows(sourceRows, deletedColumns), [sourceRows, deletedColumns]);
@@ -1407,16 +393,29 @@ export default function App() {
     const additions = generatedSchema.filter((column) => !existing.has(column.column_name));
     return [...workingSchema, ...additions];
   }, [generatedSchema, workingSchema]);
-  const activeBaseRowsWithGenerated = useMemo(
-    () => overlayGeneratedMetadataRows(activeBaseRows, generatedOverlayByVideoId),
-    [activeBaseRows, generatedOverlayByVideoId],
+  // Overlay generated metadata and user tags once for the whole dataset and only then split by
+  // inclusion: an include/exclude then just filters arrays, every other row keeps its object, and
+  // AG Grid can skip re-processing rows it already has.
+  const sourceRowsWithGenerated = useMemo(
+    () => overlayGeneratedMetadataRows(sourceMaskedRows, generatedOverlayByVideoId),
+    [generatedOverlayByVideoId, sourceMaskedRows],
   );
-  const includedBaseRowsWithGenerated = useMemo(
-    () => overlayGeneratedMetadataRows(includedBaseRows, generatedOverlayByVideoId),
-    [generatedOverlayByVideoId, includedBaseRows],
+  const sourceDisplayRows = useMemo(
+    () => buildDisplayRows(sourceRowsWithGenerated, userTagsByVideoId),
+    [sourceRowsWithGenerated, userTagsByVideoId],
   );
+  const generatedInclusionPartition = useMemo(
+    () => partitionRowsByInclusion(sourceRowsWithGenerated, excludedVideoIdSet),
+    [excludedVideoIdSet, sourceRowsWithGenerated],
+  );
+  const displayInclusionPartition = useMemo(
+    () => partitionRowsByInclusion(sourceDisplayRows, excludedVideoIdSet),
+    [excludedVideoIdSet, sourceDisplayRows],
+  );
+  const includedBaseRowsWithGenerated = generatedInclusionPartition.included;
+  const includedDisplayRows = displayInclusionPartition.included;
   const displaySchema = useMemo(() => buildDisplaySchema(workingSchemaWithGenerated, userTagsByVideoId), [workingSchemaWithGenerated, userTagsByVideoId]);
-  const displayRows = useMemo(() => buildDisplayRows(activeBaseRowsWithGenerated, userTagsByVideoId), [activeBaseRowsWithGenerated, userTagsByVideoId]);
+  const displayRows = inclusionView === 'excluded' ? displayInclusionPartition.excluded : displayInclusionPartition.included;
   const channelScopedDisplayRows = useMemo(() => {
     if (!videoScopeChannelKeys?.length) return displayRows;
     const allowed = new Set(videoScopeChannelKeys);
@@ -1451,91 +450,28 @@ export default function App() {
     exclusionMembershipFingerprint,
     inclusionView,
   }), [exclusionMembershipFingerprint, inclusionView, videoCorpusFingerprint]);
-  const isChannelMetadataFresh = useMemo(() => Boolean(
-    channelMetadataSnapshot
-    && (
-      (channelMetadataSnapshot.cacheKeyAtCalculation
-        ? channelMetadataSnapshot.cacheKeyAtCalculation === currentChannelMetadataCacheKey
-        : (
-          channelMetadataSnapshot.datasetVersionAtCalculation === datasetVersion
-          && channelMetadataSnapshot.inclusionViewAtCalculation === inclusionView
-        ))
-    ),
-  ), [channelMetadataSnapshot, currentChannelMetadataCacheKey, datasetVersion, inclusionView]);
-  const channelRows = useMemo(() => {
-    if (!channelMetadataSnapshot?.rows?.length) return [];
-    return mergeChannelMetadataRows(channelMetadataSnapshot.rows, importedChannelMetadata);
-  }, [channelMetadataSnapshot, importedChannelMetadata]);
-  const hasChannelUserTags = useMemo(
-    () => Object.values(channelTagsById).some((tags) => Array.isArray(tags) && tags.length > 0),
-    [channelTagsById],
-  );
-  const scopedChannelRows = useMemo(() => {
-    if (!channelRows.length || !activeBaseRows.length) return [];
-    const scopedChannelKeys = new Set<string>();
-    activeBaseRows.forEach((row) => {
-      const channelId = resolveChannelId(row);
-      const channelName = resolveChannelName(row);
-      const channelKey = channelId ? `id:${channelId}` : `name:${channelName.toLowerCase()}`;
-      if (channelKey) scopedChannelKeys.add(channelKey);
-    });
-    if (!scopedChannelKeys.size) return [];
-
-    const scopedCachedRows = channelRows.filter((row) => scopedChannelKeys.has(resolveChannelRowKey(row)));
-    const coveredKeys = new Set(scopedCachedRows.map((row) => resolveChannelRowKey(row)).filter(Boolean));
-    const missingSourceRows = activeBaseRows.filter((row) => {
-      const channelId = resolveChannelId(row);
-      const channelName = resolveChannelName(row);
-      const channelKey = channelId ? `id:${channelId}` : `name:${channelName.toLowerCase()}`;
-      return Boolean(channelKey) && !coveredKeys.has(channelKey);
-    });
-    if (!missingSourceRows.length) return scopedCachedRows;
-
-    const scopedFallbackRows = buildChannelMetadataRows(missingSourceRows, importedChannelMetadata)
-      .filter((row) => {
-        const channelKey = resolveChannelRowKey(row);
-        return Boolean(channelKey) && !coveredKeys.has(channelKey);
-      });
-    return [...scopedCachedRows, ...scopedFallbackRows];
-  }, [activeBaseRows, channelRows, importedChannelMetadata]);
-  const channelRowsWithTags = useMemo(() => {
-    if (!scopedChannelRows.length) return scopedChannelRows;
-    if (!hasChannelUserTags) return scopedChannelRows;
-    return scopedChannelRows.map((row) => {
-      const channelKey = resolveChannelRowKey(row);
-      const tags = channelKey ? (channelTagsById[channelKey] || []) : [];
-      return {
-        ...row,
-        [CHANNEL_USER_TAGS_COLUMN]: tags,
-      };
-    });
-  }, [channelTagsById, hasChannelUserTags, scopedChannelRows]);
-  const channelRowsWithLinking = useMemo(() => {
-    if (!channelRowsWithTags.length) return channelRowsWithTags;
-    if (!channelLinkingState.snapshot?.byChannelKey || channelLinkingState.stale) return channelRowsWithTags;
-    const byChannelKey = channelLinkingState.snapshot.byChannelKey;
-    return channelRowsWithTags.map((row) => {
-      const key = String(row?.channel_key || '');
-      const linking = byChannelKey[key];
-      if (!linking) return row;
-      return { ...row, ...linking };
-    });
-  }, [channelLinkingState.snapshot?.byChannelKey, channelLinkingState.stale, channelRowsWithTags]);
-  const channelSchema = useMemo(() => {
-    const rawSchema = deriveSchemaFromRows(channelRowsWithLinking, CHANNEL_BASE_SCHEMA);
-    const hasCanonicalChannelName = rawSchema.some((column) => column.column_name === 'channel_name');
-    return rawSchema.filter((column) => !(hasCanonicalChannelName && column.column_name === 'title'));
-  }, [channelRowsWithLinking]);
-  const channelBooleanMapColumns = useMemo(() => detectBooleanMapColumns(channelRowsWithLinking, channelSchema), [channelRowsWithLinking, channelSchema]);
-  const channelListLikeColumns = useMemo(() => detectListLikeColumns(channelRowsWithLinking, channelSchema, channelBooleanMapColumns), [channelBooleanMapColumns, channelRowsWithLinking, channelSchema]);
-  const unifiedChannelFilterState = useMemo(() => buildUnifiedFilterState({
-    rows: channelRowsWithLinking,
-    schema: channelSchema,
-    filterModel: channelFilterModel,
-    listLikeColumns: channelListLikeColumns,
-    booleanMapColumns: channelBooleanMapColumns,
-  }), [channelBooleanMapColumns, channelFilterModel, channelListLikeColumns, channelRowsWithLinking, channelSchema]);
-  const filteredChannelRows = unifiedChannelFilterState.filteredRows;
+  const isChannelMetadataFresh = useMemo(() => isChannelMetadataSnapshotFresh(channelMetadataSnapshot, {
+    cacheKey: currentChannelMetadataCacheKey,
+    datasetVersion,
+    inclusionView,
+  }), [channelMetadataSnapshot, currentChannelMetadataCacheKey, datasetVersion, inclusionView]);
+  const {
+    channelRows,
+    hasChannelUserTags,
+    channelRowsWithLinking,
+    channelSchema,
+    channelBooleanMapColumns,
+    channelListLikeColumns,
+    filteredChannelRows,
+    channelFilteredColumns,
+  } = useChannelRows({
+    snapshot: channelMetadataSnapshot,
+    importedChannelMetadata,
+    videoRows: activeBaseRows,
+    channelTagsById,
+    channelLinkingState,
+    channelFilterModel,
+  });
   const selectedChannelRows = useMemo(
     () => filteredChannelRows.filter((row) => selectedChannelKeys.includes(resolveChannelRowKey(row))),
     [filteredChannelRows, selectedChannelKeys],
@@ -1563,18 +499,35 @@ export default function App() {
     const selectedSet = new Set(selectedChannelKeys);
     return filteredKeys.every((key) => selectedSet.has(key));
   }, [filteredChannelRows, selectedChannelKeys]);
-  const channelFilteredColumns = unifiedChannelFilterState.filteredColumns;
   const displayedRowCount = viewScope === 'channels' ? filteredChannelRows.length : rows.length;
   const totalScopeRowCount = viewScope === 'channels' ? channelRowsWithLinking.length : displayRows.length;
   const activeGridRows = viewScope === 'channels' ? filteredChannelRows : rows;
   const activeGridSchema = viewScope === 'channels' ? channelSchema : displaySchema;
   const activeGridListLikeColumns = viewScope === 'channels' ? channelListLikeColumns : listLikeColumns;
   const activeGridBooleanMapColumns = viewScope === 'channels' ? channelBooleanMapColumns : booleanMapColumns;
-  const activeGridTagValuesByColumn = viewScope === 'channels'
-    ? unifiedChannelFilterState.tagValueIndexByColumn
-    : unifiedFilterState.tagValueIndexByColumn;
+  // Tag filter options are built when a tag filter opens, from whatever the grid shows at that moment.
+  const tagValueSourceRef = useRef<Omit<Parameters<typeof buildTagValuesForColumn>[0], 'column'> | null>(null);
+  tagValueSourceRef.current = viewScope === 'channels'
+    ? {
+        rows: channelRowsWithLinking,
+        schema: channelSchema,
+        filterModel: channelFilterModel,
+        listLikeColumns: channelListLikeColumns,
+        booleanMapColumns: channelBooleanMapColumns,
+      }
+    : {
+        rows: channelScopedDisplayRows,
+        schema: displaySchema,
+        filterModel,
+        listLikeColumns,
+        booleanMapColumns,
+      };
+  const getActiveGridTagValues = useCallback((column: string) => {
+    const source = tagValueSourceRef.current;
+    return source ? buildTagValuesForColumn({ ...source, column }) : [];
+  }, []);
   const activeGridFilterModel = viewScope === 'channels' ? channelFilterModel : filterModel;
-  const selectedVideoIdsForActions = viewScope === 'videos' ? videoSelection.selectedKeys : [];
+  const selectedVideoIdsForActions = viewScope === 'videos' ? videoSelection.selectedKeys : NO_SELECTED_KEYS;
   const selectedVideoCount = selectedVideoIdsForActions.length;
   const sourceMaskedRowByVideoId = useMemo(() => {
     const next = new Map<string, any>();
@@ -1769,10 +722,6 @@ export default function App() {
   }, [applyScopeSelection, channelSelection.detailKey, filteredChannelRows, videoSelection.detailKey, viewScope, visibleVideoIdSet]);
 
   useEffect(() => {
-    thumbnailCachesRef.current = thumbnailCaches;
-  }, [thumbnailCaches]);
-
-  useEffect(() => {
     sourceRowsRef.current = sourceRows;
   }, [sourceRows]);
 
@@ -1780,105 +729,16 @@ export default function App() {
     sourceSchemaRef.current = sourceSchema;
   }, [sourceSchema]);
 
-  useEffect(() => () => {
-    (Object.values(thumbnailCachesRef.current) as DashboardThumbnailCacheSnapshot[]).forEach((snapshot) => revokeThumbnailUrls(snapshot));
-  }, []);
-
-  const flushAutosaveSnapshotNow = useCallback(async (reason: string) => {
-    if (!sourceRows.length || !sourceSchema.length) {
-      return;
-    }
-    const snapshot = {
-      version: LAST_PROJECT_AUTOSAVE_VERSION,
-      savedAt: new Date().toISOString(),
-      fileName: state.fileName ?? null,
-      sourceSchema,
-      rows: sourceRows,
-    };
-    try {
-      await saveLastProjectAutosaveSnapshot(snapshot);
-    } catch (error) {
-      console.warn(`[autosave] Failed to persist snapshot (${reason}).`, error);
-    }
-  }, [sourceRows, sourceSchema, state.fileName]);
-
-  useEffect(() => {
-    const nextPersistedState = {
-      isRightPanelCollapsed: state.isRightPanelCollapsed,
-      savedViews: state.savedViews,
-      activeViewId: state.activeViewId,
-      annotations: state.annotations,
-      userTagsByVideoId,
-      projectOverview: state.projectOverview,
-      projectNotes: state.projectNotes,
-      researchLogSectionComments: state.researchLogSectionComments,
-      researchHistory,
-      watchHistoryByVideoId,
-      savedViewsVersion,
-      inclusionView,
-      excludedVideoIds,
-      excludedVideoMetaById,
-      visibleColumns,
-      channelVisibleColumns,
-      theme: state.theme,
-      deletedColumns,
-      specialMappings,
-      dashboardSnapshots,
-      savedViewDashboardSnapshots,
-      channelMetadataSnapshot,
-      importedChannelMetadata,
-      viewScope,
-      channelFilterModel,
-      selectedVideoId: videoSelection.detailKey || videoSelection.focusKey || videoSelection.anchorKey || videoSelection.selectedKeys[0] || null,
-      selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
-      videoColumnWidths,
-      channelColumnWidths,
-      sourceRegistry,
-      sourceVisibility,
-      rowLineage,
-      columnLineage,
-      generatedMetadata,
-      linkingState,
-      channelLinkingState,
-      researchLogMarkdownOptions,
-      notesByVideoId,
-      channelNotesById,
-      channelTagsById,
-    };
-    latestPersistedStateRef.current = nextPersistedState;
-
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let idleId: number | null = null;
-    const persist = () => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(nextPersistedState));
-    };
-
-    if ('requestIdleCallback' in window) {
-      idleId = (window as Window & { requestIdleCallback: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number }).requestIdleCallback(
-        () => persist(),
-        { timeout: 1200 },
-      );
-    } else {
-      timeoutId = globalThis.setTimeout(persist, 120);
-    }
-
-    return () => {
-      if (idleId !== null && 'cancelIdleCallback' in window) {
-        (window as Window & { cancelIdleCallback: (handle: number) => void }).cancelIdleCallback(idleId);
-      }
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [
-    state.isRightPanelCollapsed,
-    state.savedViews,
-    state.activeViewId,
-    state.annotations,
-    state.projectOverview,
-    state.projectNotes,
-    state.researchLogSectionComments,
-    state.theme,
+  // Everything that survives a reload. usePersistence saves it whenever a field changes.
+  const persistedAppState = {
+    isRightPanelCollapsed: state.isRightPanelCollapsed,
+    savedViews: state.savedViews,
+    activeViewId: state.activeViewId,
+    annotations: state.annotations,
+    userTagsByVideoId,
+    projectOverview: state.projectOverview,
+    projectNotes: state.projectNotes,
+    researchLogSectionComments: state.researchLogSectionComments,
     researchHistory,
     watchHistoryByVideoId,
     savedViewsVersion,
@@ -1887,6 +747,7 @@ export default function App() {
     excludedVideoMetaById,
     visibleColumns,
     channelVisibleColumns,
+    theme: state.theme,
     deletedColumns,
     specialMappings,
     dashboardSnapshots,
@@ -1895,16 +756,13 @@ export default function App() {
     importedChannelMetadata,
     viewScope,
     channelFilterModel,
-    videoSelection.anchorKey,
-    videoSelection.detailKey,
-    videoSelection.focusKey,
-    videoSelection.selectedKeys,
-    channelSelection.anchorKey,
-    channelSelection.detailKey,
-    channelSelection.focusKey,
-    channelSelection.selectedKeys,
+    selectedVideoId: videoSelection.detailKey || videoSelection.focusKey || videoSelection.anchorKey || videoSelection.selectedKeys[0] || null,
+    selectedChannelKey: channelSelection.detailKey || channelSelection.focusKey || channelSelection.anchorKey || channelSelection.selectedKeys[0] || null,
     videoColumnWidths,
     channelColumnWidths,
+    vernacularExclusions,
+    explorerLayout,
+    thumbnailTileWidth,
     sourceRegistry,
     sourceVisibility,
     rowLineage,
@@ -1916,33 +774,14 @@ export default function App() {
     notesByVideoId,
     channelNotesById,
     channelTagsById,
-    userTagsByVideoId,
-  ]);
-
-  useEffect(() => {
-    const flushLatestPersistedState = () => {
-      const snapshot = latestPersistedStateRef.current;
-      void flushAutosaveSnapshotNow('page-lifecycle');
-      if (!snapshot) return;
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
-      } catch (error) {
-        console.warn('Failed to flush local storage on page lifecycle event:', error);
-      }
-    };
-
-    window.addEventListener('pagehide', flushLatestPersistedState);
-    window.addEventListener('beforeunload', flushLatestPersistedState);
-    return () => {
-      window.removeEventListener('pagehide', flushLatestPersistedState);
-      window.removeEventListener('beforeunload', flushLatestPersistedState);
-    };
-  }, [flushAutosaveSnapshotNow]);
-
-  useEffect(() => {
-    if (!sourceRows.length || !sourceSchema.length) return;
-    void flushAutosaveSnapshotNow('dataset-change');
-  }, [flushAutosaveSnapshotNow, sourceRows.length, sourceSchema.length]);
+  };
+  const { getLatestPersistedState, markRowsRestored } = usePersistence({
+    state: persistedAppState,
+    rows: sourceRows,
+    schema: sourceSchema,
+    fileName: state.fileName ?? null,
+    onSaveError: (what, error) => showToast(saveFailedToast(what, error)),
+  });
 
   useEffect(() => {
     document.documentElement.dataset.theme = state.theme;
@@ -2012,25 +851,13 @@ export default function App() {
     return filteredChannelRows[0] || null;
   }, [channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, filteredChannelRows, selectedChannelKeys, selectedChannelRows, viewScope]);
   const hasLoadedData = workingSchema.length > 0 && baseRows.length > 0;
+  const showThumbnailView = hasLoadedData && viewScope === 'videos' && explorerLayout === 'thumbnails';
+  // The thumbnails follow the table's sort order; only sort when they are shown.
+  const thumbnailViewRows = useMemo(
+    () => (showThumbnailView ? sortRowsLikeGrid(rows, videoSortRules) : NO_ROWS),
+    [rows, showThumbnailView, videoSortRules],
+  );
   const currentProjectName = useMemo(() => (state.fileName || 'ytde_project').replace(/\.(csv|zip)$/i, ''), [state.fileName]);
-
-  const appendResearchHistory = useCallback((event: Omit<ResearchHistoryEvent, 'id' | 'createdAt'> & { id?: string; createdAt?: string }) => {
-    setResearchHistory((current) => [
-      ...current,
-      {
-        id: event.id || createHistoryId('history'),
-        createdAt: event.createdAt || new Date().toISOString(),
-        ...event,
-      },
-    ]);
-  }, []);
-
-  const markResearchHistoryEventReverted = useCallback((eventId?: string) => {
-    if (!eventId) return;
-    setResearchHistory((current) => current.map((event) => (
-      event.id === eventId ? { ...event, reverted: true } : event
-    )));
-  }, []);
 
   const clearChannelDrilldownState = useCallback((options?: { restoreVideoFilters?: boolean }) => {
     const shouldRestore = options?.restoreVideoFilters !== false;
@@ -2057,7 +884,6 @@ export default function App() {
   }, [channelSchema]);
 
   const restoreNavigationEntry = useCallback((entry: AppNavigationEntry) => {
-    navigationRestoreInFlightRef.current = true;
     drilldownPreviousVideoFilterRef.current = entry.drilldownPreviousVideoFilter ?? null;
     setDefaultGridResetStage(0);
     setInclusionView(entry.inclusionView);
@@ -2075,17 +901,7 @@ export default function App() {
     }
     setViewScope('videos');
     setPendingViewerTarget(entry.selectedVideoId ? { kind: 'video', videoId: entry.selectedVideoId } : null);
-  }, [clearScopeSelection]);
-
-  const navigateHistoryByOffset = useCallback((offset: -1 | 1) => {
-    setNavigationCursor((current) => {
-      const target = current + offset;
-      const entry = navigationHistory[target];
-      if (!entry) return current;
-      restoreNavigationEntry(entry);
-      return target;
-    });
-  }, [navigationHistory, restoreNavigationEntry]);
+  }, [clearScopeSelection, setInclusionView]);
 
   const markDerivedSnapshotsStale = useCallback((reason: string) => {
     setLinkingState((current) => ({
@@ -2101,14 +917,6 @@ export default function App() {
     }));
   }, []);
 
-  const clearAllThumbnailCaches = useCallback(() => {
-    thumbnailLoadTokenRef.current = Math.max(thumbnailLoadTokenRef.current + 1, hydratedSessionCounter);
-    setThumbnailLoadProgress(null);
-    setThumbnailCaches((current) => {
-      (Object.values(current as Record<string, DashboardThumbnailCacheSnapshot>) as DashboardThumbnailCacheSnapshot[]).forEach((snapshot) => revokeThumbnailUrls(snapshot));
-      return {};
-    });
-  }, []);
 
   useEffect(() => {
     dispatchSelection(pruneScopeSelectionAction('videos', visibleVideoIds));
@@ -2139,50 +947,9 @@ export default function App() {
     });
   }, [applyScopeSelection, rows, selectedVideoId, viewScope]);
 
-  const hydrateProject = useCallback((args: {
-    rows: any[];
-    schema?: any[];
-    fileName: string | null;
-    visible?: string[];
-    channelVisible?: string[];
-    videoColumnWidths?: Record<string, number>;
-    channelColumnWidths?: Record<string, number>;
-    annotations?: Record<string, Annotation>;
-    notesByVideoId?: Record<string, string>;
-    channelNotesById?: Record<string, string>;
-    channelTagsById?: Record<string, string[]>;
-    savedViews?: SavedView[];
-    activeViewId?: string | null;
-    projectOverview?: string;
-    projectNotes?: string;
-    researchLogSectionComments?: Partial<Record<ResearchLogCommentSectionId, string>>;
-    researchHistory?: ResearchHistoryEvent[];
-    watchHistoryByVideoId?: Record<string, WatchHistoryEntry>;
-    theme?: AppState['theme'];
-    isRightPanelCollapsed?: boolean;
-    deletedColumns?: string[];
-    specialMappings?: Partial<SpecialMappings>;
-    excludedVideoIds?: string[];
-    excludedVideoMetaById?: Record<string, ExcludedVideoMeta>;
-    inclusionView?: InclusionView;
-    dashboardSnapshots?: Partial<Record<DashboardScope, DatasetDashboardSnapshot>>;
-    savedViewDashboardSnapshots?: Record<string, SavedViewDashboardSnapshot>;
-    savedViewsVersion?: number;
-    channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
-    importedChannelMetadata?: ImportedChannelMetadataState | null;
-    thumbnailCaches?: Record<string, DashboardThumbnailCacheSnapshot>;
-    viewScope?: ViewScope;
-    channelFilterModel?: ExplorerFilterModel;
-    channelSnapshotShouldBeFresh?: boolean;
-    autoExpandPanel?: boolean;
-    sourceRegistry?: SourceRegistryState;
-    sourceVisibility?: SourceVisibilityState;
-    rowLineage?: RowLineageState;
-    columnLineage?: ColumnLineageState;
-    generatedMetadata?: GeneratedMetadataState;
-    linkingState?: LinkingState;
-    channelLinkingState?: ChannelLinkingState;
-  }) => {
+  // Navigation history is set up further down (it depends on later values); hydrate reaches it via a ref.
+  const resetNavigationHistoryRef = useRef<() => void>(() => {});
+  const hydrateProject = useCallback((args: HydrateProjectArgs) => {
     const nextSourceRows = args.rows;
     const nextSourceSchema = applyFriendlyColumnMappings(args.schema || deriveSchemaFromRows(nextSourceRows), args.fileName || '');
     const nextDeletedColumns = args.deletedColumns ?? [];
@@ -2235,36 +1002,6 @@ export default function App() {
           },
         ]))) as Record<string, SavedViewDashboardSnapshot>
       : {};
-    let hydratedSessionCounter = thumbnailLoadTokenRef.current;
-    const nextThumbnailCaches = args.thumbnailCaches
-      ? Object.fromEntries(Object.entries(args.thumbnailCaches).map(([scopeKey, snapshot]) => {
-          hydratedSessionCounter += 1;
-          const fallbackSessionId = hydratedSessionCounter;
-          const sessionId = Number.isFinite(snapshot.sessionId) ? Number(snapshot.sessionId) : fallbackSessionId;
-          const entries = (snapshot.entries || []).map((entry) => {
-            const normalizedIndex = Number.isFinite(entry.activeCandidateIndex)
-              ? Number(entry.activeCandidateIndex)
-              : Math.max(0, Number(entry.fallbackIndex ?? 0));
-            return {
-              ...entry,
-              activeCandidateIndex: entry.activeUrl || entry.sourceUrl ? normalizedIndex : -1,
-            };
-          });
-          return [
-            scopeKey,
-            {
-              ...snapshot,
-              sessionId,
-              entries,
-              datasetVersionAtCalculation: nextDatasetVersion,
-              filteredViewVersionAtCalculation: scopeKey === FILTERED_TEMP_THUMBNAIL_SCOPE ? nextFilteredVersion : snapshot.filteredViewVersionAtCalculation,
-              savedViewsVersionAtCalculation: isSavedViewThumbnailScopeKey(scopeKey)
-                ? (args.savedViewsVersion ?? snapshot.savedViewsVersionAtCalculation ?? 0)
-                : snapshot.savedViewsVersionAtCalculation,
-            },
-          ];
-        })) as Record<string, DashboardThumbnailCacheSnapshot>
-      : {};
     const nextChannelSnapshot = args.channelMetadataSnapshot
       ? {
           ...args.channelMetadataSnapshot,
@@ -2300,7 +1037,6 @@ export default function App() {
       nextSourceRegistry,
     );
 
-    thumbnailLoadTokenRef.current += 1;
     setSourceRows(nextSourceRows);
     setSourceSchema(nextSourceSchema);
     setDeletedColumns(nextDeletedColumns);
@@ -2312,30 +1048,24 @@ export default function App() {
     setVisibleColumns(nextVisibleColumns);
     setChannelVisibleColumns(nextChannelVisibleColumns);
     setVideoColumnWidths(args.videoColumnWidths ?? {});
+    setVernacularExclusions(args.vernacularExclusions ?? []);
     setChannelColumnWidths(args.channelColumnWidths ?? {});
-    setExcludedVideoIds(nextExcludedVideoIds);
-    setExcludedVideoMetaById(args.excludedVideoMetaById ?? {});
+    setInclusionState({
+      excludedVideoIds: nextExcludedVideoIds,
+      excludedVideoMetaById: args.excludedVideoMetaById ?? {},
+    });
     setInclusionView(nextInclusionView);
     clearScopeSelection('videos', false);
     clearScopeSelection('channels', false);
-    setIncludeExcludeUndoStack([]);
-    setIncludeExcludeRedoStack([]);
+    resetInclusionHistory();
     setFilterModel({});
     setChannelFilterModel(args.channelFilterModel ?? {});
     clearChannelDrilldownState({ restoreVideoFilters: false });
     setVideoScopeChannelKeys(null);
-    setNavigationHistory([]);
-    setNavigationCursor(-1);
-    navigationRestoreInFlightRef.current = false;
-    lastNavigationKeyRef.current = null;
+    resetNavigationHistoryRef.current();
     setDashboardActiveTab('overview');
     setDashboardSnapshots(nextDashboardSnapshots);
     setSavedViewDashboardSnapshots(nextSavedViewSnapshots);
-    setThumbnailLoadProgress(null);
-    setThumbnailCaches((current) => {
-      (Object.values(current as Record<string, DashboardThumbnailCacheSnapshot>) as DashboardThumbnailCacheSnapshot[]).forEach((snapshot) => revokeThumbnailUrls(snapshot));
-      return nextThumbnailCaches;
-    });
     setChannelMetadataSnapshot(nextChannelSnapshot);
     setImportedChannelMetadata(args.importedChannelMetadata ?? null);
     setSourceRegistry(nextSourceRegistry);
@@ -2365,7 +1095,7 @@ export default function App() {
       theme: args.theme ?? previous.theme,
       isRightPanelCollapsed: args.autoExpandPanel ? false : (args.isRightPanelCollapsed ?? previous.isRightPanelCollapsed),
     }));
-  }, [channelVisibleColumns, datasetVersion, filteredViewVersion]);
+  }, [channelVisibleColumns, clearChannelDrilldownState, clearScopeSelection, datasetVersion, filteredViewVersion, resetInclusionHistory, setChannelNotesById, setChannelTagsById, setInclusionState, setInclusionView, setResearchHistory]);
 
   const attemptAutoRestoreLastProject = useCallback(async (trigger: 'mount' | 'pageshow') => {
     if (isAutoRestoreInFlightRef.current) {
@@ -2387,97 +1117,36 @@ export default function App() {
         console.warn(`[autosave] Restore skipped (${trigger}): no autosave snapshot found.`);
         return;
       }
-
-      const persistedState = latestPersistedStateRef.current ?? persisted;
-      const mergedAnnotations = mergeAnnotationsWithUserTags(
-        (persistedState?.annotations || {}) as Record<string, Annotation>,
-        (persistedState?.userTagsByVideoId || {}) as Record<string, string[]>,
-      );
-
-      const sourceStateBase = buildDefaultProjectSourceState({
-        rows: autosavedSnapshot.rows,
-        schema: autosavedSnapshot.sourceSchema,
-        fileName: autosavedSnapshot.fileName,
-      });
-      const nextRowLineage = persistedState?.rowLineage ?? sourceStateBase.rowLineage;
-      const nextSourceRegistry = withSourceRegistryCounts({
-        sourceRegistry: persistedState?.sourceRegistry ?? sourceStateBase.sourceRegistry,
-        rowLineage: nextRowLineage,
-        defaultRowCount: autosavedSnapshot.rows.length,
-      });
-      const nextSourceVisibility = reconcileSourceVisibility(
-        persistedState?.sourceVisibility ?? sourceStateBase.sourceVisibility,
-        nextSourceRegistry,
-      );
-      const preferredInclusion = persistedState?.inclusionView === 'excluded' ? 'excluded' : 'included';
-      const counts = computeSourceVisibilityInclusionCounts({
-        rows: autosavedSnapshot.rows,
-        rowLineage: nextRowLineage,
-        sourceVisibility: nextSourceVisibility,
-        excludedVideoIds: persistedState?.excludedVideoIds ?? [],
-      });
-      const recoveredInclusion = resolveRecoverableInclusionView({
-        preferred: preferredInclusion,
-        ...counts,
-      });
-      if (recoveredInclusion !== preferredInclusion) {
-        console.warn(
-          `[autosave] Restore (${trigger}) switched inclusion view to "${recoveredInclusion}" because ` +
-          `${preferredInclusion} had no visible rows.`,
-        );
+      // Reading a large snapshot takes a while; never replace a dataset the user imported meanwhile,
+      // or reset an import dialog they are filling in.
+      if (sourceRowsRef.current.length > 0 || isImportOpenRef.current) {
+        console.warn(`[autosave] Restore skipped (${trigger}): a dataset was loaded while the snapshot was being read.`);
+        return;
       }
 
-      hydrateProject({
-        rows: autosavedSnapshot.rows,
-        schema: autosavedSnapshot.sourceSchema,
-        fileName: autosavedSnapshot.fileName || undefined,
-        visible: persistedState?.visibleColumns,
-        channelVisible: persistedState?.channelVisibleColumns,
-        videoColumnWidths: persistedState?.videoColumnWidths,
-        channelColumnWidths: persistedState?.channelColumnWidths,
-        annotations: mergedAnnotations,
-        notesByVideoId: persistedState?.notesByVideoId,
-        channelNotesById: persistedState?.channelNotesById,
-        channelTagsById: persistedState?.channelTagsById,
-        savedViews: persistedState?.savedViews,
-        activeViewId: persistedState?.activeViewId,
-        projectOverview: persistedState?.projectOverview,
-        projectNotes: persistedState?.projectNotes,
-        researchLogSectionComments: persistedState?.researchLogSectionComments,
-        researchHistory: persistedState?.researchHistory,
-        watchHistoryByVideoId: persistedState?.watchHistoryByVideoId,
-        theme: persistedState?.theme,
-        isRightPanelCollapsed: persistedState?.isRightPanelCollapsed,
-        deletedColumns: persistedState?.deletedColumns,
-        specialMappings: persistedState?.specialMappings,
-        excludedVideoIds: persistedState?.excludedVideoIds,
-        excludedVideoMetaById: persistedState?.excludedVideoMetaById,
-        inclusionView: recoveredInclusion,
-        dashboardSnapshots: persistedState?.dashboardSnapshots,
-        savedViewDashboardSnapshots: persistedState?.savedViewDashboardSnapshots,
-        savedViewsVersion: persistedState?.savedViewsVersion ?? 0,
-        channelMetadataSnapshot: persistedState?.channelMetadataSnapshot ?? null,
-        importedChannelMetadata: persistedState?.importedChannelMetadata ?? null,
-        viewScope: persistedState?.viewScope === 'channels' ? 'channels' : 'videos',
-        channelFilterModel: persistedState?.channelFilterModel ?? {},
-        sourceRegistry: nextSourceRegistry,
-        sourceVisibility: nextSourceVisibility,
-        rowLineage: nextRowLineage,
-        columnLineage: persistedState?.columnLineage ?? sourceStateBase.columnLineage,
-        generatedMetadata: persistedState?.generatedMetadata ?? createEmptyGeneratedMetadata(),
-        linkingState: persistedState?.linkingState ?? createEmptyLinkingState(),
-        channelLinkingState: persistedState?.channelLinkingState ?? createEmptyChannelLinkingState(),
-      });
+      const plan = planAutosaveRestore(autosavedSnapshot, (getLatestPersistedState() ?? persisted) as SavedAppState);
+      if (plan.recoveredInclusion !== plan.preferredInclusion) {
+        console.warn(
+          `[autosave] Restore (${trigger}) switched inclusion view to "${plan.recoveredInclusion}" because ` +
+          `${plan.preferredInclusion} had no visible rows.`,
+        );
+      }
+      markRowsRestored(plan.project.rows);
+      hydrateProject(plan.project);
       console.warn(`[autosave] Restore completed (${trigger}) from snapshot saved at ${autosavedSnapshot.savedAt}.`);
     } catch (error) {
       console.warn(`[autosave] Restore failed (${trigger}).`, error);
+      showToast(autosaveRestoreFailedToast(error));
     } finally {
       isAutoRestoreInFlightRef.current = false;
     }
-  }, [hydrateProject, persisted]);
+  }, [getLatestPersistedState, hydrateProject, markRowsRestored, persisted, showToast]);
 
+  // The effect below re-runs when the restore callback changes; only the first run is the mount attempt.
+  const hasAttemptedMountRestoreRef = useRef(false);
   useEffect(() => {
-    const mountRaf = window.requestAnimationFrame(() => {
+    const mountRaf = hasAttemptedMountRestoreRef.current ? 0 : window.requestAnimationFrame(() => {
+      hasAttemptedMountRestoreRef.current = true;
       void attemptAutoRestoreLastProject('mount');
     });
     const handlePageShow = () => {
@@ -2491,76 +1160,6 @@ export default function App() {
       window.removeEventListener('pageshow', handlePageShow);
     };
   }, [attemptAutoRestoreLastProject]);
-
-  const restoreThumbnailCachesFromArchive = useCallback((
-    manifest: ProjectArchiveManifest,
-    archiveFiles: Record<string, Uint8Array>,
-  ): Record<string, DashboardThumbnailCacheSnapshot> => {
-    const index = manifest.thumbnailCacheIndex;
-    if (!index?.scopes) return {};
-
-    const restored: Record<string, DashboardThumbnailCacheSnapshot> = {};
-    (Object.entries(index.scopes) as Array<[string, DashboardThumbnailCacheIndex['scopes'][string]]>).forEach(([scopeKey, scopeIndex]) => {
-      if (!isPersistentThumbnailScopeKey(scopeKey)) return;
-      const entries: DashboardThumbnailCacheSnapshot['entries'] = scopeIndex.entries.map((entry) => {
-        const sourceUrl = String(entry.sourceUrl || '').trim();
-        const candidateUrls = sourceUrl ? [sourceUrl] : [];
-        const activeCandidateIndex = sourceUrl ? 0 : -1;
-        if (entry.status !== 'loaded' || !entry.fileName) {
-          return {
-            ...entry,
-            sourceUrl,
-            candidateUrls,
-            activeUrl: sourceUrl,
-            fallbackIndex: activeCandidateIndex,
-            activeCandidateIndex,
-            status: 'failed' as const,
-          };
-        }
-        const fileBytes = getArchiveEntry(archiveFiles, entry.fileName);
-        if (!fileBytes || fileBytes.length === 0) {
-          return {
-            ...entry,
-            sourceUrl,
-            candidateUrls,
-            activeUrl: sourceUrl,
-            fallbackIndex: activeCandidateIndex,
-            activeCandidateIndex,
-            status: 'failed' as const,
-            error: entry.error || 'Binary thumbnail payload missing from archive.',
-          };
-        }
-        const bytes = new Uint8Array(fileBytes);
-        return {
-          ...entry,
-          sourceUrl,
-          candidateUrls,
-          activeUrl: sourceUrl,
-          fallbackIndex: activeCandidateIndex,
-          activeCandidateIndex,
-          status: 'loaded' as const,
-          bytes,
-          byteLength: bytes.length,
-          objectUrl: createObjectUrl(bytes, entry.mimeType || 'image/jpeg'),
-        };
-      });
-
-      restored[scopeKey] = {
-        scopeKey,
-        label: scopeIndex.label || resolveThumbnailCacheLabel(scopeKey),
-        sessionId: 0,
-        rowCount: scopeIndex.rowCount ?? entries.length,
-        totalCandidates: scopeIndex.totalCandidates ?? entries.length,
-        calculatedAt: scopeIndex.calculatedAt || new Date().toISOString(),
-        datasetVersionAtCalculation: scopeIndex.datasetVersionAtCalculation ?? 0,
-        savedViewsVersionAtCalculation: scopeIndex.savedViewsVersionAtCalculation,
-        sortSignature: scopeIndex.sortSignature,
-        entries,
-      };
-    });
-
-    return restored;
-  }, []);
 
   const restoreProjectBackup = useCallback(async (file: File) => {
     try {
@@ -2587,16 +1186,7 @@ export default function App() {
       });
       await waitForNextPaint();
       const archiveFiles = readStoredZip(archiveBuffer);
-      const manifestBytes = getArchiveEntry(archiveFiles, 'project.json');
-      const dataBytes = getArchiveEntry(archiveFiles, 'data.csv');
-      if (!manifestBytes || !dataBytes) throw new Error('This backup is missing project.json or data.csv.');
-
-      const manifest = JSON.parse(decodeTextFile(manifestBytes)) as ProjectArchiveManifest;
-      if (manifest.version !== 10) {
-        throw new Error(`Unsupported project archive version ${manifest.version}. This build only imports version 10 archives.`);
-      }
-      const noteFiles = extractNotesFromArchive(archiveFiles);
-      const restoredThumbnailCaches = restoreThumbnailCachesFromArchive(manifest, archiveFiles);
+      const { manifest, dataBytes, noteFiles } = unpackProjectBackup(archiveFiles);
       updateLongTaskProgress({
         title: 'Restoring project backup',
         detail: 'Parsing archived dataset',
@@ -2614,189 +1204,59 @@ export default function App() {
         total: 100,
       });
       await waitForNextPaint();
-      hydrateProject({
-        rows: parsed.rows,
-        schema: manifest.sourceSchema || parsed.schema,
-        fileName: manifest.originalFileName || 'restored_project.csv',
-        visible: manifest.visibleColumns,
-        channelVisible: manifest.channelVisibleColumns,
-        videoColumnWidths: manifest.videoColumnWidths,
-        channelColumnWidths: manifest.channelColumnWidths,
-        annotations: manifest.annotations,
-        notesByVideoId: Object.keys(noteFiles).length > 0 ? noteFiles : buildLegacyNotesFromAnnotations(manifest.annotations),
-        channelNotesById: manifest.channelNotesById ?? {},
-        channelTagsById: manifest.channelTagsById ?? {},
-        savedViews: manifest.savedViews,
-        activeViewId: manifest.activeViewId,
-        projectOverview: manifest.projectOverview,
-        projectNotes: manifest.projectNotes,
-        researchLogSectionComments: manifest.researchLogSectionComments,
-        researchHistory: manifest.researchHistory,
-        watchHistoryByVideoId: manifest.watchHistoryByVideoId,
-        theme: manifest.uiState?.theme,
-        isRightPanelCollapsed: manifest.uiState?.isRightPanelCollapsed,
-        deletedColumns: manifest.deletedColumns,
-        specialMappings: manifest.specialMappings,
-        excludedVideoIds: manifest.excluded_videos,
-        excludedVideoMetaById: manifest.excludedVideoMetaById,
-        inclusionView: 'included',
-        dashboardSnapshots: manifest.dashboardSnapshots,
-        savedViewDashboardSnapshots: manifest.savedViewDashboardSnapshots,
-        savedViewsVersion: manifest.savedViewsVersion ?? 0,
-        channelMetadataSnapshot: manifest.channelMetadataSnapshot ?? null,
-        importedChannelMetadata: manifest.importedChannelMetadata ?? null,
-        thumbnailCaches: restoredThumbnailCaches,
-        viewScope: manifest.viewScope === 'channels' ? 'channels' : 'videos',
-        channelSnapshotShouldBeFresh: true,
-        sourceRegistry: manifest.sourceRegistry ?? createEmptySourceRegistry(),
-        sourceVisibility: manifest.sourceVisibility ?? createEmptySourceVisibility(),
-        rowLineage: manifest.rowLineage ?? createEmptyRowLineage(),
-        columnLineage: manifest.columnLineage ?? createEmptyColumnLineage(),
-        generatedMetadata: manifest.generatedMetadata ?? createEmptyGeneratedMetadata(),
-        linkingState: manifest.linkingState ?? createEmptyLinkingState(),
-        channelLinkingState: manifest.channelLinkingState ?? createEmptyChannelLinkingState(),
-      });
+      hydrateProject(planBackupRestore({ manifest, noteFiles, parsed }));
     } catch (error) {
       console.error('Failed to restore backup:', error);
+      showToast(restoreFailedToast(file.name, error));
     } finally {
       updateLongTaskProgress(null);
       setIsLoadingRows(false);
     }
-  }, [hydrateProject, readCSVBuffer, restoreThumbnailCachesFromArchive, updateLongTaskProgress]);
+  }, [hydrateProject, readCSVBuffer, showToast, updateLongTaskProgress]);
 
   const handleFileUpload = useCallback(async (file: File) => {
     if (file.name.toLowerCase().endsWith('.zip')) {
       await restoreProjectBackup(file);
       return;
     }
-
-    try {
-      setImportError(null);
-      setIsLoadingRows(true);
-      updateLongTaskProgress({
-        title: 'Preparing CSV import',
-        detail: `Reading ${file.name}`,
-        completed: 0,
-        total: 100,
-      });
-      const buffer = await readFileBufferWithProgress(file, (completed, total) => {
-        updateLongTaskProgress({
-          title: 'Preparing CSV import',
-          detail: `Reading ${file.name}`,
-          completed: Math.min(40, Math.round((completed / Math.max(total, 1)) * 40)),
-          total: 100,
-        });
-      });
-      updateLongTaskProgress({
-        title: 'Preparing CSV import',
-        detail: 'Parsing rows and inferring columns',
-        completed: 50,
-        total: 100,
-        indeterminate: true,
-      });
-      await waitForNextPaint();
-      const { schema, rows: parsedRows } = await readCSVBuffer(file.name, buffer);
-      const decoratedSchema = applyFriendlyColumnMappings(schema, file.name);
-      updateLongTaskProgress({
-        title: 'Preparing CSV import',
-        detail: `Loaded ${parsedRows.length.toLocaleString()} rows`,
-        completed: 100,
-        total: 100,
-      });
-      setPendingFile(file);
-      setPendingSchema(decoratedSchema);
-      setPendingRows(parsedRows);
-      setIsImportOpen(true);
-    } catch (error) {
-      console.error('Failed to read CSV:', error);
-    } finally {
-      updateLongTaskProgress(null);
-      setIsLoadingRows(false);
-    }
-  }, [readCSVBuffer, restoreProjectBackup, updateLongTaskProgress]);
+    await openCsvForImport(file);
+  }, [openCsvForImport, restoreProjectBackup]);
 
   const handleImportConfirm = useCallback(async ({ options, incomingRows }: ImportSubmission) => {
     if (!pendingFile) return;
-    try {
-      setImportError(null);
-      setIsImportSubmitting(true);
-      setIsLoadingRows(true);
-      const progressTitle = options.importKind === 'channelMetadata'
-        ? 'Merging channel metadata'
-        : (options.mode === 'replace' || sourceRows.length === 0 ? 'Importing CSV' : 'Merging CSV');
-      updateLongTaskProgress({
-        title: progressTitle,
-        detail: 'Preparing import settings',
-        completed: 1,
-        total: 5,
-      });
-      await waitForNextPaint();
-      const autoMappings: Partial<SpecialMappings> = {
-        ...detectSpecialMappings(pendingSchema),
-        ...(options.specialMappings || {}),
-      };
-
+    const fileName = pendingFile.name;
+    await runImport(importProgressTitle(options, sourceRows.length > 0), async (progress) => {
       if (options.importKind === 'channelMetadata') {
         if (!sourceRows.length) {
           throw new Error('Import a video dataset before merging channel metadata.');
         }
         const relationshipType = options.channelMetadataRelationship || 'channelId';
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Matching imported channel rows to existing channels',
-          completed: 2,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
+        await progress('Matching imported channel rows to existing channels', 2, { indeterminate: true });
         const mergeResult = buildImportedChannelMetadataState({
           existingVideoRows: sourceRows,
           incomingRows,
           incomingSchema: pendingSchema,
           relationshipType,
-          sourceFileName: pendingFile.name,
+          sourceFileName: fileName,
           previousState: importedChannelMetadata,
         });
         const nextImportedState = mergeResult.state;
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Rebuilding the channel table',
-          completed: 3,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const nextChannelRows = buildChannelMetadataRows(activeBaseRows, nextImportedState);
+        await progress('Rebuilding the channel table', 3, { indeterminate: true });
         setImportedChannelMetadata(nextImportedState);
-        setChannelMetadataSnapshot({
-          rows: nextChannelRows,
-          calculatedAt: new Date().toISOString(),
-          datasetVersionAtCalculation: datasetVersion,
-          inclusionViewAtCalculation: inclusionView,
-          videoCorpusFingerprintAtCalculation: videoCorpusFingerprint,
-          exclusionMembershipFingerprintAtCalculation: exclusionMembershipFingerprint,
-          cacheKeyAtCalculation: currentChannelMetadataCacheKey,
-        });
+        setChannelMetadataSnapshot(buildChannelMetadataSnapshot(buildChannelMetadataRows(activeBaseRows, nextImportedState), {
+          datasetVersion,
+          inclusionView,
+          videoCorpusFingerprint,
+          exclusionMembershipFingerprint,
+          cacheKey: currentChannelMetadataCacheKey,
+        }));
         setChannelFilterModel({});
-        setSourceRegistry((current) => {
-          const sourceId = buildSourceId('source/enrichment', pendingFile.name);
-          const next: SourceRegistryState = {
-            ...current,
-            byId: {
-              ...current.byId,
-              [sourceId]: {
-                id: sourceId,
-                label: pendingFile.name,
-                kind: 'enrichment',
-                rowCount: incomingRows.length,
-                contributedColumns: pendingSchema.map((column) => column.column_name),
-                createdAt: new Date().toISOString(),
-              },
-            },
-            orderedIds: joinUnique([...current.orderedIds, sourceId]),
-          };
-          return next;
-        });
+        setSourceRegistry((current) => addEnrichmentSource(current, {
+          fileName,
+          rowCount: incomingRows.length,
+          columns: pendingSchema.map((column) => column.column_name),
+          now: new Date().toISOString(),
+        }));
         setChannelLinkingState((current) => ({
           ...current,
           stale: true,
@@ -2804,517 +1264,167 @@ export default function App() {
         }));
         appendResearchHistory({
           type: 'import_merge_completed',
-          summary: `Merged channel metadata from ${pendingFile.name}: ${mergeResult.updatedCount.toLocaleString()} matched / updated, ${mergeResult.skippedCount.toLocaleString()} skipped.`,
+          summary: `Merged channel metadata from ${fileName}: ${mergeResult.updatedCount.toLocaleString()} matched / updated, ${mergeResult.skippedCount.toLocaleString()} skipped.`,
           details: `Relationship: ${relationshipType === 'channelId' ? 'channelId → channelId' : 'normalized channel title'}; matched on ${mergeResult.relationshipColumn || 'n/a'}.`,
         });
-      } else if (options.mode === 'replace' || sourceRows.length === 0) {
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Applying mapped support fields',
-          completed: 2,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const preparedRows = applySupportMappings(incomingRows, autoMappings);
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Deriving column schema',
-          completed: 3,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const preparedSchema = deriveSchemaFromRows(preparedRows, pendingSchema);
-        const isFirstDataset = sourceRows.length === 0;
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Rebuilding project state',
-          completed: 4,
-          total: 5,
-        });
-        await waitForNextPaint();
-        hydrateProject({
-          rows: preparedRows,
-          schema: preparedSchema,
-          fileName: pendingFile.name,
-          visible: options.selectedColumns,
-          annotations: extractAnnotationsFromRows(preparedRows, {}),
-          notesByVideoId: {},
-          channelNotesById: {},
-          channelTagsById: {},
-          savedViews: [],
-          activeViewId: null,
-          projectOverview: state.projectOverview,
-          projectNotes: state.projectNotes,
-          researchLogSectionComments: state.researchLogSectionComments,
-          researchHistory: [],
-          watchHistoryByVideoId: {},
-          specialMappings: autoMappings,
-          excludedVideoIds: [],
-          excludedVideoMetaById: {},
-          inclusionView: 'included',
-          savedViewDashboardSnapshots: {},
-          savedViewsVersion: 0,
-          channelMetadataSnapshot: null,
-          importedChannelMetadata: null,
-          viewScope: 'videos',
-          autoExpandPanel: isFirstDataset,
-          generatedMetadata: createEmptyGeneratedMetadata(),
-          linkingState: {
-            ...createEmptyLinkingState(),
-            sourceCandidateProfiles: profileLinkingColumnCandidates(preparedRows),
-          },
-          channelLinkingState: createEmptyChannelLinkingState(),
-        });
-        appendResearchHistory({
-          type: 'import_replace_completed',
-          summary: `Imported ${preparedRows.length.toLocaleString()} rows by replacing the current project with ${pendingFile.name}.`,
-        });
-        if (autoMappings.transcriptColumn || autoMappings.descriptionColumn || autoMappings.tagColumn) {
-          appendResearchHistory({
-            type: 'special_mapping_updated',
-            summary: 'Special field mappings updated during import.',
-            details: `Transcript: ${autoMappings.transcriptColumn || 'unmapped'}; Description: ${autoMappings.descriptionColumn || 'unmapped'}; Tags: ${autoMappings.tagColumn || 'unmapped'}.`,
-          });
-        }
-      } else {
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Applying merge rules and resolving conflicts',
-          completed: 2,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const mergeResult = applyMerge({
-          existingRows: sourceRows,
-          incomingRows,
-          existingSchema: sourceSchema,
-          incomingSchema: pendingSchema,
-          joinColumn: options.joinColumn,
-          incomingJoinColumn: options.incomingJoinColumn,
-          mergeOptions: options.mergeOptions!,
-        });
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Updating row lineage and source metadata',
-          completed: 3,
-          total: 5,
-          indeterminate: true,
-        });
-        await waitForNextPaint();
-        const sourceStateBase = sourceRegistry.orderedIds.length
-          ? {
+        return;
+      }
+
+      const plan = options.mode === 'replace' || sourceRows.length === 0
+        ? await planReplaceImport({
+            incomingRows,
+            incomingSchema: pendingSchema,
+            fileName,
+            options,
+            specialMappings: { ...detectSpecialMappings(pendingSchema), ...(options.specialMappings || {}) },
+            carryOver: {
+              projectOverview: state.projectOverview,
+              projectNotes: state.projectNotes,
+              researchLogSectionComments: state.researchLogSectionComments,
+            },
+            isFirstDataset: sourceRows.length === 0,
+            progress,
+          })
+        : await planMergeImport({
+            current: {
+              rows: sourceRows,
+              schema: sourceSchema,
+              fileName: state.fileName,
+              videoColumnWidths,
+              channelColumnWidths,
+              vernacularExclusions,
+              annotations: mergeAnnotationsWithUserTags(state.annotations, userTagsByVideoId),
+              notesByVideoId,
+              channelNotesById,
+              channelTagsById,
+              savedViews: state.savedViews,
+              activeViewId: state.activeViewId,
+              projectOverview: state.projectOverview,
+              projectNotes: state.projectNotes,
+              researchLogSectionComments: state.researchLogSectionComments,
+              researchHistory,
+              watchHistoryByVideoId,
+              specialMappings,
+              deletedColumns,
+              excludedVideoIds,
+              excludedVideoMetaById,
+              inclusionView,
+              savedViewDashboardSnapshots,
+              savedViewsVersion,
+              importedChannelMetadata,
+              viewScope,
               sourceRegistry,
+              sourceVisibility,
               rowLineage,
               columnLineage,
-              sourceVisibility,
-            }
-          : buildDefaultProjectSourceState({
-              rows: sourceRows,
-              schema: sourceSchema.length ? sourceSchema : deriveSchemaFromRows(sourceRows),
-              fileName: state.fileName || 'dataset.csv',
-            });
-        const now = new Date().toISOString();
-        const incomingSourceId = buildSourceId('source/enrichment', pendingFile.name);
-        const joinColumn = options.joinColumn || 'videoId';
-        const incomingJoinColumn = options.incomingJoinColumn || joinColumn;
-        const existingByJoin = new Map<string, RowLineageState['byRowId'][string]>();
-        const existingByVideoId = new Map<string, RowLineageState['byRowId'][string]>();
-        sourceRows.forEach((row, index) => {
-          const rowId = resolveRowLineageKey(row, index);
-          const lineageEntry = sourceStateBase.rowLineage.byRowId[rowId];
-          if (lineageEntry) {
-            const joinKey = normalizeJoinKey(row?.[joinColumn]);
-            if (joinKey) existingByJoin.set(joinKey, lineageEntry);
-            const videoId = resolveVideoId(row);
-            if (videoId) existingByVideoId.set(videoId, lineageEntry);
-          }
-        });
-        const incomingJoinKeys = new Set(
-          incomingRows
-            .map((row) => normalizeJoinKey(row?.[incomingJoinColumn]))
-            .filter(Boolean),
-        );
-        const nextRowLineageByRowId: RowLineageState['byRowId'] = {};
-        mergeResult.rows.forEach((row, index) => {
-          const rowId = resolveRowLineageKey(row, index);
-          const joinKey = normalizeJoinKey(row?.[joinColumn]);
-          const existingLineage = (joinKey && existingByJoin.get(joinKey))
-            || (resolveVideoId(row) ? existingByVideoId.get(resolveVideoId(row) as string) : undefined);
-          if (existingLineage) {
-            nextRowLineageByRowId[rowId] = {
-              rowId,
-              baseSourceId: existingLineage.baseSourceId,
-              contributorSourceIds: joinUnique([
-                ...(existingLineage.contributorSourceIds || []),
-                ...(joinKey && incomingJoinKeys.has(joinKey) ? [incomingSourceId] : []),
-              ]),
-            };
-            return;
-          }
-          nextRowLineageByRowId[rowId] = {
-            rowId,
-            baseSourceId: incomingSourceId,
-            contributorSourceIds: [incomingSourceId],
-          };
-        });
-        const nextRowLineage: RowLineageState = { byRowId: nextRowLineageByRowId };
-        const nextSourceRegistry = withSourceRegistryCounts({
-          sourceRegistry: {
-            byId: {
-              ...sourceStateBase.sourceRegistry.byId,
-              [incomingSourceId]: {
-                id: incomingSourceId,
-                label: pendingFile.name,
-                kind: 'enrichment',
-                rowCount: incomingRows.length,
-                contributedColumns: pendingSchema.map((column) => column.column_name),
-                createdAt: now,
-              },
-              [GENERATED_SOURCE_ID]: sourceStateBase.sourceRegistry.byId[GENERATED_SOURCE_ID] || {
-                id: GENERATED_SOURCE_ID,
-                label: 'Generated metadata',
-                kind: 'generated',
-                rowCount: 0,
-                contributedColumns: ['content_intent', ...LINKING_GENERATED_COLUMNS],
-                createdAt: now,
-              },
+              generatedMetadata,
+              linkingState,
+              channelLinkingState,
             },
-            orderedIds: joinUnique([
-              ...sourceStateBase.sourceRegistry.orderedIds,
-              incomingSourceId,
-              GENERATED_SOURCE_ID,
-            ]),
-            primarySourceId: sourceStateBase.sourceRegistry.primarySourceId || incomingSourceId,
-          },
-          rowLineage: nextRowLineage,
-          defaultRowCount: mergeResult.rows.length,
-        });
-        const nextColumnLineage = ensureGeneratedColumnLineage({
-          byColumn: Object.fromEntries(
-            mergeResult.schema.map((column) => {
-              const previous = sourceStateBase.columnLineage.byColumn[column.column_name];
-              if (previous) return [column.column_name, previous];
-              return [column.column_name, {
-                column: column.column_name,
-                sourceId: incomingSourceId,
-                generated: false,
-                scope: 'videos',
-              }];
-            }),
-          ),
-        });
-        const nextSourceVisibility = reconcileSourceVisibility(sourceStateBase.sourceVisibility, nextSourceRegistry);
-        updateLongTaskProgress({
-          title: progressTitle,
-          detail: 'Rebuilding project state',
-          completed: 4,
-          total: 5,
-        });
-        await waitForNextPaint();
-        const nextLinkingState: LinkingState = {
-          ...linkingState,
-          stale: true,
-          staleReason: 'Source rows changed after merge. Refresh linking summary.',
-          sourceCandidateProfiles: profileLinkingColumnCandidates(mergeResult.rows),
-        };
-        const nextChannelLinkingState: ChannelLinkingState = {
-          ...channelLinkingState,
-          stale: true,
-          staleReason: 'Source rows changed after merge. Refresh channel metadata to rebuild link aggregates.',
-        };
-        hydrateProject({
-          rows: mergeResult.rows,
-          schema: mergeResult.schema,
-          fileName: state.fileName || pendingFile.name,
-          visible: options.selectedColumns,
-          videoColumnWidths,
-          channelColumnWidths,
-          annotations: extractAnnotationsFromRows(mergeResult.rows, mergeAnnotationsWithUserTags(state.annotations, userTagsByVideoId)),
-          notesByVideoId,
-          channelNotesById,
-          channelTagsById,
-          savedViews: state.savedViews,
-          activeViewId: state.activeViewId,
-          projectOverview: state.projectOverview,
-          projectNotes: state.projectNotes,
-          researchLogSectionComments: state.researchLogSectionComments,
-          researchHistory,
-          watchHistoryByVideoId,
-          specialMappings: options.mergeOptions?.specialMappings || specialMappings,
-          deletedColumns,
-          excludedVideoIds,
-          excludedVideoMetaById,
-          inclusionView,
-          savedViewDashboardSnapshots,
-          savedViewsVersion,
-          channelMetadataSnapshot: null,
-          importedChannelMetadata,
-          viewScope,
-          sourceRegistry: nextSourceRegistry,
-          sourceVisibility: nextSourceVisibility,
-          rowLineage: nextRowLineage,
-          columnLineage: nextColumnLineage,
-          generatedMetadata,
-          linkingState: nextLinkingState,
-          channelLinkingState: nextChannelLinkingState,
-        });
-        appendResearchHistory({
-          type: 'import_merge_completed',
-          summary: `Merged ${incomingRows.length.toLocaleString()} incoming rows into ${sourceRows.length.toLocaleString()} existing rows.`,
-          details: `Project key: ${options.joinColumn || 'n/a'}; incoming key: ${options.incomingJoinColumn || options.joinColumn || 'n/a'}; mode: ${options.mergeOptions?.mergeMode || 'add-update'}.`,
-        });
-        const mergeMappings = options.mergeOptions?.specialMappings || {};
-        if (mergeMappings.transcriptColumn || mergeMappings.descriptionColumn || mergeMappings.tagColumn) {
-          appendResearchHistory({
-            type: 'special_mapping_updated',
-            summary: 'Special field mappings updated during merge.',
-            details: `Transcript: ${mergeMappings.transcriptColumn || 'unmapped'}; Description: ${mergeMappings.descriptionColumn || 'unmapped'}; Tags: ${mergeMappings.tagColumn || 'unmapped'}.`,
+            incomingRows,
+            incomingSchema: pendingSchema,
+            incomingFileName: fileName,
+            options,
+            progress,
           });
-        }
-      }
-      updateLongTaskProgress({
-        title: progressTitle,
-        detail: 'Finishing import',
-        completed: 5,
-        total: 5,
-      });
-      await waitForNextPaint();
-      setIsImportOpen(false);
-      setPendingFile(null);
-      setPendingRows([]);
-      setPendingSchema([]);
-    } catch (error) {
-      console.error('Failed to import/merge CSV:', error);
-      setImportError(error instanceof Error ? error.message : 'Failed to import or merge the CSV. Please try again.');
-    } finally {
-      updateLongTaskProgress(null);
-      setIsImportSubmitting(false);
-      setIsLoadingRows(false);
-    }
+      hydrateProject(plan.project);
+      plan.history.forEach((entry) => appendResearchHistory(entry));
+    });
   }, [
-    pendingFile,
-    pendingSchema,
-    sourceRows,
-    sourceSchema,
     activeBaseRows,
-    specialMappings,
-    importedChannelMetadata,
-    hydrateProject,
+    vernacularExclusions,
     appendResearchHistory,
-    state.annotations,
-    userTagsByVideoId,
-    state.fileName,
-    state.projectOverview,
-    state.projectNotes,
-    state.researchLogSectionComments,
-    state.savedViews,
-    state.activeViewId,
-    visibleColumns,
-    deletedColumns,
-    sourceRegistry,
-    sourceVisibility,
-    rowLineage,
-    columnLineage,
-    generatedMetadata,
-    linkingState,
+    channelColumnWidths,
     channelLinkingState,
-    updateLongTaskProgress,
-    notesByVideoId,
+    channelNotesById,
+    channelTagsById,
+    columnLineage,
+    currentChannelMetadataCacheKey,
+    datasetVersion,
+    deletedColumns,
     excludedVideoIds,
     excludedVideoMetaById,
+    exclusionMembershipFingerprint,
+    generatedMetadata,
+    hydrateProject,
+    importedChannelMetadata,
     inclusionView,
+    linkingState,
+    notesByVideoId,
+    pendingFile,
+    pendingSchema,
     researchHistory,
-    watchHistoryByVideoId,
+    rowLineage,
+    runImport,
     savedViewDashboardSnapshots,
     savedViewsVersion,
+    sourceRegistry,
+    sourceRows,
+    sourceSchema,
+    sourceVisibility,
+    specialMappings,
+    state.activeViewId,
+    state.annotations,
+    state.fileName,
+    state.projectNotes,
+    state.projectOverview,
+    state.researchLogSectionComments,
+    state.savedViews,
+    userTagsByVideoId,
+    videoColumnWidths,
+    videoCorpusFingerprint,
     viewScope,
-    datasetVersion,
-    inclusionView,
+    watchHistoryByVideoId,
   ]);
 
-  const applyIncludeExcludeAction = useCallback((videoIds: string[], targetKind?: IncludeExcludeAction['kind'], options?: {
-    skipUndo?: boolean;
-    reason?: string;
-    preserveRedo?: boolean;
-    scope?: ViewScope;
-    selectionMode?: 'manual' | 'filtered_bulk';
-    filterSummary?: string;
-    selectedRows?: any[];
-  }) => {
-    const normalizedVideoIds = normalizeVideoIds(videoIds, sourceVideoIdSet);
-    if (normalizedVideoIds.length === 0) return;
-
-    const nextActionKind = targetKind ?? (inclusionView === 'included' ? 'exclude' : 'restore');
-    const actionScope = options?.scope || viewScope;
-    const selectionMode = options?.selectionMode || 'manual';
-    const normalizedFilterSummary = String(options?.filterSummary || '').trim();
-    const selectedRows = (() => {
-      if (Array.isArray(options?.selectedRows) && options.selectedRows.length) return options.selectedRows;
-      return normalizedVideoIds
-        .map((videoId) => sourceMaskedRowByVideoId.get(videoId))
-        .filter((row): row is any => Boolean(row));
-    })();
-    const manualSelectionLabels = nextActionKind === 'exclude' && selectionMode === 'manual'
-      ? buildAlphabetizedVideoTitleChannelList(selectedRows)
-      : [];
-    const restoredFilteredBulkMeta = nextActionKind === 'restore'
-      ? normalizedVideoIds
-          .map((videoId) => excludedVideoMetaById[videoId])
-          .filter((meta): meta is ExcludedVideoMeta => Boolean(meta?.exclusionMode === 'filtered_bulk'))
-      : [];
-    const eventId = !options?.skipUndo ? createHistoryId('exclusion') : undefined;
-    clearAllThumbnailCaches();
-
-    flushSync(() => {
-      clearScopeSelection('videos', true);
-      clearScopeSelection('channels', true);
+  const handleUnkeyedRowInteraction = useCallback(() => {
+    showToast({
+      kind: 'warning',
+      key: 'unkeyed-row',
+      message: "This row has no video ID, so it can't be selected or excluded",
+      detail: 'Rows need a videoId, video_id, id or Video_ID column value. Check the column mapping in the import dialog.',
     });
+  }, [showToast]);
+  const handleInclusionResult = useCallback((result: InclusionActionResult) => {
+    const toast = describeInclusionResult(result);
+    if (toast) showToast(toast);
+  }, [showToast]);
+  const handleBeforeInclusionChange = useCallback(() => {
+    clearScopeSelection('videos', true);
+    clearScopeSelection('channels', true);
+  }, [clearScopeSelection]);
+  const handleInclusionChanged = useCallback(() => {
+    setDatasetVersion((version) => version + 1);
+    setFilteredViewVersion((version) => version + 1);
+  }, []);
+  const {
+    applyIncludeExcludeAction,
+    handleMoveVideos,
+    handleMoveSelectedVideos,
+    handleUndoIncludeExclude,
+    handleRedoIncludeExclude,
+    canUndo: canUndoIncludeExclude,
+    canRedo: canRedoIncludeExclude,
+  } = useInclusionActions({
+    inclusion,
+    viewScope,
+    sourceVideoIdSet,
+    sourceRowByVideoId: sourceMaskedRowByVideoId,
+    selectedVideoIds: selectedVideoIdsForActions,
+    visibleVideoIds,
+    areAllVisibleVideosSelected: areAllFilteredVideosSelectedForAction,
+    selectedVideoRows: selectedRowsForBatchCopy,
+    filterModel,
+    startTransition: startFilterTransition,
+    onBeforeChange: handleBeforeInclusionChange,
+    onChanged: handleInclusionChanged,
+    appendResearchHistory,
+    markResearchHistoryEventReverted,
+    onResult: handleInclusionResult,
+  });
 
-    startFilterTransition(() => {
-      setExcludedVideoIds((current) => {
-        const currentSet = new Set(current);
-        normalizedVideoIds.forEach((videoId) => {
-          if (nextActionKind === 'exclude') currentSet.add(videoId);
-          else currentSet.delete(videoId);
-        });
-        return Array.from(currentSet);
-      });
-
-      setExcludedVideoMetaById((current) => {
-        const next = { ...current };
-        const now = new Date().toISOString();
-        normalizedVideoIds.forEach((videoId) => {
-          if (nextActionKind === 'exclude') {
-            next[videoId] = {
-              videoId,
-              reason: options?.reason,
-              excludedAt: now,
-              restoredAt: null,
-              exclusionMode: selectionMode,
-              exclusionScope: actionScope,
-              exclusionFilterSummary: selectionMode === 'filtered_bulk' ? normalizedFilterSummary : undefined,
-            };
-          } else if (next[videoId]) {
-            next[videoId] = {
-              ...next[videoId],
-              restoredAt: now,
-            };
-          }
-        });
-        return next;
-      });
-
-      if (!options?.skipUndo) {
-        setIncludeExcludeUndoStack((current) => [...current, {
-          kind: nextActionKind,
-          videoIds: normalizedVideoIds,
-          scope: actionScope,
-          selectionMode,
-          filterSummary: normalizedFilterSummary || undefined,
-          historyEventId: eventId,
-        }]);
-        if (!options?.preserveRedo) {
-          setIncludeExcludeRedoStack([]);
-        }
-        const details: string[] = [];
-        if (options?.reason?.trim()) details.push(`Reason: ${options.reason.trim()}`);
-        if (nextActionKind === 'exclude' && selectionMode === 'filtered_bulk' && normalizedFilterSummary) {
-          details.push(`Filter context: ${normalizedFilterSummary}`);
-        }
-        if (nextActionKind === 'exclude' && selectionMode === 'manual' && manualSelectionLabels.length) {
-          details.push('Manually selected rows (alphabetical Title — Channel):');
-          manualSelectionLabels.forEach((label) => details.push(`- ${label}`));
-        }
-        if (nextActionKind === 'restore' && restoredFilteredBulkMeta.length) {
-          details.push(`Exception to prior filter logic: restored ${restoredFilteredBulkMeta.length.toLocaleString()} row(s) previously excluded by exclude-all filtered action(s).`);
-          const uniqueFilterSummaries = Array.from(new Set(
-            restoredFilteredBulkMeta
-              .map((meta) => String(meta.exclusionFilterSummary || '').trim())
-              .filter(Boolean),
-          ));
-          if (uniqueFilterSummaries.length) {
-            details.push(`Original filter context: ${uniqueFilterSummaries.join(' | ')}`);
-          }
-        }
-        appendResearchHistory({
-          id: eventId,
-          type: nextActionKind === 'exclude' ? 'videos_excluded' : 'videos_restored',
-          createdAt: new Date().toISOString(),
-          summary: `${nextActionKind === 'exclude' ? 'Excluded' : 'Restored'} ${normalizedVideoIds.length.toLocaleString()} video(s).`,
-          affectedIds: normalizedVideoIds,
-          details: details.length ? details.join('\n') : undefined,
-          meta: {
-            scope: actionScope,
-            selectionMode,
-            filterSummary: normalizedFilterSummary || undefined,
-            count: normalizedVideoIds.length,
-          },
-        });
-      }
-
-      setDatasetVersion((version) => version + 1);
-      setFilteredViewVersion((version) => version + 1);
-    });
-  }, [appendResearchHistory, clearAllThumbnailCaches, excludedVideoMetaById, inclusionView, sourceMaskedRowByVideoId, sourceVideoIdSet, startFilterTransition, viewScope]);
-
-  const handleMoveVideos = useCallback((videoIds: string[]) => {
-    applyIncludeExcludeAction(videoIds);
-  }, [applyIncludeExcludeAction]);
-
-  const handleMoveSelectedVideos = useCallback(() => {
-    const nextVideoIds = selectedVideoIdsForActions;
-    if (nextVideoIds.length === 0) return;
-    const targetKind: IncludeExcludeAction['kind'] = inclusionView === 'included' ? 'exclude' : 'restore';
-    applyIncludeExcludeAction(nextVideoIds, targetKind, {
-      scope: 'videos',
-      selectionMode: targetKind === 'exclude' && areAllFilteredVideosSelectedForAction ? 'filtered_bulk' : 'manual',
-      filterSummary: summarizeFilterModel(filterModel),
-      selectedRows: selectedRowsForBatchCopy,
-    });
-  }, [applyIncludeExcludeAction, areAllFilteredVideosSelectedForAction, filterModel, inclusionView, selectedRowsForBatchCopy, selectedVideoIdsForActions]);
-
-  const handleExcludeSelectedVideos = useCallback(() => {
-    const nextVideoIds = selectedVideoIdsForActions;
-    if (nextVideoIds.length === 0) return;
-    applyIncludeExcludeAction(nextVideoIds, 'exclude', {
-      scope: 'videos',
-      selectionMode: areAllFilteredVideosSelectedForAction ? 'filtered_bulk' : 'manual',
-      filterSummary: summarizeFilterModel(filterModel),
-      selectedRows: selectedRowsForBatchCopy,
-    });
-  }, [applyIncludeExcludeAction, areAllFilteredVideosSelectedForAction, filterModel, selectedRowsForBatchCopy, selectedVideoIdsForActions]);
-
-  const handleUndoIncludeExclude = useCallback(() => {
-    const lastAction = includeExcludeUndoStack[includeExcludeUndoStack.length - 1];
-    if (!lastAction) return;
-
-    setIncludeExcludeUndoStack((current) => current.slice(0, -1));
-    setIncludeExcludeRedoStack((current) => [...current, lastAction]);
-    markResearchHistoryEventReverted(lastAction.historyEventId);
-    applyIncludeExcludeAction(lastAction.videoIds, lastAction.kind === 'exclude' ? 'restore' : 'exclude', {
-      skipUndo: true,
-      scope: lastAction.scope,
-      selectionMode: lastAction.selectionMode,
-      filterSummary: lastAction.filterSummary,
-    });
-  }, [applyIncludeExcludeAction, includeExcludeUndoStack, markResearchHistoryEventReverted]);
-
-  const handleRedoIncludeExclude = useCallback(() => {
-    const lastAction = includeExcludeRedoStack[includeExcludeRedoStack.length - 1];
-    if (!lastAction) return;
-
-    setIncludeExcludeRedoStack((current) => current.slice(0, -1));
-    setIncludeExcludeUndoStack((current) => [...current, lastAction]);
-    applyIncludeExcludeAction(lastAction.videoIds, lastAction.kind, {
-      skipUndo: true,
-      scope: lastAction.scope,
-      selectionMode: lastAction.selectionMode,
-      filterSummary: lastAction.filterSummary,
-    });
-  }, [applyIncludeExcludeAction, includeExcludeRedoStack]);
+  // The batch button and Ctrl/Cmd+Delete used to always exclude, which did nothing in the Excluded view.
+  const handleExcludeSelectedVideos = handleMoveSelectedVideos;
 
   const handleBatchAddTag = useCallback((videoIds: string[], tag: string) => {
     const trimmed = tag.trim();
@@ -3388,11 +1498,11 @@ export default function App() {
   const handleOpenDatasetDashboardTab = useCallback((tab: DashboardTemplateTab) => {
     setDashboardActiveTab(tab);
     setIsDashboardOpen(true);
-  }, []);
+  }, [setIsDashboardOpen]);
 
   const handleOpenResearchLog = useCallback(() => {
     setIsResearchLogOpen(true);
-  }, []);
+  }, [setIsResearchLogOpen]);
 
   const handleOpenSaveView = useCallback(() => {
     if (viewScope !== 'videos') {
@@ -3468,181 +1578,46 @@ export default function App() {
     api?.ensureIndexVisible(nextIndex, 'middle');
   }, [activeGridRows, applyScopeSelection, channelSelection.anchorKey, channelSelection.detailKey, channelSelection.focusKey, channelSelection.selectedKeys, requestSelectionScroll, videoSelection.anchorKey, videoSelection.detailKey, videoSelection.focusKey, videoSelection.selectedKeys, viewScope]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+  // Thumbnails are a videos-only layout; in the channels view the toggle declines.
+  const handleToggleExplorerLayout = useCallback(() => {
+    if (viewScope !== 'videos') return false;
+    setExplorerLayout((current) => (current === 'thumbnails' ? 'table' : 'thumbnails'));
+  }, [viewScope]);
 
-      if (event.key === 'Escape') {
-        if (isCommandPaletteOpen) {
-          event.preventDefault();
-          setIsCommandPaletteOpen(false);
-          return;
-        }
-        if (isKeyboardHelpOpen) {
-          event.preventDefault();
-          setIsKeyboardHelpOpen(false);
-          return;
-        }
-        if (isDashboardOpen) {
-          event.preventDefault();
-          setIsDashboardOpen(false);
-          return;
-        }
-        if (isImportOpen) {
-          event.preventDefault();
-          setIsImportOpen(false);
-          setPendingFile(null);
-          setPendingRows([]);
-          setPendingSchema([]);
-          return;
-        }
-        if (isExportOpen) {
-          event.preventDefault();
-          setIsExportOpen(false);
-          return;
-        }
-        if (isColumnsOpen) {
-          event.preventDefault();
-          setIsColumnsOpen(false);
-          return;
-        }
-        if (isResearchLogOpen) {
-          event.preventDefault();
-          setIsResearchLogOpen(false);
-        }
-        return;
-      }
-
-      if (event.defaultPrevented) return;
-
-      const isTyping = isEditableShortcutTarget(event.target);
-      const isGridTarget = isGridShortcutTarget(event.target);
-      const hasBlockingOverlay = isCommandPaletteOpen || isKeyboardHelpOpen || isDashboardOpen || isImportOpen || isExportOpen || isColumnsOpen || isResearchLogOpen;
-
-      if (!isTyping && !isGridTarget && !hasBlockingOverlay && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-        event.preventDefault();
-        navigateHistoryByOffset(event.key === 'ArrowLeft' ? -1 : 1);
-        return;
-      }
-
-      if (!isTyping && !isGridTarget && !hasBlockingOverlay && !event.shiftKey && !event.altKey && !hasShortcutModifier(event) && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-        event.preventDefault();
-        moveActiveSelectionByDirection(event.key === 'ArrowDown' ? 1 : -1);
-        return;
-      }
-
-      if (!isTyping && !hasBlockingOverlay) {
-        if (matchesAltShiftShortcut(event, 't')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('thumbnails');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'a')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('attention');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'c')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('content');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'o')) {
-          event.preventDefault();
-          handleOpenDatasetDashboardTab('overview');
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'v')) {
-          event.preventDefault();
-          setIsColumnsOpen(true);
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'e')) {
-          event.preventDefault();
-          setIsExportOpen(true);
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'i')) {
-          event.preventDefault();
-          handleRequestImport();
-          return;
-        }
-        if (matchesAltShiftShortcut(event, 'k')) {
-          event.preventDefault();
-          setIsKeyboardHelpOpen(true);
-          return;
-        }
-        if (matchesStandardShortcut(event, 'k')) {
-          event.preventDefault();
-          setIsCommandPaletteOpen(true);
-          return;
-        }
-        if (matchesStandardShortcut(event, 's')) {
-          event.preventDefault();
-          handleOpenSaveView();
-          return;
-        }
-        if (matchesStandardShortcut(event, 'z')) {
-          if (!includeExcludeUndoStack.length || viewScope !== 'videos') return;
-          event.preventDefault();
-          handleUndoIncludeExclude();
-          return;
-        }
-        if (matchesStandardShiftShortcut(event, 'z')) {
-          if (!includeExcludeRedoStack.length || viewScope !== 'videos') return;
-          event.preventDefault();
-          handleRedoIncludeExclude();
-          return;
-        }
-      }
-
-      if (
-        viewScope === 'videos'
-        && !isGridTarget
-        && !hasBlockingOverlay
-        && (event.ctrlKey || event.metaKey)
-        && event.key === 'Delete'
-        && selectedVideoIdsForActions.length > 0
-      ) {
-        event.preventDefault();
-        handleExcludeSelectedVideos();
-        return;
-      }
-
-      if (viewScope !== 'videos' || isTyping || hasBlockingOverlay || isGridTarget) return;
-
-      if (event.key === 'Delete' && selectedVideoIdsForActions.length > 0) {
-        event.preventDefault();
-        handleMoveSelectedVideos();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [
-    handleExcludeSelectedVideos,
-    handleMoveSelectedVideos,
-    handleOpenDatasetDashboardTab,
-    handleOpenSaveView,
-    handleRedoIncludeExclude,
-    handleRequestImport,
-    handleUndoIncludeExclude,
-    includeExcludeRedoStack.length,
-    includeExcludeUndoStack.length,
-    isColumnsOpen,
-    isCommandPaletteOpen,
-    isDashboardOpen,
-    isExportOpen,
-    isImportOpen,
-    isKeyboardHelpOpen,
-    isResearchLogOpen,
-    moveActiveSelectionByDirection,
-    navigateHistoryByOffset,
-    selectedVideoIdsForActions.length,
-    viewScope,
-    datasetVersion,
-    inclusionView,
-  ]);
+  const hasVideoSelection = viewScope === 'videos' && selectedVideoIdsForActions.length > 0;
+  useShortcuts({
+    closeOverlay: closeTopOverlay,
+    historyBack: () => navigateHistoryByOffset(-1),
+    historyForward: () => navigateHistoryByOffset(1),
+    selectNext: () => moveActiveSelectionByDirection(1),
+    selectPrevious: () => moveActiveSelectionByDirection(-1),
+    toggleThumbnailView: () => handleToggleExplorerLayout(),
+    openAttentionDashboard: () => handleOpenDatasetDashboardTab('attention'),
+    openVernacularDashboard: () => handleOpenDatasetDashboardTab('vernacular'),
+    openOverviewDashboard: () => handleOpenDatasetDashboardTab('overview'),
+    openColumns: () => setIsColumnsOpen(true),
+    openExport: () => setIsExportOpen(true),
+    openImport: () => handleRequestImport(),
+    openKeyboardHelp: () => setIsKeyboardHelpOpen(true),
+    openCommandPalette: () => setIsCommandPaletteOpen(true),
+    saveView: () => handleOpenSaveView(),
+    undo: () => {
+      if (!canUndoIncludeExclude || viewScope !== 'videos') return false;
+      handleUndoIncludeExclude();
+    },
+    redo: () => {
+      if (!canRedoIncludeExclude || viewScope !== 'videos') return false;
+      handleRedoIncludeExclude();
+    },
+    excludeSelection: () => {
+      if (!hasVideoSelection) return false;
+      handleExcludeSelectedVideos();
+    },
+    moveSelection: () => {
+      if (!hasVideoSelection) return false;
+      handleMoveSelectedVideos();
+    },
+  }, { hasBlockingOverlay });
 
   const handleUpdateAnnotation = useCallback((videoId: string, update: Partial<Annotation>) => {
     if (Array.isArray(update.tags)) {
@@ -3715,115 +1690,38 @@ export default function App() {
     };
   }, [selectedVideoIdsForActions]);
 
-  const handleUpdateChannelNotes = useCallback((channelKey: string, notes: string) => {
-    const normalizedKey = String(channelKey || '').trim();
-    if (!normalizedKey) return;
-    setChannelNotesById((previous) => {
-      const normalized = notes;
-      if (!normalized.trim()) {
-        if (!(normalizedKey in previous)) return previous;
-        const next = { ...previous };
-        delete next[normalizedKey];
-        return next;
-      }
-      if (previous[normalizedKey] === normalized) return previous;
-      return { ...previous, [normalizedKey]: normalized };
-    });
-  }, []);
+  const handleBatchAddChannelTag = useCallback((tag: string) => addTagToChannelKeys(selectedChannelKeys, tag), [addTagToChannelKeys, selectedChannelKeys]);
+  const handleBatchRemoveChannelTag = useCallback((tag: string) => removeTagFromChannelKeys(selectedChannelKeys, tag), [removeTagFromChannelKeys, selectedChannelKeys]);
+  const handleBatchApplyChannelNotes = useCallback((notes: string) => appendNotesToChannelKeys(selectedChannelKeys, notes), [appendNotesToChannelKeys, selectedChannelKeys]);
 
-  const handleReplaceChannelTags = useCallback((channelKey: string, tags: string[]) => {
-    const normalizedKey = String(channelKey || '').trim();
-    if (!normalizedKey) return;
-    const normalizedTags = Array.from(new Set((tags || []).map((tag) => String(tag || '').trim()).filter(Boolean)));
-    setChannelTagsById((previous) => {
-      if (!normalizedTags.length) {
-        if (!(normalizedKey in previous)) return previous;
-        const next = { ...previous };
-        delete next[normalizedKey];
-        return next;
-      }
-      const current = previous[normalizedKey] || [];
-      if (current.length === normalizedTags.length && current.every((tag, index) => tag === normalizedTags[index])) {
-        return previous;
-      }
-      return { ...previous, [normalizedKey]: normalizedTags };
-    });
-  }, []);
-
-  const handleBatchAddChannelTag = useCallback((tag: string) => {
-    const trimmed = String(tag || '').trim();
-    if (!trimmed || !selectedChannelKeys.length) return;
-    setChannelTagsById((previous) => {
-      const next = { ...previous };
-      selectedChannelKeys.forEach((channelKey) => {
-        const current = next[channelKey] || [];
-        if (!current.includes(trimmed)) next[channelKey] = [...current, trimmed];
-      });
-      return next;
-    });
-  }, [selectedChannelKeys]);
-
-  const handleBatchRemoveChannelTag = useCallback((tag: string) => {
-    const trimmed = String(tag || '').trim();
-    if (!trimmed || !selectedChannelKeys.length) return;
-    setChannelTagsById((previous) => {
-      const next = { ...previous };
-      selectedChannelKeys.forEach((channelKey) => {
-        const current = next[channelKey] || [];
-        const filtered = current.filter((item) => item !== trimmed);
-        if (filtered.length) next[channelKey] = filtered;
-        else delete next[channelKey];
-      });
-      return next;
-    });
-  }, [selectedChannelKeys]);
-
-  const handleBatchApplyChannelNotes = useCallback((notes: string) => {
-    const noteBlock = String(notes || '').trim();
-    if (!noteBlock) {
-      return {
-        status: 'empty' as const,
-        appliedCount: 0,
-        message: 'Enter a note before applying.',
-      };
-    }
-    if (!selectedChannelKeys.length) {
-      return {
-        status: 'empty' as const,
-        appliedCount: 0,
-        message: 'No selected channels to update.',
-      };
-    }
-    setChannelNotesById((previous) => {
-      const next = { ...previous };
-      selectedChannelKeys.forEach((channelKey) => {
-        const merged = appendNotesBlock(next[channelKey], noteBlock);
-        if (merged.trim()) next[channelKey] = merged;
-        else delete next[channelKey];
-      });
-      return next;
-    });
-    return {
-      status: 'success' as const,
-      appliedCount: selectedChannelKeys.length,
-      message: `Applied notes to ${selectedChannelKeys.length.toLocaleString()} channel(s).`,
-    };
-  }, [selectedChannelKeys]);
-
-  const handleBatchExcludeChannels = useCallback(() => {
-    const nextVideoIds = Array.from(new Set(selectedChannelVideoRowsForActions.map((row) => resolveVideoId(row)).filter(Boolean) as string[]));
+  // The grid passes its own keys: a shortcut pressed right after a click can arrive before App re-renders.
+  const handleBatchExcludeChannels = useCallback((channelKeysFromGrid?: string[]) => {
+    const fromGrid = Array.isArray(channelKeysFromGrid);
+    const channelKeys = fromGrid ? channelKeysFromGrid : selectedChannelKeys;
+    const channelVideoRows = fromGrid
+      ? channelKeys.flatMap((channelKey) => channelVideoRowsByKey.get(channelKey) || [])
+      : selectedChannelVideoRowsForActions;
+    const nextVideoIds = Array.from(new Set(channelVideoRows.map((row) => resolveVideoId(row)).filter(Boolean) as string[]));
     if (nextVideoIds.length === 0) return;
     const targetKind: IncludeExcludeAction['kind'] = inclusionView === 'excluded' ? 'restore' : 'exclude';
+    const allFilteredSelected = fromGrid
+      ? (() => {
+          const filteredKeys = filteredChannelRows.map((row) => resolveChannelRowKey(row)).filter(Boolean);
+          if (!filteredKeys.length || filteredKeys.length !== channelKeys.length) return false;
+          const keySet = new Set(channelKeys);
+          return filteredKeys.every((key) => keySet.has(key));
+        })()
+      : areAllFilteredChannelsSelectedForAction;
     applyIncludeExcludeAction(nextVideoIds, targetKind, {
-      reason: selectedChannelKeys.length === 1
+      reason: channelKeys.length === 1
         ? 'Batch action from channel viewer.'
-        : `Batch action from channel viewer for ${selectedChannelKeys.length.toLocaleString()} selected channels.`,
+        : `Batch action from channel viewer for ${channelKeys.length.toLocaleString()} selected channels.`,
       scope: 'channels',
-      selectionMode: targetKind === 'exclude' && areAllFilteredChannelsSelectedForAction ? 'filtered_bulk' : 'manual',
+      selectionMode: targetKind === 'exclude' && allFilteredSelected ? 'filtered_bulk' : 'manual',
       filterSummary: summarizeFilterModel(channelFilterModel),
-      selectedRows: selectedChannelVideoRowsForActions,
+      selectedRows: channelVideoRows,
     });
-  }, [applyIncludeExcludeAction, areAllFilteredChannelsSelectedForAction, channelFilterModel, inclusionView, selectedChannelKeys, selectedChannelVideoRowsForActions]);
+  }, [applyIncludeExcludeAction, areAllFilteredChannelsSelectedForAction, channelFilterModel, channelVideoRowsByKey, filteredChannelRows, inclusionView, selectedChannelKeys, selectedChannelVideoRowsForActions]);
 
   const handleBatchCopyChannelSelection = useCallback(async (mode: BatchCopyExportMode) => {
     const channelRowsForCopy = selectedChannelRows;
@@ -3872,6 +1770,7 @@ export default function App() {
     watchedSeconds: number;
     durationSeconds: number | null;
     qualifies: boolean;
+    ranges?: Array<[number, number]>;
   }) => {
     if (!session.videoId || session.watchedSeconds <= 0) return;
     setWatchHistoryByVideoId((current) => {
@@ -3885,6 +1784,7 @@ export default function App() {
         qualifyingSessionCount: (previous?.qualifyingSessionCount || 0) + (session.qualifies ? 1 : 0),
         playStartCount: (previous?.playStartCount || 0) + 1,
         durationSeconds: session.durationSeconds ?? previous?.durationSeconds ?? null,
+        watchedRanges: mergeRanges([...(previous?.watchedRanges ?? []), ...(session.ranges ?? [])]),
       };
       return { ...current, [session.videoId]: next };
     });
@@ -3906,15 +1806,13 @@ export default function App() {
     try {
       await waitForNextPaint();
       const nextRows = buildChannelMetadataRows(activeBaseRows, importedChannelMetadata);
-      setChannelMetadataSnapshot({
-        rows: nextRows,
-        calculatedAt: new Date().toISOString(),
-        datasetVersionAtCalculation: datasetVersion,
-        inclusionViewAtCalculation: inclusionView,
-        videoCorpusFingerprintAtCalculation: videoCorpusFingerprint,
-        exclusionMembershipFingerprintAtCalculation: exclusionMembershipFingerprint,
-        cacheKeyAtCalculation: currentChannelMetadataCacheKey,
-      });
+      setChannelMetadataSnapshot(buildChannelMetadataSnapshot(nextRows, {
+        datasetVersion,
+        inclusionView,
+        videoCorpusFingerprint,
+        exclusionMembershipFingerprint,
+        cacheKey: currentChannelMetadataCacheKey,
+      }));
 
       updateLongTaskProgress({
         title: metadataActionLabel,
@@ -3983,23 +1881,7 @@ export default function App() {
       setIsGeneratingChannelMetadata(false);
       updateLongTaskProgress(null);
     }
-  }, [
-    activeBaseRows,
-    appendResearchHistory,
-    datasetVersion,
-    effectiveGeneratedMetadataByVideoId,
-    importedChannelMetadata,
-    includedBaseRows,
-    inclusionView,
-    isGeneratingChannelMetadata,
-    channelMetadataSnapshot?.rows,
-    currentChannelMetadataCacheKey,
-    exclusionMembershipFingerprint,
-    sourceVisibility,
-    updateLongTaskProgress,
-    videoCorpusFingerprint,
-    viewScope,
-  ]);
+  }, [isGeneratingChannelMetadata, channelMetadataSnapshot?.rows?.length, updateLongTaskProgress, activeBaseRows, importedChannelMetadata, datasetVersion, inclusionView, videoCorpusFingerprint, exclusionMembershipFingerprint, currentChannelMetadataCacheKey, effectiveGeneratedMetadataByVideoId, clearScopeSelection, includedBaseRows, sourceVisibility, appendResearchHistory]);
 
   const updateExternalFilterModel = useCallback((nextFilterModel: ExplorerFilterModel) => {
     const sanitizedModel = Object.fromEntries(
@@ -4058,7 +1940,7 @@ export default function App() {
     }
     clearScopeSelection('videos', true);
     clearScopeSelection('channels', true);
-  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, excludedBaseRows.length, includedBaseRows.length, updateExternalFilterModel, viewScope]);
+  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, excludedBaseRows.length, includedBaseRows.length, setInclusionView, updateExternalFilterModel, viewScope]);
 
   const handleToggleSourceRows = useCallback((sourceId: string) => {
     setSourceVisibility((current) => {
@@ -4248,8 +2130,7 @@ export default function App() {
       setGeneratedMetadata((previous) => ({
         byVideoId: Object.fromEntries(Object.entries(previous.byVideoId).filter(([videoId]) => survivingVideoIds.has(videoId))),
       }));
-      setExcludedVideoIds((current) => current.filter((videoId) => survivingVideoIds.has(videoId)));
-      setExcludedVideoMetaById((previous) => Object.fromEntries(Object.entries(previous).filter(([videoId]) => survivingVideoIds.has(videoId))));
+      setInclusionState(pruneInclusionState(inclusionStateRef.current, survivingVideoIds));
       setSourceRegistry(nextSourceRegistry);
       setSourceVisibility(nextSourceVisibility);
       setRowLineage(nextRowLineage);
@@ -4257,7 +2138,6 @@ export default function App() {
       markDerivedSnapshotsStale('Source deleted. Refresh linking summary and channel metadata.');
       setChannelMetadataSnapshot(null);
       setChannelLinkingState(createEmptyChannelLinkingState());
-      clearAllThumbnailCaches();
       setDatasetVersion((version) => version + 1);
       setFilteredViewVersion((version) => version + 1);
       updateLongTaskProgress({
@@ -4267,34 +2147,14 @@ export default function App() {
         total: 4,
       });
       appendResearchHistory({
-        type: 'source_deleted' as any,
+        type: 'source_deleted',
         summary: `Deleted source "${source.label}" from the current project.`,
         meta: { sourceId, removedColumns: removedColumns.join(', '), removedRowCount: source.rowCount },
       });
     } finally {
       updateLongTaskProgress(null);
     }
-  }, [
-    appendResearchHistory,
-    channelVisibleColumns,
-    clearAllThumbnailCaches,
-    columnLineage.byColumn,
-    deletedColumns,
-    markDerivedSnapshotsStale,
-    rowLineage.byRowId,
-    sourceRows,
-    sourceSchema,
-    sourceRegistry.byId,
-    sourceRegistry.orderedIds,
-    sourceRegistry.primarySourceId,
-    sourceVisibility.hiddenColumnSourceIdsByScope,
-    sourceVisibility.hiddenSourceIds,
-    state.annotations,
-    state.savedViews,
-    updateLongTaskProgress,
-    userTagsByVideoId,
-    visibleColumns,
-  ]);
+  }, [sourceRegistry.byId, sourceRegistry.primarySourceId, sourceRegistry.orderedIds, rowLineage.byRowId, updateLongTaskProgress, sourceRows, columnLineage.byColumn, sourceSchema, deletedColumns, visibleColumns, channelVisibleColumns, state.savedViews, sourceVisibility.hiddenSourceIds, sourceVisibility.hiddenColumnSourceIdsByScope?.videos, sourceVisibility.hiddenColumnSourceIdsByScope?.channels, clearScopeSelection, userTagsByVideoId, setInclusionState, inclusionStateRef, markDerivedSnapshotsStale, appendResearchHistory]);
 
   const removeCurrentScopeFilter = useCallback((column: string) => {
     if (viewScope === 'channels') {
@@ -4391,20 +2251,7 @@ export default function App() {
   const handleExport = (options: ExportOptions) => {
     const activeRows = options.includeFilteredRows ? rows : displayRows;
     const markdownOptions = options.markdownOptions || researchLogMarkdownOptions;
-    const markdown = buildResearchLogMarkdown({
-      projectName: state.fileName || 'Untitled project',
-      overview: state.projectOverview,
-      diary: state.projectNotes,
-      corpusProcessing: researchLogGeneratedSectionsWithComments.corpusProcessing,
-      views: researchLogGeneratedSectionsWithComments.views,
-      watchHistory: researchLogGeneratedSectionsWithComments.watchHistory,
-      researchActions: researchLogGeneratedSectionsWithComments.researchActions,
-      notesAppendix: researchLogGeneratedSectionsWithComments.notesAppendix,
-      dashboard: researchLogGeneratedSectionsWithComments.dashboard,
-      includeNotesAppendix: markdownOptions.includeNotesAppendix,
-      includeDashboardSection: markdownOptions.includeDashboardSection,
-      dashboardStale: isAnyDashboardSnapshotStale,
-    });
+    const markdown = buildResearchLogMarkdownNow(markdownOptions);
 
     if (options.format === 'markdown') {
       downloadBlob(new Blob([markdown], { type: 'text/markdown;charset=utf-8;' }), `${sanitizeFileName(state.fileName, 'research_log')}_research_log.md`);
@@ -4434,65 +2281,6 @@ export default function App() {
 
     const projectName = options.projectName || sanitizeFileName(state.fileName, 'ytde_project');
     const archiveAnnotations = mergeAnnotationsWithUserTags(stripNotesFromAnnotations(state.annotations), userTagsByVideoId);
-    const thumbnailScopeIndex: Record<string, DashboardThumbnailCacheIndex['scopes'][string]> = {};
-    const thumbnailArchiveFiles: Array<{ fileName: string; data: Uint8Array }> = [];
-
-    (Object.entries(thumbnailCaches) as Array<[string, DashboardThumbnailCacheSnapshot]>).forEach(([scopeKey, scopeSnapshot]) => {
-      if (!isPersistentThumbnailScopeKey(scopeKey)) return;
-
-      const scopeFolder = scopeKey === 'full'
-        ? 'full'
-        : `saved_views/${sanitizeThumbnailPathSegment(scopeKey.replace('savedView:', ''), 'view')}`;
-
-      const indexedEntries: DashboardThumbnailArchiveEntry[] = [];
-      scopeSnapshot.entries.forEach((entry) => {
-        if (entry.status === 'loaded' && entry.bytes && entry.bytes.length > 0) {
-          const ext = inferFileExtensionFromMimeType(entry.mimeType);
-          const safeVideoId = sanitizeThumbnailPathSegment(entry.videoId || entry.dedupeKey || `thumb_${entry.rank}`, `thumb_${entry.rank}`);
-          const fileName = `thumbnails/${scopeFolder}/${String(entry.rank).padStart(4, '0')}_${safeVideoId}.${ext}`;
-          thumbnailArchiveFiles.push({ fileName, data: entry.bytes });
-          indexedEntries.push({
-            videoId: entry.videoId,
-            dedupeKey: entry.dedupeKey,
-            title: entry.title,
-            rank: entry.rank,
-            sourceUrl: entry.sourceUrl,
-            status: 'loaded',
-            mimeType: entry.mimeType || 'image/jpeg',
-            byteLength: entry.bytes.length,
-            fileName,
-          });
-          return;
-        }
-
-        indexedEntries.push({
-          videoId: entry.videoId,
-          dedupeKey: entry.dedupeKey,
-          title: entry.title,
-          rank: entry.rank,
-          sourceUrl: entry.sourceUrl,
-          status: 'failed',
-          error: entry.error || 'thumbnail unavailable',
-        });
-      });
-
-      if (!indexedEntries.length) return;
-      thumbnailScopeIndex[scopeKey] = {
-        scopeKey,
-        label: scopeSnapshot.label,
-        rowCount: scopeSnapshot.rowCount,
-        totalCandidates: scopeSnapshot.totalCandidates,
-        calculatedAt: scopeSnapshot.calculatedAt,
-        datasetVersionAtCalculation: scopeSnapshot.datasetVersionAtCalculation,
-        savedViewsVersionAtCalculation: scopeSnapshot.savedViewsVersionAtCalculation,
-        sortSignature: scopeSnapshot.sortSignature,
-        entries: indexedEntries,
-      };
-    });
-
-    const thumbnailCacheIndex: DashboardThumbnailCacheIndex | undefined = Object.keys(thumbnailScopeIndex).length
-      ? { version: 1, scopes: thumbnailScopeIndex }
-      : undefined;
 
     const manifest = createProjectManifest({
       fileName: state.fileName,
@@ -4503,6 +2291,7 @@ export default function App() {
       channelVisibleColumns,
       videoColumnWidths,
       channelColumnWidths,
+      vernacularExclusions,
       savedViews: state.savedViews,
       activeViewId: state.activeViewId,
       annotations: archiveAnnotations,
@@ -4511,7 +2300,7 @@ export default function App() {
       projectOverview: state.projectOverview,
       projectNotes: state.projectNotes,
       researchLogSectionComments: state.researchLogSectionComments,
-      researchHistory: cleanedResearchHistory,
+      researchHistory,
       watchHistoryByVideoId,
       theme: state.theme,
       isRightPanelCollapsed: state.isRightPanelCollapsed,
@@ -4524,7 +2313,6 @@ export default function App() {
       savedViewsVersion,
       channelMetadataSnapshot,
       importedChannelMetadata,
-      thumbnailCacheIndex,
       viewScope,
       sourceRegistry,
       sourceVisibility,
@@ -4542,7 +2330,6 @@ export default function App() {
       { name: `${archiveFolder}/research_log.md`, data: markdown },
       { name: `${archiveFolder}/annotations.json`, data: JSON.stringify(archiveAnnotations, null, 2) },
       { name: `${archiveFolder}/saved_views.json`, data: JSON.stringify(state.savedViews, null, 2) },
-      ...thumbnailArchiveFiles.map((entry) => ({ name: `${archiveFolder}/${entry.fileName}`, data: entry.data })),
       ...buildNoteArchiveFiles(notesByVideoId, archiveFolder),
     ]);
 
@@ -4713,7 +2500,7 @@ export default function App() {
     clearScopeSelection('videos', true);
     clearScopeSelection('channels', true);
     setFilteredViewVersion((version) => version + 1);
-  }, [clearScopeSelection]);
+  }, [clearScopeSelection, setInclusionView]);
 
   const handleVideoChannelClick = useCallback(({ channelName, row }: { channelName: string; row: any }) => {
     const normalizedChannelName = channelName?.trim() || resolveChannelName(row);
@@ -4802,6 +2589,7 @@ export default function App() {
       findDashboardTopicColumn(displaySchema) || '',
       findDashboardDurationColumn(displaySchema) || '',
       findDashboardIntentColumn(displaySchema) || '',
+      ...overviewDrilldownColumns(displaySchema),
       ...Object.keys(normalizedDrilldownFilters || {}),
     ].filter(Boolean));
     const preservedNonLinkFilters = Object.fromEntries(
@@ -4814,95 +2602,27 @@ export default function App() {
     setState((previous) => ({ ...previous, activeViewId: null }));
     updateExternalFilterModel(nextFilterModel);
     setDashboardScope('filtered');
-  }, [clearChannelDrilldownState, displaySchema, filterModel, updateExternalFilterModel, viewScope]);
+  }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, displaySchema, filterModel, setIsDashboardOpen, updateExternalFilterModel, viewScope]);
 
-  const handleApplyDashboardContentFilter = useCallback((kind: 'category' | 'topic' | 'duration' | 'intent', label: string) => {
-    if (!label.trim()) return;
-    const nextFilterModel = kind === 'category'
-      ? (() => {
-          const column = findDashboardCategoryColumn(displaySchema);
-          if (!column) return null;
-          return {
-            [column]: {
-              values: [label],
-              matchMode: 'any',
-            },
-          } as ExplorerFilterModel;
-        })()
-      : kind === 'topic'
-        ? (() => {
-            const column = findDashboardTopicColumn(displaySchema);
-            if (!column) return null;
-            return {
-              [column]: {
-                values: [label],
-                matchMode: 'any',
-              },
-            } as ExplorerFilterModel;
-          })()
-        : kind === 'duration'
-        ? (() => {
-            const column = findDashboardDurationColumn(displaySchema);
-            if (!column) return null;
-            let model: ExplorerFilterModel[string] = null;
-            if (label === '<1m') {
-              model = { filterKind: 'duration', operator: 'lt' as any, value: '60' };
-            } else if (label == '1-5m') {
-              model = { filterKind: 'duration', operator: 'between' as any, value: '60..300' };
-            } else if (label == '5-15m') {
-              model = { filterKind: 'duration', operator: 'between' as any, value: '300..900' };
-            } else if (label == '15-30m') {
-              model = { filterKind: 'duration', operator: 'between' as any, value: '900..1800' };
-            } else if (label == '30m+') {
-              model = { filterKind: 'duration', operator: 'gte' as any, value: '1800' };
-            } else if (label == 'unknown') {
-              model = { filterKind: 'duration', operator: 'eq' as any, value: '' };
-            }
-            return model ? ({ [column]: model } as ExplorerFilterModel) : null;
-          })()
-        : (() => {
-            const column = findDashboardIntentColumn(displaySchema);
-            if (!column) return null;
-            return {
-              [column]: {
-                values: [label],
-                matchMode: 'any',
-              },
-            } as ExplorerFilterModel;
-          })();
-
-    if (!nextFilterModel) return;
-    applyDashboardDrilldown({ filters: nextFilterModel, visibleColumns: Object.keys(nextFilterModel) });
-  }, [applyDashboardDrilldown, displaySchema]);
-
-  const handleInsertResearchDiaryDate = useCallback(() => {
-    const formatter = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    const heading = `## ${formatter.format(new Date())}`;
-    setState((previous) => {
-      const current = previous.projectNotes || '';
-      const trimmed = current.trimEnd();
-      const nextNotes = trimmed.length === 0
-        ? `${heading}
-
-`
-        : `${trimmed}
-
-${heading}
-
-`;
-      return { ...previous, projectNotes: nextNotes };
-    });
-  }, []);
+  const handleOverviewDrilldown = useCallback((drilldown: OverviewDrilldown) => {
+    const filters = buildOverviewDrilldownFilter(drilldown, displaySchema);
+    if (!filters) {
+      showToast({ kind: 'info', message: 'This dataset has no column to filter on for that.' });
+      return;
+    }
+    applyDashboardDrilldown({ filters, visibleColumns: Object.keys(filters) });
+  }, [applyDashboardDrilldown, displaySchema, showToast]);
 
   const commandPaletteCommands = useMemo(() => {
     const commands = [
       {
-        id: 'dashboard-thumbnails',
-        label: 'Open thumbnails dashboard',
-        description: 'Jump straight to the thumbnails tab in the dataset dashboard.',
-        keywords: ['thumbnail thumbs dashboard dataset'],
+        id: 'toggle-thumbnail-view',
+        label: explorerLayout === 'thumbnails' ? 'Show table view' : 'Show thumbnail view',
+        description: 'Switch the videos explorer between the table and a grid of thumbnails.',
+        keywords: ['thumbnail thumbs grid images table layout'],
         shortcut: 'Alt/Option + Shift + T',
-        onSelect: () => handleOpenDatasetDashboardTab('thumbnails'),
+        disabled: !hasLoadedData || viewScope !== 'videos',
+        onSelect: () => handleToggleExplorerLayout(),
       },
       {
         id: 'dashboard-attention',
@@ -4913,12 +2633,19 @@ ${heading}
         onSelect: () => handleOpenDatasetDashboardTab('attention'),
       },
       {
-        id: 'dashboard-content',
-        label: 'Open content dashboard',
-        description: 'Open the content tab in the dataset dashboard.',
-        keywords: ['content dashboard dataset'],
+        id: 'dashboard-vernacular',
+        label: 'Open vernacular dashboard',
+        description: 'Words, phrases, hashtags, tags and topics, and which tags appear together.',
+        keywords: ['vernacular content keywords hashtags tags topics network dashboard'],
         shortcut: 'Alt/Option + Shift + C',
-        onSelect: () => handleOpenDatasetDashboardTab('content'),
+        onSelect: () => handleOpenDatasetDashboardTab('vernacular'),
+      },
+      {
+        id: 'dashboard-time',
+        label: 'Open time dashboard',
+        description: 'Publishing rhythm, views by publish date, channel activity and terms over time.',
+        keywords: ['time rhythm weekday hour trend dashboard'],
+        onSelect: () => handleOpenDatasetDashboardTab('time'),
       },
       {
         id: 'dashboard-linking',
@@ -5076,32 +2803,7 @@ ${heading}
     ];
 
     return commands.filter((command) => !command.disabled || command.id === 'generate-channel-metadata');
-  }, [
-    channelMetadataSnapshot?.rows,
-    channelRows.length,
-    clearAllExplorerFilters,
-    handleGenerateChannelMetadata,
-    handleInclusionViewChange,
-    handleOpenDatasetDashboardTab,
-    handleOpenAnnotations,
-    handleOpenResearchLog,
-    handleViewScopeChange,
-    handleOpenSaveView,
-    handleRequestImport,
-    hasLoadedData,
-    hideOptionalColumns,
-    isChannelMetadataFresh,
-    inclusionView,
-    isGeneratingChannelMetadata,
-    resetVisibleColumnOrder,
-    showAllColumns,
-    state.isRightPanelCollapsed,
-    state.theme,
-    toggleRightPanel,
-    viewScope,
-    datasetVersion,
-    inclusionView,
-  ]);
+  }, [explorerLayout, handleToggleExplorerLayout, resetVisibleColumnOrder, viewScope, hasLoadedData, showAllColumns, hideOptionalColumns, handleRequestImport, handleOpenSaveView, handleOpenResearchLog, channelRows.length, channelMetadataSnapshot?.rows?.length, isChannelMetadataFresh, handleGenerateChannelMetadata, isGeneratingChannelMetadata, handleOpenAnnotations, clearAllExplorerFilters, inclusionView, state.isRightPanelCollapsed, state.theme, toggleRightPanel, handleOpenDatasetDashboardTab, setIsColumnsOpen, setIsExportOpen, setIsKeyboardHelpOpen, handleViewScopeChange, handleInclusionViewChange]);
   const handleGridReady = useCallback((api: GridApi) => {
     gridApiRef.current = api;
     setGridReadyVersion((current) => current + 1);
@@ -5146,33 +2848,7 @@ ${heading}
       clearAllExplorerFilters();
     }
     setPendingViewerTarget({ kind: 'video', videoId });
-  }, [clearAllExplorerFilters, requestSelectionScroll, rows]);
-
-  const handleDashboardNavigateToChannel = useCallback((channel: { channelId?: string | null; channelName?: string }) => {
-    setIsDashboardOpen(false);
-    requestSelectionScroll('middle');
-    clearChannelDrilldownState();
-    clearChannelScopedVideoUniverse();
-    setChannelFilterModel({});
-    const hasMatchingChannelRow = channelRowsWithLinking.some((row) => {
-      const rowChannelId = String(row?.channel_id || '').trim();
-      const rowChannelName = String(row?.channel_name || '').trim();
-      return (channel.channelId && rowChannelId === String(channel.channelId).trim())
-        || (channel.channelName && rowChannelName === String(channel.channelName).trim());
-    });
-    if (!hasMatchingChannelRow) {
-      const hasMatchingVideoRow = rows.some((row) => {
-        const rowChannelId = resolveChannelId(row);
-        const rowChannelName = resolveChannelName(row);
-        return (channel.channelId && rowChannelId === channel.channelId)
-          || (channel.channelName && rowChannelName === channel.channelName);
-      });
-      if (!hasMatchingVideoRow) {
-        clearAllExplorerFilters();
-      }
-    }
-    setPendingViewerTarget({ kind: 'channel', channelId: channel.channelId, channelName: channel.channelName });
-  }, [channelRowsWithLinking, clearAllExplorerFilters, clearChannelDrilldownState, requestSelectionScroll, rows]);
+  }, [clearAllExplorerFilters, requestSelectionScroll, rows, setIsDashboardOpen]);
 
   useEffect(() => {
     if (!pendingViewerTarget) return;
@@ -5241,25 +2917,17 @@ ${heading}
     drilldownPreviousVideoFilter: drilldownPreviousVideoFilterRef.current ?? null,
   }), [channelFilterModel, filterModel, inclusionView, isChannelDrilldownFilterActive, selectedChannelDetailRow?.channel_id, selectedChannelDetailRow?.channel_name, selectedVideoId, state.activeViewId, videoScopeChannelKeys, viewScope]);
 
-  useEffect(() => {
-    if (!hasLoadedData) return;
-    const entryKey = JSON.stringify(currentNavigationEntry);
-    if (navigationRestoreInFlightRef.current) {
-      navigationRestoreInFlightRef.current = false;
-      lastNavigationKeyRef.current = entryKey;
-      return;
-    }
-    if (lastNavigationKeyRef.current === entryKey) return;
-    lastNavigationKeyRef.current = entryKey;
-    setNavigationHistory((current) => {
-      const base = navigationCursor >= 0 ? current.slice(0, navigationCursor + 1) : current;
-      const last = base[base.length - 1];
-      if (last && JSON.stringify(last) === entryKey) return base;
-      const next = [...base, currentNavigationEntry];
-      setNavigationCursor(next.length - 1);
-      return next.slice(-120);
-    });
-  }, [currentNavigationEntry, hasLoadedData, navigationCursor]);
+  const {
+    navigateHistoryByOffset,
+    resetNavigationHistory,
+    canNavigateBack,
+    canNavigateForward,
+  } = useNavigationHistory({
+    enabled: hasLoadedData,
+    currentEntry: currentNavigationEntry,
+    restoreEntry: restoreNavigationEntry,
+  });
+  resetNavigationHistoryRef.current = resetNavigationHistory;
 
   const handleRenameProject = useCallback((nextName: string) => {
     const trimmed = nextName.trim();
@@ -5299,9 +2967,9 @@ ${heading}
     appendResearchHistory({
       type: 'saved_view_created',
       summary: `Saved view "${trimmedName}" created.`,
-      meta: { viewId: newView.id, viewName: trimmedName },
+      meta: { viewId: newView.id, viewName: trimmedName, filterSummary: summarizeFilterModel(filterModel), videoCount: rows.length },
     });
-  }, [appendResearchHistory, filterModel, state.theme, viewScope, visibleColumns]);
+  }, [appendResearchHistory, filterModel, rows.length, state.theme, viewScope, visibleColumns]);
 
   const deleteView = useCallback((id: string) => {
     const deletedView = state.savedViews.find((view) => view.id === id);
@@ -5311,14 +2979,6 @@ ${heading}
       activeViewId: previous.activeViewId === id ? null : previous.activeViewId,
     }));
     setSavedViewsVersion((version) => version + 1);
-    setThumbnailCaches((current) => {
-      const key = buildSavedViewThumbnailScopeKey(id);
-      if (!current[key]) return current;
-      revokeThumbnailUrls(current[key]);
-      const next = { ...current };
-      delete next[key];
-      return next;
-    });
     appendResearchHistory({
       type: 'saved_view_deleted',
       summary: `Saved view "${deletedView?.name || id}" deleted.`,
@@ -5363,33 +3023,6 @@ ${heading}
     });
   }, [clearChannelDrilldownState, clearChannelScopedVideoUniverse, clearScopeSelection, defaultGridResetStage, resetChannelLayoutToDefault, resetVideoLayoutToDefault, updateExternalFilterModel]);
 
-  useEffect(() => {
-    const validSavedViewKeys = new Set(state.savedViews.map((view) => buildSavedViewThumbnailScopeKey(view.id)));
-    setThumbnailCaches((current) => {
-      let changed = false;
-      const next: Record<string, DashboardThumbnailCacheSnapshot> = {};
-      (Object.entries(current as Record<string, DashboardThumbnailCacheSnapshot>) as Array<[string, DashboardThumbnailCacheSnapshot]>).forEach(([key, snapshot]) => {
-        if (isSavedViewThumbnailScopeKey(key) && !validSavedViewKeys.has(key)) {
-          changed = true;
-          revokeThumbnailUrls(snapshot);
-          return;
-        }
-        next[key] = snapshot;
-      });
-      return changed ? next : current;
-    });
-  }, [state.savedViews]);
-
-  useEffect(() => {
-    setThumbnailCaches((current) => {
-      if (!current[FILTERED_TEMP_THUMBNAIL_SCOPE]) return current;
-      const next = { ...current };
-      revokeThumbnailUrls(next[FILTERED_TEMP_THUMBNAIL_SCOPE] as DashboardThumbnailCacheSnapshot);
-      delete next[FILTERED_TEMP_THUMBNAIL_SCOPE];
-      return next;
-    });
-  }, [filteredViewVersion]);
-
   const handleApplyTagFilter = useCallback((tag: string, source: 'imported' | 'user', append = false) => {
     if (!tag) return;
     const mappedTagColumn = source === 'imported'
@@ -5413,10 +3046,6 @@ ${heading}
       [tagColumn]: { values: nextValues, matchMode: 'any' },
     });
   }, [filterModel, specialMappings.tagColumn, updateExternalFilterModel, workingSchema]);
-  const includedDisplayRows = useMemo(
-    () => buildDisplayRows(includedBaseRowsWithGenerated, userTagsByVideoId),
-    [includedBaseRowsWithGenerated, userTagsByVideoId],
-  );
   const includedBooleanMapColumns = useMemo(
     () => detectBooleanMapColumns(includedDisplayRows, displaySchema),
     [includedDisplayRows, displaySchema],
@@ -5425,435 +3054,21 @@ ${heading}
     () => detectListLikeColumns(includedDisplayRows, displaySchema, includedBooleanMapColumns),
     [includedBooleanMapColumns, includedDisplayRows, displaySchema],
   );
-  const activeSavedView = useMemo(
-    () => state.savedViews.find((view) => view.id === state.activeViewId) || null,
-    [state.activeViewId, state.savedViews],
-  );
-  const activeSavedViewThumbnailScopeKey = activeSavedView ? buildSavedViewThumbnailScopeKey(activeSavedView.id) : null;
-  const isActiveSavedViewFilterAligned = useMemo(() => {
-    if (!activeSavedView) return false;
-    return JSON.stringify(activeSavedView.filterModel || {}) === JSON.stringify(filterModel || {});
-  }, [activeSavedView, filterModel]);
-
-  const effectiveThumbnailScopeKey = useMemo(() => {
-    if (dashboardScope === 'full') return 'full';
-    if (thumbnailCaches[FILTERED_TEMP_THUMBNAIL_SCOPE]) return FILTERED_TEMP_THUMBNAIL_SCOPE;
-    if (
-      isActiveSavedViewFilterAligned
-      && activeSavedViewThumbnailScopeKey
-      && thumbnailCaches[activeSavedViewThumbnailScopeKey]
-    ) {
-      return activeSavedViewThumbnailScopeKey;
-    }
-    return FILTERED_TEMP_THUMBNAIL_SCOPE;
-  }, [activeSavedViewThumbnailScopeKey, dashboardScope, isActiveSavedViewFilterAligned, thumbnailCaches]);
-  const effectiveThumbnailCache = thumbnailCaches[effectiveThumbnailScopeKey];
-  const thumbnailTileSize = THUMBNAIL_ZOOM_STEPS[thumbnailZoomIndex] ?? THUMBNAIL_ZOOM_STEPS[2];
-  const canThumbnailZoomOut = thumbnailZoomIndex > 0;
-  const canThumbnailZoomIn = thumbnailZoomIndex < THUMBNAIL_ZOOM_STEPS.length - 1;
-
-  const handleThumbnailZoomOut = useCallback(() => {
-    setThumbnailZoomIndex((current) => Math.max(0, current - 1));
-  }, []);
-
-  const handleThumbnailZoomIn = useCallback(() => {
-    setThumbnailZoomIndex((current) => Math.min(THUMBNAIL_ZOOM_STEPS.length - 1, current + 1));
-  }, []);
-
-  const loadDashboardThumbnails = useCallback((mode: 'full' | 'filtered') => {
-    const primaryScopeKey: string = mode === 'full' ? 'full' : FILTERED_TEMP_THUMBNAIL_SCOPE;
-    const sourceRowsForLoad = mode === 'full' ? includedBaseRows : rows;
-    const sourceRowCount = sourceRowsForLoad.length;
-    const sortRules = mode === 'filtered' ? videoSortRules : [];
-    const sortSignature = buildThumbnailSortSignature(sortRules);
-    const candidates = selectThumbnailCandidates({
-      rows: sourceRowsForLoad,
-      sortRules: mode === 'filtered' ? sortRules : undefined,
-      limit: THUMBNAIL_LIMIT,
-    });
-    const mirrorSavedViewScopeKey = mode === 'filtered' && activeSavedView ? buildSavedViewThumbnailScopeKey(activeSavedView.id) : null;
-    const targetScopes = [
-      {
-        scopeKey: primaryScopeKey,
-        label: resolveThumbnailCacheLabel(primaryScopeKey as 'full' | 'filtered-temp'),
-        savedViewsVersionAtCalculation: undefined as number | undefined,
-      },
-      ...(mirrorSavedViewScopeKey ? [{
-        scopeKey: mirrorSavedViewScopeKey,
-        label: resolveThumbnailCacheLabel(mirrorSavedViewScopeKey, activeSavedView?.name),
-        savedViewsVersionAtCalculation: savedViewsVersion,
-      }] : []),
-    ];
-    const sessionIdByScope = new Map<string, number>();
-    targetScopes.forEach((target) => {
-      thumbnailLoadTokenRef.current += 1;
-      sessionIdByScope.set(target.scopeKey, thumbnailLoadTokenRef.current);
-    });
-
-    const seedSnapshot = mode === 'filtered'
-      ? thumbnailCachesRef.current.full
-      : undefined;
-    const primaryEntries = buildThumbnailEntriesFromCacheSeed({
-      candidates,
-      seedSnapshot,
-    });
-    const primaryProgress = summarizeThumbnailProgress(primaryEntries);
-    setThumbnailLoadProgress({
-      scopeKey: primaryScopeKey as DashboardThumbnailLoadProgress['scopeKey'],
-      label: targetScopes[0].label,
-      total: primaryProgress.total,
-      completed: primaryProgress.completed,
-      failed: primaryProgress.failed,
-      loading: primaryProgress.loading,
-    });
-
-    setThumbnailCaches((current) => {
-      const next = { ...current };
-      targetScopes.forEach((target) => {
-        const sessionId = sessionIdByScope.get(target.scopeKey) ?? 0;
-        const entries = target.scopeKey === primaryScopeKey
-          ? primaryEntries
-          : buildThumbnailEntriesFromCacheSeed({ candidates, seedSnapshot });
-        const nextSnapshot: DashboardThumbnailCacheSnapshot = {
-          scopeKey: target.scopeKey as DashboardThumbnailCacheSnapshot['scopeKey'],
-          label: target.label,
-          sessionId,
-          rowCount: sourceRowCount,
-          totalCandidates: primaryEntries.length,
-          calculatedAt: new Date().toISOString(),
-          datasetVersionAtCalculation: datasetVersion,
-          filteredViewVersionAtCalculation: mode === 'filtered' ? filteredViewVersion : undefined,
-          savedViewsVersionAtCalculation: target.savedViewsVersionAtCalculation,
-          sortSignature,
-          entries,
-        };
-        revokeDroppedThumbnailUrls(current[target.scopeKey], nextSnapshot);
-        next[target.scopeKey] = nextSnapshot;
-      });
-      return next;
-    });
-  }, [
-    activeSavedView,
-    datasetVersion,
-    filteredViewVersion,
-    includedBaseRows,
-    rows,
-    savedViewsVersion,
-    videoSortRules,
-  ]);
-
-  const handleLoadFullDashboardThumbnails = useCallback(() => {
-    loadDashboardThumbnails('full');
-  }, [loadDashboardThumbnails]);
-
-  const handleLoadFilteredDashboardThumbnails = useCallback(() => {
-    loadDashboardThumbnails('filtered');
-  }, [loadDashboardThumbnails]);
-
-  useEffect(() => {
-    if (dashboardScope !== 'filtered') return;
-    if (thumbnailCaches[FILTERED_TEMP_THUMBNAIL_SCOPE]) return;
-    if (
-      isActiveSavedViewFilterAligned
-      && activeSavedViewThumbnailScopeKey
-      && thumbnailCaches[activeSavedViewThumbnailScopeKey]
-    ) {
-      return;
-    }
-
-    const sortRules = videoSortRules;
-    const sortSignature = buildThumbnailSortSignature(sortRules);
-    const candidates = selectThumbnailCandidates({
-      rows,
-      sortRules,
-      limit: THUMBNAIL_LIMIT,
-    });
-    const entries = buildThumbnailEntriesFromCacheSeed({
-      candidates,
-      seedSnapshot: thumbnailCaches.full,
-    });
-    const sessionId = thumbnailLoadTokenRef.current + 1;
-    thumbnailLoadTokenRef.current = sessionId;
-    const nextSnapshot: DashboardThumbnailCacheSnapshot = {
-      scopeKey: FILTERED_TEMP_THUMBNAIL_SCOPE as DashboardThumbnailCacheSnapshot['scopeKey'],
-      label: resolveThumbnailCacheLabel('filtered-temp'),
-      sessionId,
-      rowCount: rows.length,
-      totalCandidates: entries.length,
-      calculatedAt: new Date().toISOString(),
-      datasetVersionAtCalculation: datasetVersion,
-      filteredViewVersionAtCalculation: filteredViewVersion,
-      sortSignature,
-      entries,
-    };
-
-    setThumbnailCaches((current) => {
-      if (current[FILTERED_TEMP_THUMBNAIL_SCOPE]) return current;
-      return {
-        ...current,
-        [FILTERED_TEMP_THUMBNAIL_SCOPE]: nextSnapshot,
-      };
-    });
-
-    const summary = summarizeThumbnailProgress(entries);
-    setThumbnailLoadProgress({
-      scopeKey: FILTERED_TEMP_THUMBNAIL_SCOPE as DashboardThumbnailLoadProgress['scopeKey'],
-      label: nextSnapshot.label,
-      total: summary.total,
-      completed: summary.completed,
-      failed: summary.failed,
-      loading: summary.loading,
-    });
-  }, [
-    activeSavedViewThumbnailScopeKey,
-    dashboardScope,
-    datasetVersion,
-    filteredViewVersion,
-    isActiveSavedViewFilterAligned,
-    rows,
-    thumbnailCaches,
-    videoSortRules,
-  ]);
-
-  const updateThumbnailEntryForScope = useCallback((
-    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
-    dedupeKey: string,
-    updater: (entry: DashboardThumbnailCacheSnapshot['entries'][number]) => DashboardThumbnailCacheSnapshot['entries'][number],
-    expectedSessionId?: number,
-  ) => {
-    let nextEntriesForProgress: DashboardThumbnailCacheSnapshot['entries'] | null = null;
-    let nextLabelForProgress = '';
-    setThumbnailCaches((current) => {
-      const scopeSnapshot = current[scopeKey];
-      if (!scopeSnapshot?.entries?.length) return current;
-      if (Number.isFinite(expectedSessionId) && scopeSnapshot.sessionId !== Number(expectedSessionId)) return current;
-      const entryIndex = scopeSnapshot.entries.findIndex((entry) => entry.dedupeKey === dedupeKey);
-      if (entryIndex < 0) return current;
-      const previousEntry = scopeSnapshot.entries[entryIndex];
-      const nextEntry = updater(previousEntry);
-      if (nextEntry === previousEntry) return current;
-      const entries = [...scopeSnapshot.entries];
-      if (previousEntry.objectUrl && nextEntry.objectUrl && previousEntry.objectUrl !== nextEntry.objectUrl) {
-        URL.revokeObjectURL(previousEntry.objectUrl);
-      }
-      entries[entryIndex] = nextEntry;
-      const nextSnapshot: DashboardThumbnailCacheSnapshot = {
-        ...scopeSnapshot,
-        calculatedAt: new Date().toISOString(),
-        entries,
-      };
-      nextEntriesForProgress = entries;
-      nextLabelForProgress = nextSnapshot.label;
-      return {
-        ...current,
-        [scopeKey]: nextSnapshot,
-      };
-    });
-    if (!nextEntriesForProgress) return;
-    setThumbnailLoadProgress((current) => {
-      if (!current || current.scopeKey !== scopeKey) return current;
-      const summary = summarizeThumbnailProgress(nextEntriesForProgress || []);
-      return {
-        ...current,
-        label: nextLabelForProgress || current.label,
-        total: summary.total,
-        completed: summary.completed,
-        failed: summary.failed,
-        loading: summary.loading,
-      };
-    });
-  }, []);
-
-  const handleThumbnailEntryLoad = useCallback((
-    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
-    sessionId: number,
-    dedupeKey: string,
-    candidateIndex: number,
-    loadedUrl?: string,
-  ) => {
-    updateThumbnailEntryForScope(scopeKey, dedupeKey, (entry) => {
-      const resolvedUrl = String(loadedUrl || entry.objectUrl || entry.activeUrl || entry.sourceUrl || '').trim();
-      if (!resolvedUrl) return entry;
-      const urls = Array.from(new Set(
-        (entry.candidateUrls || [entry.activeUrl, entry.sourceUrl, resolvedUrl])
-          .map((url) => String(url || '').trim())
-          .filter(Boolean),
-      ));
-      const normalizedCandidateIndex = Math.max(0, Math.min(Math.floor(candidateIndex), Math.max(urls.length - 1, 0)));
-      if (Number.isFinite(entry.activeCandidateIndex) && Number(entry.activeCandidateIndex) !== normalizedCandidateIndex) {
-        return entry;
-      }
-      if (
-        entry.status === 'loaded'
-        && entry.activeUrl === resolvedUrl
-        && (entry.fallbackIndex ?? 0) === normalizedCandidateIndex
-        && (entry.activeCandidateIndex ?? 0) === normalizedCandidateIndex
-      ) {
-        return entry;
-      }
-      return {
-        ...entry,
-        status: 'loaded',
-        sourceUrl: urls[normalizedCandidateIndex] || entry.sourceUrl,
-        activeUrl: resolvedUrl,
-        candidateUrls: urls,
-        fallbackIndex: normalizedCandidateIndex,
-        activeCandidateIndex: normalizedCandidateIndex,
-        error: undefined,
-      };
-    }, sessionId);
-  }, [updateThumbnailEntryForScope]);
-
-  const handleThumbnailEntryError = useCallback((
-    scopeKey: DashboardThumbnailCacheSnapshot['scopeKey'],
-    sessionId: number,
-    dedupeKey: string,
-    candidateIndex: number,
-    failedUrl?: string,
-  ) => {
-    updateThumbnailEntryForScope(scopeKey, dedupeKey, (entry) => {
-      const urls = Array.from(new Set(
-        (entry.candidateUrls || [entry.activeUrl, entry.sourceUrl])
-          .map((url) => String(url || '').trim())
-          .filter(Boolean),
-      ));
-      if (!urls.length) {
-        if (entry.status === 'failed' && !entry.activeUrl) return entry;
-        return {
-          ...entry,
-          status: 'failed',
-          activeUrl: '',
-          fallbackIndex: 0,
-          activeCandidateIndex: -1,
-          candidateUrls: [],
-          error: entry.error || 'No thumbnail URL available',
-        };
-      }
-      const normalizedCandidateIndex = Math.max(0, Math.min(Math.floor(candidateIndex), Math.max(urls.length - 1, 0)));
-      if (Number.isFinite(entry.activeCandidateIndex) && Number(entry.activeCandidateIndex) !== normalizedCandidateIndex) {
-        return entry;
-      }
-      const currentUrl = String(failedUrl || entry.activeUrl || '').trim();
-      const currentIndex = currentUrl ? urls.findIndex((url) => url === currentUrl) : -1;
-      const fallbackIndex = Math.max(0, Math.min(
-        Number.isFinite(entry.activeCandidateIndex) ? Number(entry.activeCandidateIndex) : (entry.fallbackIndex ?? 0),
-        urls.length - 1,
-      ));
-      const baseIndex = currentIndex >= 0 ? currentIndex : fallbackIndex;
-      const nextIndex = baseIndex + 1;
-      if (nextIndex < urls.length) {
-        const nextUrl = urls[nextIndex];
-        if (
-          entry.status === 'pending'
-          && entry.activeUrl === nextUrl
-          && fallbackIndex === nextIndex
-          && (entry.activeCandidateIndex ?? nextIndex) === nextIndex
-        ) {
-          return entry;
-        }
-        return {
-          ...entry,
-          status: 'pending',
-          sourceUrl: nextUrl,
-          activeUrl: nextUrl,
-          candidateUrls: urls,
-          fallbackIndex: nextIndex,
-          activeCandidateIndex: nextIndex,
-          error: undefined,
-        };
-      }
-      if (
-        entry.status === 'failed'
-        && !entry.activeUrl
-        && fallbackIndex === urls.length - 1
-        && (entry.activeCandidateIndex ?? fallbackIndex) === fallbackIndex
-      ) {
-        return entry;
-      }
-      return {
-        ...entry,
-        status: 'failed',
-        activeUrl: '',
-        candidateUrls: urls,
-        fallbackIndex: urls.length - 1,
-        activeCandidateIndex: urls.length - 1,
-        error: entry.error || 'Failed to load thumbnail',
-      };
-    }, sessionId);
-  }, [updateThumbnailEntryForScope]);
-
-  const handleRetryFailedDashboardThumbnails = useCallback(() => {
-    let nextEntriesForProgress: DashboardThumbnailCacheSnapshot['entries'] | null = null;
-    let nextLabelForProgress = '';
-    setThumbnailCaches((current) => {
-      const scopeSnapshot = current[effectiveThumbnailScopeKey];
-      if (!scopeSnapshot?.entries?.length) return current;
-      let changed = false;
-      const entries = scopeSnapshot.entries.map((entry) => {
-        if (entry.status !== 'failed') return entry;
-        const urls = Array.from(new Set(
-          (entry.candidateUrls || [entry.sourceUrl])
-            .map((url) => String(url || '').trim())
-            .filter(Boolean),
-        ));
-        if (!urls.length) return entry;
-        changed = true;
-        return {
-          ...entry,
-          status: 'pending' as const,
-          sourceUrl: urls[0],
-          activeUrl: urls[0],
-          candidateUrls: urls,
-          fallbackIndex: 0,
-          activeCandidateIndex: 0,
-          error: undefined,
-        };
-      });
-      if (!changed) return current;
-      thumbnailLoadTokenRef.current += 1;
-      const nextSnapshot: DashboardThumbnailCacheSnapshot = {
-        ...scopeSnapshot,
-        sessionId: thumbnailLoadTokenRef.current,
-        calculatedAt: new Date().toISOString(),
-        entries,
-      };
-      nextEntriesForProgress = entries;
-      nextLabelForProgress = nextSnapshot.label;
-      return {
-        ...current,
-        [effectiveThumbnailScopeKey]: nextSnapshot,
-      };
-    });
-    if (!nextEntriesForProgress) return;
-    setThumbnailLoadProgress((current) => {
-      if (!current || current.scopeKey !== effectiveThumbnailScopeKey) return current;
-      const summary = summarizeThumbnailProgress(nextEntriesForProgress || []);
-      return {
-        ...current,
-        label: nextLabelForProgress || current.label,
-        total: summary.total,
-        completed: summary.completed,
-        failed: summary.failed,
-        loading: summary.loading,
-      };
-    });
-  }, [effectiveThumbnailScopeKey]);
-
   const createScopeDashboardSnapshot = useCallback((scope: DashboardScope, scopedRows: any[]): DatasetDashboardSnapshot => ({
     scope,
-    stats: buildDatasetDashboardStats(scopedRows),
     template: buildDashboardTemplateSnapshot({
       rows: scopedRows,
       annotations: state.annotations,
       importedChannelMetadata,
       datasetLabel: state.fileName,
       scope,
+      vernacularExclusions,
     }),
     rowCount: scopedRows.length,
     calculatedAt: new Date().toISOString(),
     datasetVersionAtCalculation: datasetVersion,
     filteredViewVersionAtCalculation: scope === 'filtered' ? filteredViewVersion : undefined,
-  }), [datasetVersion, filteredViewVersion, importedChannelMetadata, state.annotations, state.fileName]);
+  }), [datasetVersion, filteredViewVersion, importedChannelMetadata, state.annotations, state.fileName, vernacularExclusions]);
 
   const createSavedViewDashboardSnapshot = useCallback((view: SavedView): SavedViewDashboardSnapshot => {
     const savedViewFilterState = buildUnifiedFilterState({
@@ -5867,7 +3082,6 @@ ${heading}
     return {
       savedViewId: view.id,
       savedViewName: view.name,
-      stats: buildDatasetDashboardStats(scopedRows),
       template: buildDashboardTemplateSnapshot({
         rows: scopedRows,
         annotations: state.annotations,
@@ -5875,31 +3089,15 @@ ${heading}
         datasetLabel: state.fileName,
         scope: 'filtered',
         scopeLabel: `saved view: ${view.name}`,
+        vernacularExclusions,
       }),
       rowCount: scopedRows.length,
       calculatedAt: new Date().toISOString(),
       datasetVersionAtCalculation: datasetVersion,
       savedViewsVersionAtCalculation: savedViewsVersion,
     };
-  }, [datasetVersion, displaySchema, importedChannelMetadata, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns, savedViewsVersion, state.annotations, state.fileName]);
+  }, [datasetVersion, displaySchema, importedChannelMetadata, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns, savedViewsVersion, state.annotations, state.fileName, vernacularExclusions]);
 
-  const allVisibleChannelIdsForDashboard = useMemo(() => {
-    const scopedRows = dashboardScope === 'full' ? includedDisplayRows : rows;
-    const channelIdColumn = detectIncomingChannelIdColumn(displaySchema);
-    if (!channelIdColumn) return [];
-
-    const seen = new Set<string>();
-    const values: string[] = [];
-    scopedRows.forEach((row) => {
-      const value = row?.[channelIdColumn];
-      if (value === null || value === undefined) return;
-      const normalized = String(value).trim();
-      if (!normalized || seen.has(normalized)) return;
-      seen.add(normalized);
-      values.push(normalized);
-    });
-    return values;
-  }, [dashboardScope, displaySchema, includedDisplayRows, rows]);
 
   const currentLinkingRows = useMemo(
     () => (dashboardScope === 'full' ? includedBaseRowsWithGenerated : rows),
@@ -5916,480 +3114,39 @@ ${heading}
     [sourceVisibility],
   );
   const currentLinkingVideoIds = useMemo(() => new Set(collectVideoIds(currentLinkingRows)), [currentLinkingRows]);
-  useEffect(() => {
-    setLinkingState((current) => {
-      if (!current.snapshot) return current;
-      if (current.snapshot.datasetFingerprint === currentLinkingDatasetFingerprint && !current.stale) return current;
-      if (current.snapshot.datasetFingerprint === currentLinkingDatasetFingerprint && current.stale) return current;
-      if (
-        current.stale
-        && current.snapshot.datasetFingerprint !== currentLinkingDatasetFingerprint
-        && current.staleReason === 'Dataset changed. Refresh linking summary.'
-      ) {
-        return current;
-      }
-      if (current.stale && current.snapshot.datasetFingerprint !== currentLinkingDatasetFingerprint) {
-        return {
-          ...current,
-          staleReason: 'Dataset changed. Refresh linking summary.',
-        };
-      }
-      return {
-        ...current,
-        stale: true,
-        staleReason: 'Dataset changed. Refresh linking summary.',
-      };
-    });
-  }, [currentLinkingDatasetFingerprint]);
-  useEffect(() => {
-    setChannelLinkingState((current) => {
-      if (!current.snapshot) return current;
-      const channelDatasetFingerprint = buildDatasetFingerprint({
-        datasetVersion,
-        inclusionView,
-        rowCount: includedBaseRows.length,
-        sourceVisibility,
-      });
-      if (current.snapshot.datasetFingerprint === channelDatasetFingerprint && !current.stale) return current;
-      if (current.snapshot.datasetFingerprint === channelDatasetFingerprint && current.stale) return current;
-      if (current.stale && current.staleReason === 'Dataset changed. Refresh channel metadata to rebuild link aggregates.') {
-        return current;
-      }
-      return {
-        ...current,
-        stale: true,
-        staleReason: 'Dataset changed. Refresh channel metadata to rebuild link aggregates.',
-      };
-    });
-  }, [datasetVersion, includedBaseRows.length, inclusionView, sourceVisibility]);
-  const handleSelectLinkingSource = useCallback((sourceColumn: string) => {
-    if (!sourceColumn) return;
-    setLinkingState((current) => ({
-      ...current,
-      selectedSourceColumn: sourceColumn,
-      selectedSourceUpdatedAt: new Date().toISOString(),
-      sourceCandidateProfiles: profileLinkingColumnCandidates(currentLinkingRows),
-    }));
-    appendResearchHistory({
-      type: 'linking_source_selected',
-      summary: `Selected linking source column "${sourceColumn}".`,
-      meta: { sourceColumn },
-    });
-  }, [appendResearchHistory, currentLinkingRows]);
-  const handleGenerateLinkingSummary = useCallback(async (sourceColumn: string) => {
-    const selectedColumn = String(sourceColumn || linkingState.selectedSourceColumn || '').trim();
-    if (!selectedColumn) return;
-
-    updateLongTaskProgress({
-      title: 'Generating linking summary',
-      detail: `Preparing ${currentLinkingRows.length.toLocaleString()} row(s) from ${selectedColumn}`,
-      completed: 1,
-      total: 100,
-    });
-
-    const cacheKey = `${currentLinkingDatasetFingerprint}::${selectedColumn}`;
-    try {
-      await waitForNextPaint();
-      const cachedStageA = linkingState.parseCacheByKey[cacheKey] as LinkingStageAResult | undefined;
-      const stageA = cachedStageA && cachedStageA.sourceColumn === selectedColumn
-        ? cachedStageA
-        : await buildLinkingStageAAsync(currentLinkingRows, { linkColumn: selectedColumn }, (progress) => {
-            updateLongTaskProgress({
-              title: 'Generating linking summary',
-              detail: progress.detail,
-              completed: Math.min(45, Math.max(1, Math.round((progress.completed / Math.max(progress.total, 1)) * 45))),
-              total: 100,
-            });
-          });
-      const nextParseCache = cachedStageA
-        ? linkingState.parseCacheByKey
-        : { ...linkingState.parseCacheByKey, [cacheKey]: stageA };
-
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: 'Classifying domains and building bucket summaries',
-        completed: cachedStageA ? 45 : 46,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      const stageB = await buildLinkingStageBAsync(stageA, {
-        sourceColumn: selectedColumn,
-        overridesByDomain: linkingState.overridesByDomain,
-      }, (progress) => {
-        updateLongTaskProgress({
-          title: 'Generating linking summary',
-          detail: progress.detail,
-          completed: Math.min(80, 46 + Math.round((progress.completed / Math.max(progress.total, 1)) * 34)),
-          total: 100,
-        });
-      });
-
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: 'Writing linking metadata back into the explorer',
-        completed: 86,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      setGeneratedMetadata((current) => {
-        const nextByVideoId: GeneratedMetadataState['byVideoId'] = { ...current.byVideoId };
-        currentLinkingVideoIds.forEach((videoId) => {
-          const previous = nextByVideoId[videoId];
-          const linking = stageB.generatedMetadataByVideoId[videoId];
-          nextByVideoId[videoId] = {
-            content_intent: computedContentIntentByVideoId[videoId] || previous?.content_intent || 'other',
-            linking,
-          };
-        });
-        return { byVideoId: nextByVideoId };
-      });
-      setColumnLineage((current) => ensureGeneratedColumnLineage(current));
-      setLinkingState((current) => ({
-        ...current,
-        selectedSourceColumn: selectedColumn,
-        selectedSourceUpdatedAt: new Date().toISOString(),
-        stale: false,
-        staleReason: undefined,
-        datasetFingerprint: currentLinkingDatasetFingerprint,
-        sourceVisibilityFingerprint: currentSourceVisibilityFingerprint,
-        parseCacheByKey: nextParseCache,
-        sourceCandidateProfiles: profileLinkingColumnCandidates(currentLinkingRows),
-        snapshot: {
-          sourceColumn: selectedColumn,
-          generatedAt: new Date().toISOString(),
-          datasetFingerprint: currentLinkingDatasetFingerprint,
-          stageAFingerprint: stageA.stageAFingerprint,
-          overrideVersion: current.overrideVersion,
-          hasLinkedRows: stageB.model.hasLinkedRows,
-          model: stageB.model,
-          mentionAudit: stageB.mentionAudit,
-          domainAudit: stageB.domainAudit,
-          rowAudit: stageB.rowAudit,
-        },
-      }));
-
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: channelMetadataSnapshot?.rows?.length
-          ? 'Refreshing channel-level link aggregates from the new linking metadata'
-          : 'Finishing linking summary',
-        completed: 92,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      if (channelMetadataSnapshot?.rows?.length) {
-        setChannelLinkingState({
-          stale: false,
-          staleReason: undefined,
-          snapshot: buildChannelLinkingSnapshot({
-            rows: includedBaseRows,
-            generatedMetadataByVideoId: stageB.generatedMetadataByVideoId,
-          }),
-        });
-      } else {
-        setChannelLinkingState((current) => ({
-          ...current,
-          stale: true,
-          staleReason: 'Linking summary changed. Refresh channel metadata to rebuild channel-level link aggregates.',
-        }));
-      }
-      appendResearchHistory({
-        type: linkingState.snapshot ? 'linking_summary_refreshed' : 'linking_summary_generated',
-        summary: `${linkingState.snapshot ? 'Refreshed' : 'Generated'} linking summary from "${selectedColumn}" (${currentLinkingRows.length.toLocaleString()} rows).`,
-        details: `Visible sources: ${linkingSourceItems.filter((item) => item.visible).map((item) => item.label).join(', ') || 'none'}.`,
-        meta: { sourceColumn: selectedColumn, rowCount: currentLinkingRows.length },
-      });
-      updateLongTaskProgress({
-        title: 'Generating linking summary',
-        detail: 'Done',
-        completed: 100,
-        total: 100,
-      });
-      await waitForNextPaint();
-    } finally {
-      updateLongTaskProgress(null);
-    }
-  }, [
+  const channelLinkingDatasetFingerprint = useMemo(() => buildDatasetFingerprint({
+    datasetVersion,
+    inclusionView,
+    rowCount: includedBaseRows.length,
+    sourceVisibility,
+  }), [datasetVersion, includedBaseRows.length, inclusionView, sourceVisibility]);
+  const visibleLinkingSourceLabels = useMemo(
+    () => linkingSourceItems.filter((item) => item.visible).map((item) => item.label),
+    [linkingSourceItems],
+  );
+  const {
+    handleSelectLinkingSource,
+    handleGenerateLinkingSummary,
+    handleApplyLinkingOverride,
+    handleApplyLinkingOverrideBatch,
+  } = useLinkingActions({
+    linkingState,
+    setLinkingState,
+    setChannelLinkingState,
+    setGeneratedMetadata,
+    setColumnLineage,
+    linkingRows: currentLinkingRows,
+    linkingVideoIds: currentLinkingVideoIds,
+    linkingDatasetFingerprint: currentLinkingDatasetFingerprint,
+    sourceVisibilityFingerprint: currentSourceVisibilityFingerprint,
+    channelVideoRows: includedBaseRows,
+    channelDatasetFingerprint: channelLinkingDatasetFingerprint,
+    hasChannelMetadata: Boolean(channelMetadataSnapshot?.rows?.length),
+    contentIntentByVideoId: computedContentIntentByVideoId,
+    visibleSourceLabels: visibleLinkingSourceLabels,
     appendResearchHistory,
-    channelMetadataSnapshot?.rows,
-    computedContentIntentByVideoId,
-    currentLinkingDatasetFingerprint,
-    currentLinkingRows,
-    currentLinkingVideoIds,
-    currentSourceVisibilityFingerprint,
-    includedBaseRows,
-    linkingSourceItems,
-    linkingState.overridesByDomain,
-    linkingState.parseCacheByKey,
-    linkingState.selectedSourceColumn,
-    linkingState.snapshot,
     updateLongTaskProgress,
-  ]);
-  const handleApplyLinkingOverride = useCallback((args: { domain: string; baseBucket?: string; note?: string; revert?: boolean }) => {
-    const domain = String(args.domain || '').trim().toLowerCase();
-    if (!domain) return;
-
-    const mutation = args.revert
-      ? revertLinkingDomainOverride({ overridesByDomain: linkingState.overridesByDomain, domain })
-      : applyLinkingDomainOverride({
-          overridesByDomain: linkingState.overridesByDomain,
-          domain,
-          baseBucket: args.baseBucket as any,
-          note: args.note,
-        });
-    const nextOverrides = mutation.overridesByDomain;
-    const nextOverrideVersion = linkingState.overrideVersion + 1;
-
-    const currentSnapshot = linkingState.snapshot;
-    if (!currentSnapshot) {
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: true,
-        staleReason: 'Override saved. Generate linking summary to apply changes.',
-      }));
-    } else {
-      const cacheKey = `${currentSnapshot.datasetFingerprint}::${currentSnapshot.sourceColumn}`;
-      const stageA = linkingState.parseCacheByKey[cacheKey] as LinkingStageAResult | undefined;
-      if (!stageA) {
-        setLinkingState((current) => ({
-          ...current,
-          overridesByDomain: nextOverrides,
-          overrideVersion: nextOverrideVersion,
-          stale: true,
-          staleReason: 'Override saved, but parse cache is missing. Refresh linking summary.',
-        }));
-      } else {
-        const stageB = buildLinkingStageB(stageA, {
-          sourceColumn: currentSnapshot.sourceColumn,
-          overridesByDomain: nextOverrides,
-        });
-        setGeneratedMetadata((previous) => {
-          const nextByVideoId: GeneratedMetadataState['byVideoId'] = { ...previous.byVideoId };
-          currentLinkingVideoIds.forEach((videoId) => {
-            const previousEntry = nextByVideoId[videoId];
-            nextByVideoId[videoId] = {
-              content_intent: computedContentIntentByVideoId[videoId] || previousEntry?.content_intent || 'other',
-              linking: stageB.generatedMetadataByVideoId[videoId],
-            };
-          });
-          return { byVideoId: nextByVideoId };
-        });
-        if (channelMetadataSnapshot?.rows?.length) {
-          setChannelLinkingState({
-            stale: false,
-            staleReason: undefined,
-            snapshot: buildChannelLinkingSnapshot({
-              rows: includedBaseRows,
-              generatedMetadataByVideoId: stageB.generatedMetadataByVideoId,
-            }),
-          });
-        } else {
-          setChannelLinkingState((previous) => ({
-            ...previous,
-            stale: true,
-            staleReason: 'Linking bucket overrides changed. Refresh channel metadata to rebuild channel-level link aggregates.',
-          }));
-        }
-        setLinkingState((current) => ({
-          ...current,
-          overridesByDomain: nextOverrides,
-          overrideVersion: nextOverrideVersion,
-          stale: false,
-          staleReason: undefined,
-          snapshot: {
-            ...currentSnapshot,
-            generatedAt: new Date().toISOString(),
-            overrideVersion: nextOverrideVersion,
-            hasLinkedRows: stageB.model.hasLinkedRows,
-            model: stageB.model,
-            mentionAudit: stageB.mentionAudit,
-            domainAudit: stageB.domainAudit,
-            rowAudit: stageB.rowAudit,
-          },
-        }));
-      }
-    }
-
-    const oldAssignment = currentSnapshot?.domainAudit?.find((entry: any) => entry.domain === domain);
-    const stageAForEvent = currentSnapshot
-      ? (linkingState.parseCacheByKey[`${currentSnapshot.datasetFingerprint}::${currentSnapshot.sourceColumn}`] as LinkingStageAResult | undefined)
-      : undefined;
-    const nextSnapshotDomain = currentSnapshot && stageAForEvent
-      ? buildLinkingStageB(stageAForEvent, {
-          sourceColumn: currentSnapshot.sourceColumn,
-          overridesByDomain: nextOverrides,
-        }).domainAudit.find((entry) => entry.domain === domain)
-      : undefined;
-    const previouslyUnmapped = Boolean(oldAssignment?.unmapped);
-    const eventType = args.revert
-      ? 'linking_bucket_override_reverted'
-      : mutation.previous
-        ? 'linking_bucket_override_changed'
-        : 'linking_bucket_override_created';
-    appendResearchHistory({
-      type: eventType as any,
-      summary: args.revert
-        ? `Reverted linking override for ${domain}.`
-        : mutation.previous
-          ? `Changed linking bucket override for ${domain}.`
-          : `Assigned linking buckets for ${domain}.`,
-      details: `Ecology bucket: ${oldAssignment?.currentBaseBucket || oldAssignment?.baseBucket || 'auto'} -> ${nextSnapshotDomain?.currentBaseBucket || nextSnapshotDomain?.baseBucket || 'auto'}.`,
-      meta: {
-        domain,
-        oldBaseBucket: oldAssignment?.currentBaseBucket || oldAssignment?.baseBucket || null,
-        newBaseBucket: nextSnapshotDomain?.currentBaseBucket || nextSnapshotDomain?.baseBucket || null,
-        previouslyUnmapped,
-      },
-    });
-  }, [appendResearchHistory, channelMetadataSnapshot?.rows, computedContentIntentByVideoId, currentLinkingVideoIds, includedBaseRows, linkingState]);
-  const handleApplyLinkingOverrideBatch = useCallback(async (assignments: Array<{ domain: string; baseBucket: string }>) => {
-    const cleaned = assignments
-      .map((entry) => ({
-        domain: String(entry.domain || '').trim().toLowerCase(),
-        baseBucket: String(entry.baseBucket || '').trim() || 'other',
-      }))
-      .filter((entry) => entry.domain);
-    if (!cleaned.length) return;
-
-    let nextOverrides = linkingState.overridesByDomain;
-    cleaned.forEach((entry) => {
-      nextOverrides = applyLinkingDomainOverride({
-        overridesByDomain: nextOverrides,
-        domain: entry.domain,
-        baseBucket: entry.baseBucket as any,
-      }).overridesByDomain;
-    });
-    const nextOverrideVersion = linkingState.overrideVersion + cleaned.length;
-
-    const currentSnapshot = linkingState.snapshot;
-    if (!currentSnapshot) {
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: true,
-        staleReason: 'Override saved. Generate linking summary to apply changes.',
-      }));
-      appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
-        summary: `Updated ecology buckets for ${cleaned.length} domains.`,
-        meta: { domainCount: cleaned.length },
-      });
-      return;
-    }
-
-    const cacheKey = `${currentSnapshot.datasetFingerprint}::${currentSnapshot.sourceColumn}`;
-    const stageA = linkingState.parseCacheByKey[cacheKey] as LinkingStageAResult | undefined;
-    if (!stageA) {
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: true,
-        staleReason: 'Override saved, but parse cache is missing. Refresh linking summary.',
-      }));
-      appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
-        summary: `Updated ecology buckets for ${cleaned.length} domains.`,
-        meta: { domainCount: cleaned.length },
-      });
-      return;
-    }
-
-    updateLongTaskProgress({
-      title: 'Saving ecology buckets',
-      detail: `Applying ${cleaned.length.toLocaleString()} domain reassignment(s)`,
-      completed: 1,
-      total: 100,
-    });
-    try {
-      await waitForNextPaint();
-      const stageB = await buildLinkingStageBAsync(stageA, {
-        sourceColumn: currentSnapshot.sourceColumn,
-        overridesByDomain: nextOverrides,
-      }, (progress) => {
-        updateLongTaskProgress({
-          title: 'Saving ecology buckets',
-          detail: progress.detail,
-          completed: Math.min(88, 8 + Math.round((progress.completed / Math.max(progress.total, 1)) * 80)),
-          total: 100,
-        });
-      });
-
-      updateLongTaskProgress({
-        title: 'Saving ecology buckets',
-        detail: 'Writing updated ecology labels back into the explorer',
-        completed: 92,
-        total: 100,
-      });
-      await waitForNextPaint();
-
-      setGeneratedMetadata((previous) => {
-        const nextByVideoId: GeneratedMetadataState['byVideoId'] = { ...previous.byVideoId };
-        currentLinkingVideoIds.forEach((videoId) => {
-          const previousEntry = nextByVideoId[videoId];
-          nextByVideoId[videoId] = {
-            content_intent: computedContentIntentByVideoId[videoId] || previousEntry?.content_intent || 'other',
-            linking: stageB.generatedMetadataByVideoId[videoId],
-          };
-        });
-        return { byVideoId: nextByVideoId };
-      });
-      if (channelMetadataSnapshot?.rows?.length) {
-        setChannelLinkingState({
-          stale: false,
-          staleReason: undefined,
-          snapshot: buildChannelLinkingSnapshot({
-            rows: includedBaseRows,
-            generatedMetadataByVideoId: stageB.generatedMetadataByVideoId,
-          }),
-        });
-      } else {
-        setChannelLinkingState((previous) => ({
-          ...previous,
-          stale: true,
-          staleReason: 'Linking bucket overrides changed. Refresh channel metadata to rebuild channel-level link aggregates.',
-        }));
-      }
-      setLinkingState((current) => ({
-        ...current,
-        overridesByDomain: nextOverrides,
-        overrideVersion: nextOverrideVersion,
-        stale: false,
-        staleReason: undefined,
-        snapshot: {
-          ...currentSnapshot,
-          generatedAt: new Date().toISOString(),
-          overrideVersion: nextOverrideVersion,
-          hasLinkedRows: stageB.model.hasLinkedRows,
-          model: stageB.model,
-          mentionAudit: stageB.mentionAudit,
-          domainAudit: stageB.domainAudit,
-          rowAudit: stageB.rowAudit,
-        },
-      }));
-      appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
-        summary: `Updated ecology buckets for ${cleaned.length} domains.`,
-        details: `Selected source: ${currentSnapshot.sourceColumn}.`,
-        meta: { domainCount: cleaned.length, sourceColumn: currentSnapshot.sourceColumn },
-      });
-      updateLongTaskProgress({
-        title: 'Saving ecology buckets',
-        detail: 'Done',
-        completed: 100,
-        total: 100,
-      });
-      await waitForNextPaint();
-    } finally {
-      updateLongTaskProgress(null);
-    }
-  }, [appendResearchHistory, channelMetadataSnapshot?.rows, computedContentIntentByVideoId, currentLinkingVideoIds, includedBaseRows, linkingState, updateLongTaskProgress]);
+  });
   const currentDashboardSnapshot = dashboardSnapshots[dashboardScope];
   const isDashboardSnapshotStale = useMemo(() => {
     if (!currentDashboardSnapshot) return false;
@@ -6446,10 +3203,97 @@ ${heading}
         total: 2,
       });
       setDashboardSnapshots((previous) => ({ ...previous, [dashboardScope]: snapshot }));
+      appendResearchHistory({
+        type: 'dashboard_generated',
+        summary: `Generated the dashboard for the ${dashboardScope === 'full' ? 'whole corpus' : 'filtered videos'}.`,
+        meta: { scope: dashboardScope, scopeLabel: dashboardScope === 'full' ? `whole corpus (${scopedRows.length.toLocaleString()} videos)` : `filtered videos (${scopedRows.length.toLocaleString()})`, videoCount: scopedRows.length },
+      });
     } finally {
       updateLongTaskProgress(null);
     }
-  }, [createScopeDashboardSnapshot, dashboardScope, includedDisplayRows, rows, updateLongTaskProgress]);
+  }, [appendResearchHistory, createScopeDashboardSnapshot, dashboardScope, includedDisplayRows, rows, updateLongTaskProgress]);
+
+  const handleVernacularExclusionsChange = useCallback((next: string[]) => {
+    const previous = vernacularExclusions;
+    if (next.length === previous.length && next.every((term) => previous.includes(term))) return;
+    setVernacularExclusions(next);
+    const added = next.filter((term) => !previous.includes(term));
+    const removed = previous.filter((term) => !next.includes(term));
+    const parts = [added.length ? `Hid ${added.join(', ')}` : '', removed.length ? `showed ${removed.join(', ')} again` : ''].filter(Boolean).join('; ');
+    appendResearchHistory({
+      type: 'vernacular_terms_changed',
+      summary: `${parts.charAt(0).toUpperCase()}${parts.slice(1)} in the vernacular analysis`,
+      details: next.length ? `Hidden terms now: ${next.join(', ')}` : 'No terms hidden.',
+      meta: { hiddenTerms: next.join('\n'), previousTerms: previous.join('\n') },
+    });
+  }, [appendResearchHistory, vernacularExclusions]);
+
+  const savedViewRows = useCallback((view: SavedView) => buildUnifiedFilterState({
+    rows: includedDisplayRows,
+    schema: displaySchema,
+    filterModel: view.filterModel,
+    listLikeColumns: includedListLikeColumns,
+    booleanMapColumns: includedBooleanMapColumns,
+  }).filteredRows, [displaySchema, includedBooleanMapColumns, includedDisplayRows, includedListLikeColumns]);
+
+  const toDashboardRecords = useCallback(
+    (scopedRows: any[]) => normalizeTemplateRows(scopedRows, state.annotations, importedChannelMetadata),
+    [importedChannelMetadata, state.annotations],
+  );
+  const getDashboardScopeRecords = useCallback(
+    () => toDashboardRecords(dashboardScope === 'full' ? includedDisplayRows : rows),
+    [dashboardScope, includedDisplayRows, rows, toDashboardRecords],
+  );
+
+  const dashboardCompareOptions = useMemo(() => [
+    { value: 'none', label: 'Nothing' },
+    ...(dashboardScope === 'filtered' ? [{ value: 'full', label: 'Whole dataset' }] : []),
+    ...state.savedViews.map((view) => ({ value: `view:${view.id}`, label: `Saved view: ${view.name}` })),
+  ], [dashboardScope, state.savedViews]);
+  const effectiveCompareTarget = dashboardCompareOptions.some((option) => option.value === dashboardCompareTarget) ? dashboardCompareTarget : 'none';
+
+  const dashboardCompare = useMemo(() => {
+    if (effectiveCompareTarget === 'full') {
+      const template = dashboardSnapshots.full?.template;
+      return template ? { snapshot: template, label: 'whole dataset', getRecords: () => toDashboardRecords(includedDisplayRows) } : undefined;
+    }
+    if (effectiveCompareTarget.startsWith('view:')) {
+      const view = state.savedViews.find((entry) => entry.id === effectiveCompareTarget.slice(5));
+      const template = view ? savedViewDashboardSnapshots[view.id]?.template : undefined;
+      return view && template ? { snapshot: template, label: `saved view “${view.name}”`, getRecords: () => toDashboardRecords(savedViewRows(view)) } : undefined;
+    }
+    return undefined;
+  }, [dashboardSnapshots.full, effectiveCompareTarget, includedDisplayRows, savedViewDashboardSnapshots, savedViewRows, state.savedViews, toDashboardRecords]);
+
+  // Choosing a comparison builds its snapshot when it is missing or out of date.
+  const handleDashboardCompareChange = useCallback(async (target: string) => {
+    setDashboardCompareTarget(target);
+    const fullStale = !dashboardSnapshots.full || dashboardSnapshots.full.datasetVersionAtCalculation !== datasetVersion;
+    const view = target.startsWith('view:') ? state.savedViews.find((entry) => entry.id === target.slice(5)) : undefined;
+    const needsWork = (target === 'full' && fullStale) || (view && savedViewSnapshotStaleById[view.id]);
+    if (!needsWork) return;
+    updateLongTaskProgress({ title: 'Preparing comparison', detail: 'Building the comparison snapshot', completed: 1, total: 2, indeterminate: true });
+    try {
+      await waitForNextPaint();
+      if (target === 'full') {
+        const snapshot = createScopeDashboardSnapshot('full', includedDisplayRows);
+        setDashboardSnapshots((previous) => ({ ...previous, full: snapshot }));
+      } else if (view) {
+        const snapshot = createSavedViewDashboardSnapshot(view);
+        setSavedViewDashboardSnapshots((previous) => ({ ...previous, [view.id]: snapshot }));
+      }
+    } finally {
+      updateLongTaskProgress(null);
+    }
+  }, [createSavedViewDashboardSnapshot, createScopeDashboardSnapshot, dashboardSnapshots.full, datasetVersion, includedDisplayRows, savedViewSnapshotStaleById, state.savedViews, updateLongTaskProgress]);
+
+  // Hidden terms change the vernacular numbers: rebuild the open dashboard right away.
+  const exclusionsAtLastBuildRef = useRef(vernacularExclusions);
+  useEffect(() => {
+    if (exclusionsAtLastBuildRef.current === vernacularExclusions) return;
+    exclusionsAtLastBuildRef.current = vernacularExclusions;
+    if (isDashboardOpen && currentDashboardSnapshot) void handleRefreshDashboard();
+  }, [currentDashboardSnapshot, handleRefreshDashboard, isDashboardOpen, vernacularExclusions]);
 
   const recalculateAllDashboardSnapshots = useCallback(async () => {
     const totalSteps = Math.max(3, state.savedViews.length + 2);
@@ -6497,34 +3341,6 @@ ${heading}
       updateLongTaskProgress(null);
     }
   }, [appendResearchHistory, createSavedViewDashboardSnapshot, createScopeDashboardSnapshot, includedDisplayRows, rows, state.savedViews, updateLongTaskProgress]);
-
-  const cleanedResearchHistory = useMemo(() => {
-    const events = researchHistory.filter((event) => !event.reverted);
-    const pairedDeletes = new Set<string>();
-    const pairedCreates = new Set<string>();
-    const createdByViewId = new Map<string, string>();
-
-    events.forEach((event) => {
-      const viewId = typeof event.meta?.viewId === 'string' ? event.meta.viewId : null;
-      if (!viewId) return;
-      if (event.type === 'saved_view_created') createdByViewId.set(viewId, event.id);
-      if (event.type === 'saved_view_deleted' && createdByViewId.has(viewId)) {
-        pairedDeletes.add(event.id);
-        pairedCreates.add(createdByViewId.get(viewId)!);
-      }
-    });
-
-    return events.filter((event) => !pairedDeletes.has(event.id) && !pairedCreates.has(event.id));
-  }, [researchHistory]);
-
-  const exclusionReasonCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    excludedVideoIds.forEach((videoId) => {
-      const reason = excludedVideoMetaById[videoId]?.reason?.trim() || 'unspecified';
-      counts.set(reason, (counts.get(reason) ?? 0) + 1);
-    });
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [excludedVideoIds, excludedVideoMetaById]);
 
   const savedViewLiveRows = useMemo(() => {
     return Object.fromEntries(state.savedViews.map((view) => {
@@ -6574,294 +3390,105 @@ ${heading}
     return items;
   }, [dashboardSnapshots.filtered, dashboardSnapshots.full, datasetVersion, filteredViewVersion, includedBaseRows.length, rows.length, savedViewDashboardSnapshots, savedViewLiveRows, savedViewSnapshotStaleById, state.savedViews]);
 
-  const corpusProcessingSectionText = useMemo(() => {
-    const importEvents = cleanedResearchHistory
-      .filter((event) => event.type === 'import_replace_completed' || event.type === 'import_merge_completed')
-      .slice(-8);
-    const mappingSummary = [
-      `Merge key: ${specialMappings.mergeKeyColumn || 'not configured'}`,
-      `Transcript mapping: ${specialMappings.transcriptColumn || 'unmapped'}`,
-      `Description mapping: ${specialMappings.descriptionColumn || 'unmapped'}`,
-      `Tag mapping: ${specialMappings.tagColumn || 'unmapped'}`,
-    ];
-    const durableColumnSummary = deletedColumns.length
-      ? `Durable deleted columns: ${deletedColumns.join(', ')}`
-      : 'Durable deleted columns: none';
-    const exclusionSummary = exclusionReasonCounts.length
-      ? exclusionReasonCounts.map(([reason, count]) => `- ${reason}: ${count}`).join('\n')
-      : 'No entries recorded';
-    return [
-      `Source file(s): ${state.fileName || 'No file loaded'}`,
-      `Imported at: ${sourceRows.length ? parseDateLabel(new Date().toISOString()) : 'No entries recorded'}`,
-      '',
-      `Import / merge milestones:`,
-      importEvents.length
-        ? importEvents.map((event) => `- ${formatDateDisplay(event.createdAt)} - ${event.summary}${event.details ? ` (${event.details})` : ''}`).join('\n')
-        : 'No entries recorded',
-      '',
-      `Special mappings in effect:`,
-      ...mappingSummary.map((line) => `- ${line}`),
-      `- ${durableColumnSummary}`,
-      '',
-      `Source visibility state:`,
-      `- Registered sources: ${sourceRegistry.orderedIds.length.toLocaleString()}`,
-      `- Hidden row sources: ${(sourceVisibility.hiddenSourceIds || []).length.toLocaleString()}`,
-      `- Visible row sources: ${(sourceRegistry.orderedIds.length - (sourceVisibility.hiddenSourceIds || []).length).toLocaleString()}`,
-      `- Hidden video-column sources: ${(sourceVisibility.hiddenColumnSourceIdsByScope?.videos || []).length.toLocaleString()}`,
-      `- Hidden channel-column sources: ${(sourceVisibility.hiddenColumnSourceIdsByScope?.channels || []).length.toLocaleString()}`,
-      '',
-      `Final corpus size:`,
-      `- Included rows: ${includedBaseRows.length.toLocaleString()}`,
-      `- Excluded rows: ${excludedBaseRows.length.toLocaleString()}`,
-      `- Column count: ${workingSchema.length.toLocaleString()}`,
-      `- Deeper reproducibility details are preserved in project zip export.`,
-      '',
-      `Inclusion / Exclusion`,
-      `- Included videos: ${includedBaseRows.length.toLocaleString()}`,
-      `- Explicitly excluded videos: ${excludedVideoIds.length.toLocaleString()}`,
-      `- Exclusion reason categories:`,
-      exclusionSummary,
-      `- Exclusions are reversible through include/restore actions in the app.`,
-      `- Filtered or hidden videos inside views are not equal to corpus exclusion.`,
-    ].join('\n');
-  }, [
-    cleanedResearchHistory,
-    deletedColumns,
-    excludedBaseRows.length,
-    excludedVideoIds.length,
-    exclusionReasonCounts,
-    includedBaseRows.length,
-    sourceRegistry.orderedIds.length,
-    sourceRows.length,
-    sourceVisibility.hiddenColumnSourceIdsByScope,
-    sourceVisibility.hiddenSourceIds,
-    specialMappings.descriptionColumn,
-    specialMappings.mergeKeyColumn,
-    specialMappings.tagColumn,
-    specialMappings.transcriptColumn,
-    state.fileName,
-    workingSchema.length,
-  ]);
-
-  const viewsSectionText = useMemo(() => {
-    if (!state.savedViews.length) return 'No entries recorded';
-    const lines: string[] = [
-      'Saved views document analytical lenses; they do not change corpus inclusion/exclusion.',
-      '',
-    ];
-    state.savedViews.forEach((view, index) => {
-      const snapshot = savedViewDashboardSnapshots[view.id];
-      const columnOrder = Array.isArray(view.columnState)
-        ? view.columnState.map((column: any) => column?.colId).filter(Boolean).join(', ')
-        : '';
-      const liveRows = savedViewLiveRows[view.id] || [];
-      lines.push(
-        `${index + 1}. ${view.name}`,
-        `   Created: ${formatDateDisplay(new Date(view.createdAt).toISOString())}`,
-        `   Filter summary: ${summarizeFilterModel(view.filterModel as ExplorerFilterModel)}`,
-        `   Visible columns/order: ${columnOrder || 'No column state recorded'}`,
-        `   Row count snapshot: ${(snapshot?.rowCount ?? liveRows.length).toLocaleString()}`,
-        `   Dashboard summary snapshot: ${snapshot ? (snapshot.template?.summaryText || summarizeDashboardSnapshot(snapshot)).replace(/\n/g, ' | ') : 'No snapshot calculated yet'}`,
-        '',
-      );
-    });
-    return lines.join('\n').trim();
-  }, [savedViewDashboardSnapshots, savedViewLiveRows, state.savedViews]);
-
-  const watchHistoryEntries = useMemo<WatchHistoryEntry[]>(() => (
-    (Object.values(watchHistoryByVideoId) as WatchHistoryEntry[]).sort((a, b) => Date.parse(b.lastWatchedAt) - Date.parse(a.lastWatchedAt))
-  ), [watchHistoryByVideoId]);
-
-  const watchHistorySectionText = useMemo(() => {
-    if (!watchHistoryEntries.length) return 'No entries recorded';
-    const totalWatchSeconds = watchHistoryEntries.reduce((sum, entry) => sum + entry.totalWatchSeconds, 0);
-    const averagePct = watchHistoryEntries.reduce((sum, entry) => {
-      if (!entry.durationSeconds || entry.durationSeconds <= 0) return sum;
-      return sum + Math.min(1, entry.totalWatchSeconds / entry.durationSeconds);
-    }, 0) / Math.max(1, watchHistoryEntries.length);
-    const lines: string[] = [
-      `Total watch time across corpus: ${formatDurationLabel(totalWatchSeconds)}`,
-      `Unique videos watched: ${watchHistoryEntries.length.toLocaleString()}`,
-      `Average percentage watched: ${(averagePct * 100).toFixed(1)}%`,
-      '',
-    ];
-    watchHistoryEntries.forEach((entry, index) => {
-      const pct = entry.durationSeconds && entry.durationSeconds > 0
-        ? Math.min(1, entry.totalWatchSeconds / entry.durationSeconds) * 100
-        : null;
-      const rewatchCount = Math.max(0, entry.qualifyingSessionCount - 1);
-      lines.push(
-        `${index + 1}. ${entry.title}`,
-        `   video id: ${entry.videoId}`,
-        `   first watched: ${formatDateDisplay(entry.firstWatchedAt)}`,
-        `   last watched: ${formatDateDisplay(entry.lastWatchedAt)}`,
-        `   total time watched: ${formatDurationLabel(entry.totalWatchSeconds)}`,
-        `   watch session count: ${entry.qualifyingSessionCount.toLocaleString()}`,
-        `   rewatch count: ${rewatchCount.toLocaleString()}`,
-        `   percentage watched: ${pct === null ? 'unknown' : `${pct.toFixed(1)}%`}`,
-        '',
-      );
-    });
-    return lines.join('\n').trim();
-  }, [watchHistoryEntries]);
-
-  const researchActionsSectionText = useMemo(() => {
-    const meaningful = cleanedResearchHistory.filter((event) => (
-      event.type !== 'videos_restored' || (event.affectedIds?.length ?? 0) > 0
-    ));
-    const tagUsage = buildTagUsageSummary(userTagsByVideoId);
-    if (!meaningful.length && !tagUsage.length) return 'No entries recorded';
-    const lines: string[] = [];
-    if (meaningful.length) {
-      lines.push('Timeline of meaningful research actions:');
-      meaningful.slice(-60).forEach((event) => {
-        lines.push(`- ${formatDateDisplay(event.createdAt)} - ${event.summary}${event.details ? ` (${event.details})` : ''}`);
-      });
-      lines.push('');
-    }
-    lines.push('Current tag usage summary:');
-    if (!tagUsage.length) {
-      lines.push('No entries recorded');
-    } else {
-      tagUsage.forEach(([tag, count]) => lines.push(`- ${tag}: applied to ${count.toLocaleString()} video(s)`));
-    }
-    return lines.join('\n');
-  }, [cleanedResearchHistory, userTagsByVideoId]);
-
-  const notesAppendixSectionText = useMemo(() => {
-    const rowByVideoId = new Map<string, any>();
+  // Research log: the timeline is built from researchHistory in the dialog; these feed its labels,
+  // the watch summary and the Markdown export.
+  const videoLabelById = useMemo(() => {
+    const map = new Map<string, { title: string; channel: string; url: string }>();
     sourceRows.forEach((row) => {
       const videoId = resolveVideoId(row);
-      if (videoId && !rowByVideoId.has(videoId)) rowByVideoId.set(videoId, row);
+      if (!videoId || map.has(videoId)) return;
+      map.set(videoId, { title: resolveVideoTitle(row) || 'Untitled video', channel: resolveChannelName(row) || 'Unknown channel', url: `https://www.youtube.com/watch?v=${videoId}` });
     });
-    const noteVideoIds = Array.from(new Set([
-      ...Object.keys(notesByVideoId),
-      ...Object.keys(state.annotations),
-      ...Object.keys(userTagsByVideoId),
-    ])).filter((videoId) => {
+    return map;
+  }, [sourceRows]);
+  const describeVideo = useCallback((videoId: string) => videoLabelById.get(videoId) ?? null, [videoLabelById]);
+
+  const researchLogWatch = useMemo(() => (Object.values(watchHistoryByVideoId) as WatchHistoryEntry[])
+    .sort((a, b) => Date.parse(b.lastWatchedAt) - Date.parse(a.lastWatchedAt))
+    .map((entry) => ({
+      videoId: entry.videoId,
+      title: videoLabelById.get(entry.videoId)?.title ?? entry.title,
+      channel: videoLabelById.get(entry.videoId)?.channel ?? '',
+      // Before ranges were recorded only the total is known; use it, capped at the video's length.
+      coveredSeconds: entry.watchedRanges ? coveredSeconds(entry.watchedRanges) : Math.min(entry.totalWatchSeconds, entry.durationSeconds || Infinity),
+      totalSeconds: entry.totalWatchSeconds,
+      durationSeconds: entry.durationSeconds ?? null,
+      lastWatchedAt: entry.lastWatchedAt,
+    })), [videoLabelById, watchHistoryByVideoId]);
+
+  const buildResearchLogMarkdownNow = useCallback((options: ResearchLogMarkdownOptions = researchLogMarkdownOptions) => {
+    const settings: string[] = [];
+    if (vernacularExclusions.length) settings.push(`Terms hidden from vernacular analysis: ${vernacularExclusions.join(', ')}.`);
+    const overrideCount = Object.keys(linkingState.overridesByDomain || {}).length;
+    if (overrideCount) settings.push(`Link buckets changed by hand for ${overrideCount.toLocaleString()} domain(s).`);
+    if (deletedColumns.length) settings.push(`Deleted columns: ${deletedColumns.join(', ')}.`);
+    const mappings = [
+      specialMappings.descriptionColumn && `description = ${specialMappings.descriptionColumn}`,
+      specialMappings.tagColumn && `tags = ${specialMappings.tagColumn}`,
+      specialMappings.transcriptColumn && `transcript = ${specialMappings.transcriptColumn}`,
+      specialMappings.mergeKeyColumn && `merge key = ${specialMappings.mergeKeyColumn}`,
+    ].filter(Boolean);
+    if (mappings.length) settings.push(`Field mappings: ${mappings.join(', ')}.`);
+    const noteVideoIds = Array.from(new Set([...Object.keys(notesByVideoId), ...Object.keys(state.annotations), ...Object.keys(userTagsByVideoId)]));
+    const videoNotes = noteVideoIds.flatMap((videoId) => {
+      const annotation = state.annotations[videoId];
       const notes = notesByVideoId[videoId] || '';
-      const annotation = state.annotations[videoId];
       const tags = userTagsByVideoId[videoId] || [];
-      return Boolean(notes.trim()) || Boolean(annotation?.quoteRefs?.length) || Boolean(annotation?.timestampRefs?.length) || tags.length > 0;
+      const quotes = (annotation?.quoteRefs || []).map((quote) => quote.text);
+      const timestamps = (annotation?.timestampRefs || []).map((item) => item.label);
+      if (!notes.trim() && !quotes.length && !timestamps.length && !tags.length) return [];
+      const label = videoLabelById.get(videoId) ?? { title: videoId, channel: '', url: `https://www.youtube.com/watch?v=${videoId}` };
+      return [{ ...label, tags, notes, quotes, timestamps }];
     });
-    if (!noteVideoIds.length) return 'No entries recorded';
-    const lines: string[] = [];
-    noteVideoIds.forEach((videoId, index) => {
-      const row = rowByVideoId.get(videoId);
-      const annotation = state.annotations[videoId];
-      const tags = userTagsByVideoId[videoId] || [];
-      const noteText = (notesByVideoId[videoId] || '').trim() || 'No notes';
-      const quotes = annotation?.quoteRefs || [];
-      const timestamps = annotation?.timestampRefs || [];
-      lines.push(
-        `${index + 1}. ${row ? resolveVideoTitle(row) : 'Untitled Video'}`,
-        `   video id: ${videoId}`,
-        `   user tags: ${tags.length ? tags.join(', ') : 'none'}`,
-        `   notes:`,
-        noteText.split('\n').map((line) => `     ${line}`).join('\n'),
-        `   quotes: ${quotes.length ? quotes.map((quote) => quote.text).join(' | ') : 'none'}`,
-        `   timestamps: ${timestamps.length ? timestamps.map((item) => item.label).join(', ') : 'none'}`,
-        '',
-      );
+    return buildResearchLogExport({
+      projectName: currentProjectName,
+      overview: state.projectOverview,
+      entries: netTimeline(researchHistory),
+      describeVideo,
+      corpus: {
+        included: includedBaseRows.length,
+        excluded: excludedBaseRows.length,
+        sources: sourceRegistry.orderedIds.filter((id) => sourceRegistry.byId[id]?.kind !== 'generated').map((id) => sourceRegistry.byId[id]?.label || id),
+        savedViews: state.savedViews.map((view) => ({ name: view.name, filterSummary: summarizeFilterModel(view.filterModel as ExplorerFilterModel), videoCount: savedViewLiveRows[view.id]?.length ?? 0 })),
+        settings,
+      },
+      dashboards: dashboardSnapshotIndex.filter((item) => item.calculatedAt).map((item) => ({ label: item.label, text: item.summary, stale: item.stale })),
+      videoNotes,
+      includeDashboards: options.includeDashboardSection,
+      includeVideoNotes: options.includeNotesAppendix,
     });
-    return lines.join('\n').trim();
-  }, [notesByVideoId, sourceRows, state.annotations, userTagsByVideoId]);
+  }, [currentProjectName, dashboardSnapshotIndex, deletedColumns, describeVideo, excludedBaseRows.length, includedBaseRows.length, linkingState.overridesByDomain, notesByVideoId, researchHistory, researchLogMarkdownOptions, savedViewLiveRows, sourceRegistry.byId, sourceRegistry.orderedIds, specialMappings.descriptionColumn, specialMappings.mergeKeyColumn, specialMappings.tagColumn, specialMappings.transcriptColumn, state.annotations, state.projectOverview, state.savedViews, userTagsByVideoId, vernacularExclusions, videoLabelById]);
 
-  const dashboardSectionText = useMemo(() => {
-    if (!dashboardSnapshotIndex.length && !linkingState.snapshot) return 'No entries recorded';
-    const snapshotText = dashboardSnapshotIndex.map((item) => [
-      `${item.label}`,
-      `- rows: ${item.rowCount.toLocaleString()}`,
-      `- calculated: ${item.calculatedAt ? formatDateDisplay(item.calculatedAt) : 'not calculated'}`,
-      `- status: ${item.stale ? 'stale' : 'fresh'}`,
-      `- calculations write-up:`,
-      item.summary.split('\n').map((line) => `  ${line}`).join('\n'),
-    ].join('\n')).join('\n\n');
-    const linkingBlock = linkingState.snapshot ? [
-      `Linking summary`,
-      `- source column: ${linkingState.snapshot.sourceColumn}`,
-      `- generated: ${formatDateDisplay(linkingState.snapshot.generatedAt)}`,
-      `- status: ${linkingState.stale ? 'stale' : 'fresh'}`,
-      `- linked rows: ${Number((linkingState.snapshot.model as any)?.summary?.linkedRows || 0).toLocaleString()}`,
-      `- total urls: ${Number((linkingState.snapshot.model as any)?.summary?.totalUrls || 0).toLocaleString()}`,
-      `- unique domains: ${Number((linkingState.snapshot.model as any)?.summary?.uniqueDomains || 0).toLocaleString()}`,
-      `- override count: ${Object.keys(linkingState.overridesByDomain || {}).length.toLocaleString()}`,
-      `- visible source fingerprint: ${linkingState.sourceVisibilityFingerprint || 'n/a'}`,
-    ].join('\n') : 'Linking summary\n- not generated yet';
-    const channelLinkingBlock = [
-      `Channel link aggregates`,
-      `- status: ${channelLinkingState.stale ? 'stale' : 'fresh'}`,
-      `- generated: ${channelLinkingState.snapshot?.generatedAt ? formatDateDisplay(channelLinkingState.snapshot.generatedAt) : 'not generated'}`,
-      `- channels covered: ${Object.keys(channelLinkingState.snapshot?.byChannelKey || {}).length.toLocaleString()}`,
-    ].join('\n');
-    return [snapshotText, linkingBlock, channelLinkingBlock].filter(Boolean).join('\n\n');
-  }, [channelLinkingState.snapshot, channelLinkingState.stale, dashboardSnapshotIndex, linkingState.overridesByDomain, linkingState.snapshot, linkingState.sourceVisibilityFingerprint, linkingState.stale]);
+  const handleAddResearchNote = useCallback((text: string) => {
+    if (!text.trim()) return;
+    appendResearchHistory({ type: 'note', summary: text.trim(), note: text.trim() });
+  }, [appendResearchHistory]);
+  const handleSetResearchNote = useCallback((eventId: string, text: string) => {
+    setResearchHistory((current) => current.map((event) => {
+      if (event.id !== eventId) return event;
+      if (event.type === 'note') return text.trim() ? { ...event, note: text.trim(), summary: text.trim(), editedAt: new Date().toISOString() } : event;
+      return { ...event, note: text.trim() || undefined, editedAt: new Date().toISOString() };
+    }));
+  }, [setResearchHistory]);
+  const handleDeleteResearchNote = useCallback((eventId: string) => {
+    setResearchHistory((current) => current.filter((event) => !(event.id === eventId && event.type === 'note')));
+  }, [setResearchHistory]);
 
-  const researchLogGeneratedSections = useMemo(() => ({
-    corpusProcessing: corpusProcessingSectionText,
-    views: viewsSectionText,
-    watchHistory: watchHistorySectionText,
-    researchActions: researchActionsSectionText,
-    notesAppendix: notesAppendixSectionText,
-    dashboard: dashboardSectionText,
-  }), [corpusProcessingSectionText, dashboardSectionText, notesAppendixSectionText, researchActionsSectionText, viewsSectionText, watchHistorySectionText]);
+  // The old free-text diary and per-section comments become timeline notes, once.
+  useEffect(() => {
+    const diary = cleanupAutoSeededResearchDiary(state.projectNotes || '').trim();
+    const comments = Object.entries(state.researchLogSectionComments || {}).filter(([, value]) => String(value || '').trim());
+    if (!diary && !comments.length) return;
+    const now = new Date().toISOString();
+    const notes = [
+      ...diaryToNotes(diary, now),
+      ...comments.map(([section, value]) => ({ createdAt: now, note: `Comment on “${section}”: ${String(value).trim()}` })),
+    ];
+    setResearchHistory((current) => [...current, ...notes.map((entry) => ({ id: createHistoryId('history'), type: 'note' as const, createdAt: entry.createdAt, summary: entry.note, note: entry.note }))]);
+    setState((previous) => ({ ...previous, projectNotes: '', researchLogSectionComments: {} }));
+  }, [setResearchHistory, state.projectNotes, state.researchLogSectionComments]);
 
-  const researchLogGeneratedSectionsWithComments = useMemo(() => {
-    const applyComment = (key: ResearchLogCommentSectionId, baseText: string) => {
-      const comment = (state.researchLogSectionComments[key] || '').trim();
-      if (!comment) return baseText;
-      return `${baseText}\n\nResearcher comment:\n${comment}`;
-    };
-    return {
-      corpusProcessing: applyComment('corpusProcessing', researchLogGeneratedSections.corpusProcessing),
-      views: applyComment('views', researchLogGeneratedSections.views),
-      watchHistory: applyComment('watchHistory', researchLogGeneratedSections.watchHistory),
-      researchActions: applyComment('researchActions', researchLogGeneratedSections.researchActions),
-      notesAppendix: applyComment('notesAppendix', researchLogGeneratedSections.notesAppendix),
-      dashboard: applyComment('dashboard', researchLogGeneratedSections.dashboard),
-    };
-  }, [researchLogGeneratedSections, state.researchLogSectionComments]);
-
-  const researchLogMarkdown = useMemo(() => buildResearchLogMarkdown({
-    projectName: state.fileName || 'Untitled project',
-    overview: state.projectOverview,
-    diary: state.projectNotes,
-    corpusProcessing: researchLogGeneratedSectionsWithComments.corpusProcessing,
-    views: researchLogGeneratedSectionsWithComments.views,
-    watchHistory: researchLogGeneratedSectionsWithComments.watchHistory,
-    researchActions: researchLogGeneratedSectionsWithComments.researchActions,
-    notesAppendix: researchLogGeneratedSectionsWithComments.notesAppendix,
-    dashboard: researchLogGeneratedSectionsWithComments.dashboard,
-    includeNotesAppendix: researchLogMarkdownOptions.includeNotesAppendix,
-    includeDashboardSection: researchLogMarkdownOptions.includeDashboardSection,
-    dashboardStale: isAnyDashboardSnapshotStale,
-  }), [
-    isAnyDashboardSnapshotStale,
-    researchLogMarkdownOptions.includeDashboardSection,
-    researchLogMarkdownOptions.includeNotesAppendix,
-    researchLogGeneratedSectionsWithComments,
-    state.fileName,
-    state.projectNotes,
-    state.projectOverview,
-  ]);
-
-  if (!isReady) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-[var(--bg-primary)]">
-        <div className="text-center">
-          <img
-            src="/wave-loader.gif"
-            alt="Initializing Playlist Surfer"
-            className="mx-auto mb-4 h-11 w-11 object-contain"
-            width={44}
-            height={44}
-          />
-          <p className="font-medium text-[var(--text-muted)]">Initializing Playlist Surfer</p>
-        </div>
-      </div>
-    );
-  }
-
+  const isBatchMode = selectedVideoCount > 1;
   return (
     <div className={cn('flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-primary)] text-[var(--text-main)]', state.theme === 'pink-pop' && 'pink-ui-mode')}>
       <TopBar
@@ -6896,8 +3523,8 @@ ${heading}
         onRenameProject={handleRenameProject}
         onNavigateBack={() => navigateHistoryByOffset(-1)}
         onNavigateForward={() => navigateHistoryByOffset(1)}
-        canNavigateBack={navigationCursor > 0}
-        canNavigateForward={navigationCursor >= 0 && navigationCursor < navigationHistory.length - 1}
+        canNavigateBack={canNavigateBack}
+        canNavigateForward={canNavigateForward}
       />
 
       <main className="flex flex-1 overflow-hidden">
@@ -6905,25 +3532,40 @@ ${heading}
           <div className="flex h-full min-h-0 flex-col">
             <div className="relative min-h-0 flex-1">
               {hasLoadedData && viewScope === 'channels' && !channelRows.length ? (
-                <div className="flex h-full items-center justify-center p-6">
-                  <div className="w-full max-w-md border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6 text-center shadow-sm">
-                    <div className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Channels view</div>
-                    <div className="mt-2 text-lg font-semibold text-[var(--text-main)]">Channel metadata hasn’t been generated yet</div>
-                    <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">Generate channel-level metadata from the current video list to switch into the channels table.</p>
-                    <div className="mt-5 flex justify-center">
-                      <button
-                        type="button"
-                        onClick={handleGenerateChannelMetadata}
-                        disabled={isGeneratingChannelMetadata}
-                        className="border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-4 py-2 text-sm font-medium text-[var(--text-main)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent)_14%,transparent)] disabled:opacity-50"
-                      >
-                        {isGeneratingChannelMetadata ? 'Generating...' : 'Generate channel metadata'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <ChannelMetadataEmptyState isGenerating={isGeneratingChannelMetadata} onGenerate={handleGenerateChannelMetadata} />
               ) : (
-                <div key={viewScope} className="h-full w-full">
+                <div key={viewScope} className="relative h-full w-full">
+                  {hasLoadedData && viewScope === 'videos' ? (
+                    <ExplorerViewPill
+                      layout={explorerLayout}
+                      onLayoutChange={setExplorerLayout}
+                      tileWidth={thumbnailTileWidth}
+                      onTileWidthChange={setThumbnailTileWidth}
+                    />
+                  ) : null}
+                  {showThumbnailView ? (
+                    <ThumbnailGrid
+                      rows={thumbnailViewRows}
+                      selection={videoSelection}
+                      onSelectionChange={handleGridSelectionChange}
+                      onMoveSelection={handleMoveSelectedVideos}
+                      onExcludeSelection={handleExcludeSelectedVideos}
+                      onUnkeyedRowInteraction={handleUnkeyedRowInteraction}
+                      tileWidth={thumbnailTileWidth}
+                      onTileWidthChange={setThumbnailTileWidth}
+                      isLoading={isLoadingRows || isIngesting}
+                      emptyState={(
+                        <ExplorerNoRowsState
+                          onClearFilters={clearAllExplorerFilters}
+                          onShowAllSources={(sourceVisibility.hiddenSourceIds || []).length > 0 ? handleShowAllSources : undefined}
+                          onToggleInclusionView={() => handleInclusionViewChange(inclusionView === 'included' ? 'excluded' : 'included')}
+                          inclusionView={inclusionView}
+                        />
+                      )}
+                    />
+                  ) : null}
+                  {/* The table stays mounted behind the thumbnails, so its sort state and row order are kept. */}
+                  <div className={cn('h-full w-full', showThumbnailView && 'hidden')}>
                   <MetadataGrid
                     rows={activeGridRows}
                     schema={activeGridSchema}
@@ -6933,7 +3575,7 @@ ${heading}
                     activeView={viewScope === 'videos' ? state.savedViews.find((view) => view.id === state.activeViewId) : undefined}
                     filterModel={activeGridFilterModel}
                     listLikeColumns={activeGridListLikeColumns}
-                    tagValueIndexByColumn={activeGridTagValuesByColumn}
+                    getTagValues={getActiveGridTagValues}
                     booleanMapSchemas={activeGridBooleanMapColumns}
                     onGridReady={handleGridReady}
                     onFilterModelChange={viewScope === 'channels' ? updateChannelFilterModel : updateExternalFilterModel}
@@ -6944,6 +3586,7 @@ ${heading}
                     onMoveSelection={viewScope === 'videos' ? handleMoveSelectedVideos : undefined}
                     onExcludeSelection={viewScope === 'videos' ? handleExcludeSelectedVideos : (viewScope === 'channels' ? handleBatchExcludeChannels : undefined)}
                     onMoveVideos={viewScope === 'videos' ? handleMoveVideos : undefined}
+                    onUnkeyedRowInteraction={handleUnkeyedRowInteraction}
                     viewScope={viewScope}
                     onVideoChannelClick={handleVideoChannelClick}
                     onChannelNavigateToVideos={handleChannelNavigateToVideos}
@@ -6956,6 +3599,7 @@ ${heading}
                     columnWidths={viewScope === 'channels' ? channelColumnWidths : videoColumnWidths}
                     onColumnWidthsChange={viewScope === 'channels' ? setChannelColumnWidths : setVideoColumnWidths}
                   />
+                  </div>
                 </div>
               )}
             </div>
@@ -6968,85 +3612,63 @@ ${heading}
           )}
         </div>
 
-        <AnimatePresence initial={false}>
-          {hasLoadedData && !state.isRightPanelCollapsed && (
-            <motion.div
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: '32%', opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-              className="detail-pane-shell h-full min-w-[420px] max-w-[620px] overflow-hidden border-l border-[var(--border-color)] bg-[var(--bg-secondary)]"
-            >
-              {(() => {
-                const isBatchMode = selectedVideoCount > 1;
-                if (viewScope !== 'videos') {
-                  return (
-                    <ChannelSummaryPanel
-                      row={selectedChannelDetailRow}
-                      defaultRow={filteredChannelRows[0] || null}
-                      selectedRows={selectedChannelRows}
-                      hasChannelRows={channelRows.length > 0}
-                      isGenerating={isGeneratingChannelMetadata}
-                      onGenerate={handleGenerateChannelMetadata}
-                      channelNotesById={channelNotesById}
-                      channelTagsById={channelTagsById}
-                      onUpdateChannelNotes={handleUpdateChannelNotes}
-                      onReplaceChannelTags={handleReplaceChannelTags}
-                      onBatchAddChannelTag={handleBatchAddChannelTag}
-                      onBatchRemoveChannelTag={handleBatchRemoveChannelTag}
-                      onBatchApplyChannelNotes={handleBatchApplyChannelNotes}
-                      inclusionView={inclusionView}
-                      onBatchExcludeChannels={handleBatchExcludeChannels}
-                      onBatchCopySelection={handleBatchCopyChannelSelection}
-                      onChannelNavigateToVideos={handleChannelNavigateToVideos}
-                    />
-                  );
-                }
-                return (
-                  <DetailPanel
-                    row={isBatchMode ? null : detailRow}
-                    annotation={isBatchMode ? undefined : (detailVideoId ? ({ ...(state.annotations[detailVideoId] || {}), tags: userTagsByVideoId[detailVideoId] || [] } as Annotation) : undefined)}
-                    savedNotes={isBatchMode ? '' : (detailVideoId ? (notesByVideoId[detailVideoId] || '') : '')}
-                    selectedCount={selectedVideoCount}
-                    batchSelectionKey={batchSelectionKey}
-                    onUpdateAnnotation={handleUpdateAnnotation}
-                    onUpdateNotes={handleUpdateVideoNotes}
-                    onApplyTagFilter={handleApplyTagFilter}
-                    onBatchAddTag={handleBatchAddTagToSelection}
-                    batchSharedTags={batchSharedTags}
-                    onBatchRemoveTag={handleBatchRemoveTagFromSelection}
-                    onBatchApplyNotes={handleBatchApplyNotesToSelection}
-                    onBatchExclude={handleExcludeSelectedVideos}
-                    onBatchCopySelection={handleBatchCopySelection}
-                    isBatchTagging={isTagWritePending}
-                    onWatchSession={handleWatchSession}
-                    openAnnotateRequestKey={openAnnotationsRequestKey}
-                  />
-                );
-              })()}
-            </motion.div>
+        <RightPanelShell isOpen={hasLoadedData && !state.isRightPanelCollapsed}>
+          {viewScope !== 'videos' ? (
+            <ChannelSummaryPanel
+              row={selectedChannelDetailRow}
+              defaultRow={filteredChannelRows[0] || null}
+              selectedRows={selectedChannelRows}
+              hasChannelRows={channelRows.length > 0}
+              isGenerating={isGeneratingChannelMetadata}
+              onGenerate={handleGenerateChannelMetadata}
+              channelNotesById={channelNotesById}
+              channelTagsById={channelTagsById}
+              onUpdateChannelNotes={handleUpdateChannelNotes}
+              onReplaceChannelTags={handleReplaceChannelTags}
+              onBatchAddChannelTag={handleBatchAddChannelTag}
+              onBatchRemoveChannelTag={handleBatchRemoveChannelTag}
+              onBatchApplyChannelNotes={handleBatchApplyChannelNotes}
+              inclusionView={inclusionView}
+              onBatchExcludeChannels={handleBatchExcludeChannels}
+              onBatchCopySelection={handleBatchCopyChannelSelection}
+              onChannelNavigateToVideos={handleChannelNavigateToVideos}
+            />
+          ) : (
+            <DetailPanel
+              row={isBatchMode ? null : detailRow}
+              annotation={isBatchMode ? undefined : (detailVideoId ? ({ ...(state.annotations[detailVideoId] || {}), tags: userTagsByVideoId[detailVideoId] || [] } as Annotation) : undefined)}
+              savedNotes={isBatchMode ? '' : (detailVideoId ? (notesByVideoId[detailVideoId] || '') : '')}
+              selectedCount={selectedVideoCount}
+              batchSelectionKey={batchSelectionKey}
+              onUpdateAnnotation={handleUpdateAnnotation}
+              onUpdateNotes={handleUpdateVideoNotes}
+              onApplyTagFilter={handleApplyTagFilter}
+              onBatchAddTag={handleBatchAddTagToSelection}
+              batchSharedTags={batchSharedTags}
+              onBatchRemoveTag={handleBatchRemoveTagFromSelection}
+              onBatchApplyNotes={handleBatchApplyNotesToSelection}
+              onBatchExclude={handleExcludeSelectedVideos}
+              inclusionView={inclusionView}
+              onBatchCopySelection={handleBatchCopySelection}
+              isBatchTagging={isTagWritePending}
+              onWatchSession={handleWatchSession}
+              openAnnotateRequestKey={openAnnotationsRequestKey}
+            />
           )}
-        </AnimatePresence>
+        </RightPanelShell>
       </main>
 
-      <footer className="status-footer flex h-6 flex-shrink-0 items-center justify-between border-t border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 text-[11px] text-[var(--text-muted)]">
-        <div>
-          {hasLoadedData ? (
-            <span>{viewScope === 'channels' ? 'Channels' : 'Videos'}: showing <b className="text-[var(--text-main)]">{displayedRowCount.toLocaleString()}</b> of {totalScopeRowCount.toLocaleString()} rows</span>
-          ) : 'No rows loaded'}
-          {viewScope === 'videos' && (filteredColumns.length > 0 || state.activeViewId) && ' (Filtering Active)'}
-          {viewScope === 'channels' && channelFilteredColumns.length > 0 && ' (Filtering Active)'}
-          {viewScope === 'videos' && selectedVideoCount > 0 && (
-            <span>
-              {' - '}<b className="text-[var(--text-main)]">{selectedVideoCount.toLocaleString()}</b> selected
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-          DuckDB-Wasm Engine: Active
-        </div>
-      </footer>
+      <StatusFooter
+        hasLoadedData={hasLoadedData}
+        viewScope={viewScope}
+        displayedRowCount={displayedRowCount}
+        totalRowCount={totalScopeRowCount}
+        isFilteringActive={viewScope === 'videos'
+          ? (filteredColumns.length > 0 || Boolean(state.activeViewId))
+          : channelFilteredColumns.length > 0}
+        selectedVideoCount={selectedVideoCount}
+        isEngineReady={isReady}
+      />
 
       <ExportDialog
         isOpen={isExportOpen}
@@ -7055,7 +3677,6 @@ ${heading}
         onExport={handleExport}
         rowCount={viewScope === 'videos' ? displayedRowCount : rows.length}
         totalRowCount={displayRows.length}
-        hasProjectNotes={state.projectNotes.trim().length > 0}
         hasUserTags={hasUserTags}
         currentProjectName={currentProjectName}
         markdownOptions={researchLogMarkdownOptions}
@@ -7102,34 +3723,32 @@ ${heading}
         onUpdateSpecialMapping={handleUpdateSpecialMapping}
       />
 
-      <ResearchLogDialog
-        isOpen={isResearchLogOpen}
-        onClose={() => setIsResearchLogOpen(false)}
-        overview={state.projectOverview}
-        onUpdateOverview={(value) => setState((previous) => ({ ...previous, projectOverview: value }))}
-        diary={state.projectNotes}
-        onUpdateDiary={(value) => setState((previous) => ({ ...previous, projectNotes: value }))}
-        generatedSections={researchLogGeneratedSectionsWithComments}
-        sectionComments={state.researchLogSectionComments}
-        onUpdateSectionComment={(sectionId, value) => setState((previous) => ({
-          ...previous,
-          researchLogSectionComments: { ...previous.researchLogSectionComments, [sectionId]: value },
-        }))}
-        markdownPreview={researchLogMarkdown}
-        markdownOptions={researchLogMarkdownOptions}
-        onMarkdownOptionsChange={setResearchLogMarkdownOptions}
-        dashboardSnapshotsStale={isAnyDashboardSnapshotStale}
-        onRecalculateSnapshots={recalculateAllDashboardSnapshots}
-        onOpenDatasetDashboard={() => {
-          setIsResearchLogOpen(false);
-          setIsDashboardOpen(true);
-        }}
-        onOpenKeyboardHelp={() => setIsKeyboardHelpOpen(true)}
-        onInsertDiaryDate={handleInsertResearchDiaryDate}
-        dashboardSnapshotIndex={dashboardSnapshotIndex}
-        currentProjectName={currentProjectName}
-        onRenameProject={handleRenameProject}
-      />
+      {hasOpenedResearchLog && (
+        <Suspense fallback={null}>
+          <ResearchLogDialog
+            isOpen={isResearchLogOpen}
+            onClose={() => setIsResearchLogOpen(false)}
+            currentProjectName={currentProjectName}
+            onRenameProject={handleRenameProject}
+            overview={state.projectOverview}
+            onUpdateOverview={(value) => setState((previous) => ({ ...previous, projectOverview: value }))}
+            events={researchHistory}
+            onAddNote={handleAddResearchNote}
+            onSetNote={handleSetResearchNote}
+            onDeleteNote={handleDeleteResearchNote}
+            describeVideo={describeVideo}
+            onOpenVideo={(videoId) => {
+              setIsResearchLogOpen(false);
+              handleDashboardNavigateToVideo(videoId);
+            }}
+            watch={researchLogWatch}
+            markdownOptions={researchLogMarkdownOptions}
+            onMarkdownOptionsChange={setResearchLogMarkdownOptions}
+            buildMarkdown={() => buildResearchLogMarkdownNow()}
+            dashboardsStale={isAnyDashboardSnapshotStale}
+          />
+        </Suspense>
+      )}
 
       <CommandPaletteDialog
         isOpen={isCommandPaletteOpen}
@@ -7143,51 +3762,46 @@ ${heading}
         onClose={() => setIsKeyboardHelpOpen(false)}
       />
 
-      <DatasetDashboardDialog
-        isOpen={isDashboardOpen}
-        onClose={() => setIsDashboardOpen(false)}
-        scope={dashboardScope}
-        onScopeChange={setDashboardScope}
-        onRefresh={handleRefreshDashboard}
-        snapshot={currentDashboardSnapshot}
-        stale={isDashboardSnapshotStale}
-        activeTab={dashboardActiveTab}
-        onActiveTabChange={setDashboardActiveTab}
-        thumbnailCache={effectiveThumbnailCache}
-        thumbnailLoadProgress={thumbnailLoadProgress}
-        thumbnailTileSize={thumbnailTileSize}
-        canZoomOut={canThumbnailZoomOut}
-        canZoomIn={canThumbnailZoomIn}
-        onZoomOut={handleThumbnailZoomOut}
-        onZoomIn={handleThumbnailZoomIn}
-        onLoadFullThumbnails={handleLoadFullDashboardThumbnails}
-        onLoadFilteredThumbnails={handleLoadFilteredDashboardThumbnails}
-        onThumbnailEntryLoad={handleThumbnailEntryLoad}
-        onThumbnailEntryError={handleThumbnailEntryError}
-        onRetryFailedThumbnails={handleRetryFailedDashboardThumbnails}
-        onNavigateToVideo={handleDashboardNavigateToVideo}
-        onNavigateToChannel={handleDashboardNavigateToChannel}
-        onApplyContentFilter={handleApplyDashboardContentFilter}
-        allChannelIds={allVisibleChannelIdsForDashboard}
-        linkingProps={{
-          rows: currentLinkingRows,
-          state: linkingState,
-          sourceItems: linkingSourceItems,
-          onGenerate: handleGenerateLinkingSummary,
-          onSelectSource: handleSelectLinkingSource,
-          onApplyOverride: handleApplyLinkingOverride,
-          onSaveOverrideBatch: handleApplyLinkingOverrideBatch,
-          onApplyDrilldown: applyDashboardDrilldown,
-        }}
-      />
+      {hasOpenedDashboard && (
+        <Suspense fallback={null}>
+          <DatasetDashboardDialog
+            isOpen={isDashboardOpen}
+            onClose={() => setIsDashboardOpen(false)}
+            scope={dashboardScope}
+            onScopeChange={setDashboardScope}
+            onRefresh={handleRefreshDashboard}
+            snapshot={currentDashboardSnapshot}
+            stale={isDashboardSnapshotStale}
+            activeTab={dashboardActiveTab}
+            onActiveTabChange={setDashboardActiveTab}
+            onNavigateToVideo={handleDashboardNavigateToVideo}
+            onOverviewDrilldown={handleOverviewDrilldown}
+            compareValue={effectiveCompareTarget}
+            compareOptions={dashboardCompareOptions}
+            onCompareChange={(target) => void handleDashboardCompareChange(target)}
+            compare={dashboardCompare}
+            scopeLabel={dashboardScope === 'full' ? 'whole dataset' : 'filtered view'}
+            getScopeRecords={getDashboardScopeRecords}
+            vernacularExclusions={vernacularExclusions}
+            onVernacularExclusionsChange={handleVernacularExclusionsChange}
+            linkingProps={{
+              rows: currentLinkingRows,
+              state: linkingState,
+              sourceItems: linkingSourceItems,
+              onGenerate: handleGenerateLinkingSummary,
+              onSelectSource: handleSelectLinkingSource,
+              onApplyOverride: handleApplyLinkingOverride,
+              onSaveOverrideBatch: handleApplyLinkingOverrideBatch,
+              onApplyDrilldown: applyDashboardDrilldown,
+            }}
+          />
+        </Suspense>
+      )}
 
       <ImportDialog
         isOpen={isImportOpen}
         onClose={() => {
-          setIsImportOpen(false);
-          setPendingFile(null);
-          setPendingRows([]);
-          setPendingSchema([]);
+          closeImport();
           setImportError(null);
         }}
         fileName={pendingFile?.name || ''}

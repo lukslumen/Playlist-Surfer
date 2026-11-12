@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Tag, StickyNote, Quote, Ban, Copy, ChevronDown, X, ExternalLink } from 'lucide-react';
-import { formatDateDisplay } from '../lib/data';
+import { Plus, Tag, StickyNote, Quote, ExternalLink } from 'lucide-react';
+import { appendQuotedText } from '../lib/detailNotes';
+import { CHANNEL_HEADER_META_KEYS, CHANNEL_KPI_KEYS, EMPTY_PLACEHOLDER, METADATA_HIDDEN_KEYS, MetadataBucket, PROFILE_SNAPSHOT_KEYS, SECTION_PRIORITY, bucketForKey, buildChannelMonogram, dedupeMetadataKeys, fieldLabel, formatMetadataDisplay, formatValue, isEmptyValue, isLongTextFieldKey, orderKeysByPriority, parseArrayLikeValue, resolveChannelDescription, resolveChannelKey } from '../lib/channelFieldFormatting';
+import { resolveChannelThumbnailCandidates } from '../lib/channelThumbnails';
+import { ChannelBatchPanel, type BatchNoteApplyResult } from './channel/ChannelBatchPanel';
 
-type BatchNoteApplyResult = {
-  status: 'success' | 'error' | 'empty';
-  appliedCount: number;
-  message: string;
-};
+// Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
+const NO_TAGS: string[] = [];
 
 type Props = {
   row: any | null;
@@ -32,442 +32,6 @@ type Props = {
   onChannelNavigateToVideos?: (channelRow: any) => void;
 };
 
-type MetadataBucket = 'publishing' | 'performance' | 'linking' | 'profile' | 'imported';
-
-const EMPTY_PLACEHOLDER = 'N/A';
-
-const CHANNEL_BATCH_COPY_OPTIONS: Array<{ mode: 'channelIds' | 'channelUrls' | 'videoIds' | 'videoUrls'; label: string }> = [
-  { mode: 'channelIds', label: 'Copy channel IDs' },
-  { mode: 'channelUrls', label: 'Copy channel URLs' },
-  { mode: 'videoIds', label: 'Copy related video IDs' },
-  { mode: 'videoUrls', label: 'Copy related video URLs' },
-];
-
-const FIELD_LABELS: Record<string, string> = {
-  channel_name: 'Channel name',
-  channel_id: 'Channel ID',
-  channel_user_tags: 'Channel user tags',
-  channel_created_at: 'Channel created',
-  channel_subscriber_count: 'Subscribers',
-  channel_video_count: 'Channel video count',
-  channel_total_views: 'Channel total views',
-  channel_country: 'Country',
-  channel_default_language: 'Default language',
-  channel_keywords: 'Keywords',
-  channel_topics: 'Topics',
-  channel_description: 'Description',
-  channel_linked_video_count: 'Linked videos',
-  channel_total_urls: 'Total outgoing URLs',
-  channel_unique_domains: 'Unique linked domains',
-  channel_top_domains: 'Top linked domains',
-  channel_linking_recipe_mix: 'Linking recipe mix',
-  video_count_in_dataset: 'Videos in dataset',
-  total_views_in_dataset: 'Total views in dataset',
-  total_likes_in_dataset: 'Total likes in dataset',
-  total_comments_in_dataset: 'Total comments in dataset',
-  earliest_publish_date: 'Earliest publish date',
-  latest_publish_date: 'Latest publish date',
-};
-
-const SECTION_PRIORITY: Record<'publishing' | 'performance' | 'linking' | 'profile', string[]> = {
-  publishing: [
-    'earliest_publish_date',
-    'latest_publish_date',
-    'channel_created_at',
-    'video_count_in_dataset',
-    'channel_video_count',
-  ],
-  performance: [
-    'total_views_in_dataset',
-    'total_likes_in_dataset',
-    'total_comments_in_dataset',
-    'channel_subscriber_count',
-    'channel_total_views',
-  ],
-  linking: [
-    'channel_linked_video_count',
-    'channel_unique_domains',
-    'channel_total_urls',
-    'channel_top_domains',
-    'channel_linking_recipe_mix',
-  ],
-  profile: [
-    'channel_country',
-    'channel_default_language',
-    'channel_keywords',
-    'channel_topics',
-    'channel_thumbnail_url',
-  ],
-};
-
-const PROFILE_SNAPSHOT_KEYS = [
-  'channel_country',
-  'channel_default_language',
-  'channel_subscriber_count',
-  'channel_video_count',
-  'channel_total_views',
-  'channel_created_at',
-  'channel_keywords',
-  'channel_topics',
-];
-
-const CHANNEL_KPI_KEYS = [
-  'video_count_in_dataset',
-  'channel_video_count',
-  'total_views_in_dataset',
-  'total_likes_in_dataset',
-  'total_comments_in_dataset',
-  'channel_unique_domains',
-];
-
-const CHANNEL_HEADER_META_KEYS = [
-  'channel_id',
-  'earliest_publish_date',
-  'latest_publish_date',
-];
-
-const METADATA_HIDDEN_KEYS = new Set([
-  'channel_name',
-  'channel_id',
-  'channel_key',
-  'channel_user_tags',
-  'channel_description',
-  'description',
-  'about',
-  'channel_about',
-  'channelDescription',
-  'aboutText',
-  'id',
-  'title',
-  'publishedAt',
-  'defaultLanguage',
-  'country',
-  'viewCount',
-  'subscriberCount',
-  'videoCount',
-  'thumbnail',
-  'keywords',
-  'topicDetails',
-]);
-
-function isEmptyValue(value: unknown) {
-  return value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
-}
-
-function fieldLabel(key: string) {
-  if (FIELD_LABELS[key]) return FIELD_LABELS[key];
-  return key
-    .split('_')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function isNumericFieldKey(key: string) {
-  return /(count|views?|likes?|comments?|subscribers?|followers?|score|avg|average|rate|ratio|urls?|domains?|videos?)/i.test(key);
-}
-
-function isDateFieldKey(key: string) {
-  return /(date|published|publish|created|updated|time)$/i.test(key);
-}
-
-function isListFieldKey(key: string) {
-  return /(tags?|topics?|keywords?|domains?|languages?|countries?|categories?|recipes?|mix|urls?)/i.test(key);
-}
-
-function isLongTextFieldKey(key: string) {
-  return /(description|about|notes?|summary|bio|transcript)/i.test(key);
-}
-
-function formatValue(value: unknown) {
-  if (value === null || value === undefined || value === '') return EMPTY_PLACEHOLDER;
-  if (Array.isArray(value)) return value.join(', ');
-  if (typeof value === 'number') return Number.isFinite(value) ? value.toLocaleString() : EMPTY_PLACEHOLDER;
-  const text = String(value);
-  if (/^\d{4}-\d{2}-\d{2}T/.test(text)) return formatDateDisplay(text);
-  return text.trim() || EMPTY_PLACEHOLDER;
-}
-
-function parseArrayLikeValue(key: string, value: unknown): string[] {
-  if (value === null || value === undefined || value === '') return [];
-  if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean);
-
-  const text = String(value).trim();
-  if (!text) return [];
-
-  if (text.startsWith('[') && text.endsWith(']')) {
-    try {
-      const parsed = JSON.parse(text);
-      if (Array.isArray(parsed)) return parsed.map((entry) => String(entry).trim()).filter(Boolean);
-    } catch {
-      // fall through
-    }
-  }
-
-  if (text.includes('|')) return text.split('|').map((entry) => entry.trim()).filter(Boolean);
-  if (text.includes(';')) return text.split(';').map((entry) => entry.trim()).filter(Boolean);
-  if (isListFieldKey(key) && text.includes(',')) return text.split(',').map((entry) => entry.trim()).filter(Boolean);
-  return [];
-}
-
-function coerceNumericValue(value: unknown): number | null {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  if (typeof value !== 'string') return null;
-  const trimmed = value.trim();
-  if (!trimmed || !/^-?[\d,.]+$/.test(trimmed)) return null;
-  const parsed = Number(trimmed.replace(/,/g, ''));
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function formatMetadataDisplay(key: string, value: unknown): string | string[] {
-  const list = parseArrayLikeValue(key, value);
-  if (list.length) return list;
-  if (value === null || value === undefined || value === '') return EMPTY_PLACEHOLDER;
-  if (isDateFieldKey(key)) return formatValue(value);
-  const numeric = coerceNumericValue(value);
-  if (numeric !== null && (isNumericFieldKey(key) || typeof value === 'number')) return numeric.toLocaleString();
-  return String(value).trim() || EMPTY_PLACEHOLDER;
-}
-
-function resolveChannelKey(row: any) {
-  return String(row?.channel_key || row?.channel_id || row?.channel_name || '').trim();
-}
-
-function resolveChannelDescription(row: any) {
-  const candidates = [
-    row?.channel_description,
-    row?.description,
-    row?.about,
-    row?.channel_about,
-    row?.channelDescription,
-    row?.aboutText,
-  ];
-  const value = candidates.find((entry) => String(entry ?? '').trim().length > 0);
-  return value == null ? '' : String(value);
-}
-
-const THUMBNAIL_URL_PRIORITY_KEYS = [
-  'channel_thumbnail_url',
-  'channelThumbnailUrl',
-  'channel_thumbnail',
-  'channelThumbnail',
-  'channel_icon',
-  'channelIcon',
-  'channel_avatar',
-  'channelAvatar',
-  'avatar_url',
-  'avatarUrl',
-  'avatar',
-  'profile_image',
-  'profileImage',
-  'profile_picture',
-  'profilePicture',
-  'photo_url',
-  'photoUrl',
-  'photo',
-  'image_url',
-  'imageUrl',
-  'image',
-  'thumbnailUrl',
-  'thumbnail',
-  'thumbnail_default',
-  'thumbnail_medium',
-  'thumbnail_high',
-  'thumbnail_maxres',
-  'thumbnails',
-  'snippet',
-  'brandingSettings',
-  'url',
-  'src',
-  'href',
-  'default',
-  'medium',
-  'high',
-  'maxres',
-];
-
-function parseJsonLikeValue(value: string): unknown | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const looksLikeJson = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
-  if (!looksLikeJson) return null;
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    return null;
-  }
-}
-
-function extractEmbeddedHttpUrl(value: string): string | null {
-  const match = value.match(/https?:\/\/[^\s"'<>]+/i);
-  return match ? match[0] : null;
-}
-
-function collectThumbnailUrlCandidates(value: unknown, seen = new Set<unknown>()): string[] {
-  if (value === null || value === undefined) return [];
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) return [];
-    const parsedJson = parseJsonLikeValue(trimmed);
-    if (parsedJson !== null) return collectThumbnailUrlCandidates(parsedJson, seen);
-    const embedded = extractEmbeddedHttpUrl(trimmed);
-    return embedded ? [embedded] : [trimmed];
-  }
-  if (typeof value !== 'object') return [];
-  if (seen.has(value)) return [];
-  seen.add(value);
-  if (Array.isArray(value)) return value.flatMap((entry) => collectThumbnailUrlCandidates(entry, seen));
-
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj);
-  const orderedKeys = [
-    ...THUMBNAIL_URL_PRIORITY_KEYS.filter((key) => key in obj),
-    ...keys.filter((key) => !THUMBNAIL_URL_PRIORITY_KEYS.includes(key)),
-  ];
-  return orderedKeys.flatMap((key) => collectThumbnailUrlCandidates(obj[key], seen));
-}
-
-function normalizeHttpUrl(value: string): string | null {
-  let candidate = value.trim().replace(/^['"`]+|['"`]+$/g, '');
-  if (!candidate) return null;
-  if (candidate.startsWith('//')) candidate = `https:${candidate}`;
-  if (!/^https?:\/\//i.test(candidate)) {
-    const embedded = extractEmbeddedHttpUrl(candidate);
-    if (!embedded) return null;
-    candidate = embedded;
-  }
-  candidate = candidate.replace(/[),.;]+$/g, '');
-  try {
-    const parsed = new URL(candidate);
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
-const THUMBNAIL_ROW_SOURCE_KEYS = [
-  'channel_thumbnail_url',
-  'channelThumbnailUrl',
-  'channel_thumbnail',
-  'channelThumbnail',
-  'channel_icon',
-  'channelIcon',
-  'channel_avatar',
-  'channelAvatar',
-  'avatar_url',
-  'avatarUrl',
-  'avatar',
-  'profile_image',
-  'profileImage',
-  'profile_picture',
-  'profilePicture',
-  'photo_url',
-  'photoUrl',
-  'photo',
-  'image_url',
-  'imageUrl',
-  'image',
-  'thumbnailUrl',
-  'thumbnail',
-  'thumbnail_default',
-  'thumbnail_medium',
-  'thumbnail_high',
-  'thumbnail_maxres',
-  'thumbnails',
-];
-
-function resolveChannelThumbnailCandidates(rows: Array<any | null | undefined> | any | null | undefined): string[] {
-  const rowList = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
-  if (!rowList.length) return [];
-  const rawCandidates = rowList.flatMap((row) => {
-    if (!row || typeof row !== 'object') return [];
-    const candidates = THUMBNAIL_ROW_SOURCE_KEYS
-      .filter((key) => key in row)
-      .map((key) => row[key]);
-    candidates.push(
-      row?.snippet?.thumbnails,
-      row?.snippet,
-      row?.brandingSettings?.image,
-    );
-    return candidates;
-  });
-  const urls = rawCandidates
-    .flatMap((entry) => collectThumbnailUrlCandidates(entry))
-    .map((entry) => normalizeHttpUrl(entry))
-    .filter((entry): entry is string => Boolean(entry));
-  return Array.from(new Set(urls));
-}
-
-function buildChannelMonogram(channelName: unknown): string {
-  const text = String(channelName ?? '').trim();
-  if (!text) return 'CH';
-  const words = text.split(/\s+/).filter(Boolean);
-  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
-  return `${words[0][0] || ''}${words[1][0] || ''}`.toUpperCase();
-}
-
-function appendQuotedText(existing: string, heading: string, text: string) {
-  const cleaned = text.replace(/\s+/g, ' ').trim();
-  if (!cleaned) return existing;
-  const entry = `- "${cleaned.replace(/"/g, '\\"')}"`;
-  const sectionHeader = `## ${heading}`;
-  const trimmed = existing.replace(/\s+$/, '');
-  if (!trimmed) return `${sectionHeader}\n${entry}\n`;
-
-  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(`(^|\\n)## ${escapedHeading}\\n([\\s\\S]*?)(?=\\n## |$)`, 'm');
-  const match = pattern.exec(trimmed);
-  if (!match) return `${trimmed}\n\n${sectionHeader}\n${entry}\n`;
-
-  const prefix = trimmed.slice(0, match.index + match[1].length);
-  const suffix = trimmed.slice(match.index + match[0].length);
-  const existingEntries = match[2]
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (!existingEntries.includes(entry)) existingEntries.push(entry);
-  const rebuiltSection = `${sectionHeader}\n${existingEntries.join('\n')}`;
-  return `${prefix}${rebuiltSection}${suffix ? suffix : ''}`.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
-}
-
-function orderKeysByPriority(keys: string[], priority: string[]) {
-  const unique = Array.from(new Set(keys));
-  const prioritySet = new Set(priority);
-  const prioritized = priority.filter((key) => unique.includes(key));
-  const rest = unique
-    .filter((key) => !prioritySet.has(key))
-    .sort((a, b) => fieldLabel(a).localeCompare(fieldLabel(b)));
-  return [...prioritized, ...rest];
-}
-
-function dedupeMetadataKeys(keys: string[], row: any) {
-  const seen = new Set<string>();
-  const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
-  return keys.filter((key) => {
-    const label = normalize(fieldLabel(key));
-    const display = formatMetadataDisplay(key, row?.[key]);
-    const value = normalize(Array.isArray(display) ? display.join(' | ') : String(display));
-    const signature = `${label}::${value}`;
-    if (seen.has(signature)) return false;
-    seen.add(signature);
-    return true;
-  });
-}
-
-function bucketForKey(key: string): MetadataBucket {
-  if (SECTION_PRIORITY.publishing.includes(key)) return 'publishing';
-  if (SECTION_PRIORITY.performance.includes(key)) return 'performance';
-  if (SECTION_PRIORITY.linking.includes(key)) return 'linking';
-  if (SECTION_PRIORITY.profile.includes(key)) return 'profile';
-
-  if (/(publish|upload|created|date|video_count)/i.test(key)) return 'publishing';
-  if (/(view|like|comment|subscriber|follower|engagement|watch)/i.test(key)) return 'performance';
-  if (/(link|domain|url|recipe)/i.test(key)) return 'linking';
-  if (/(country|language|keyword|topic|category|tag|profile|thumbnail|about|description)/i.test(key)) return 'profile';
-  return 'imported';
-}
-
 export default function ChannelSummaryPanel({
   row,
   defaultRow = null,
@@ -490,17 +54,11 @@ export default function ChannelSummaryPanel({
   const [tab, setTab] = useState<'metadata' | 'annotations'>('metadata');
   const [tagInput, setTagInput] = useState('');
   const [notesDraft, setNotesDraft] = useState('');
-  const [batchNotesDraft, setBatchNotesDraft] = useState('');
-  const [isBatchCopyMenuOpen, setIsBatchCopyMenuOpen] = useState(false);
-  const [batchCopyFeedback, setBatchCopyFeedback] = useState<{ status: 'success' | 'error' | 'empty'; message: string } | null>(null);
-  const [batchNotesFeedback, setBatchNotesFeedback] = useState<BatchNoteApplyResult | null>(null);
   const [thumbIndex, setThumbIndex] = useState(0);
   const [thumbStatus, setThumbStatus] = useState<'loading' | 'loaded' | 'fallback'>('fallback');
 
   const descriptionRef = useRef<HTMLDivElement | null>(null);
   const notesRef = useRef<HTMLTextAreaElement | null>(null);
-  const batchCopyMenuRef = useRef<HTMLDivElement | null>(null);
-  const batchCopyButtonRef = useRef<HTMLButtonElement | null>(null);
   const thumbIndexRef = useRef(0);
 
   const activeRow = row || defaultRow;
@@ -517,7 +75,7 @@ export default function ChannelSummaryPanel({
   const channelId = String(activeRow?.channel_id || '').trim();
   const youtubeChannelUrl = channelId ? `https://www.youtube.com/channel/${channelId}` : '';
 
-  const currentTags = activeKey ? (channelTagsById[activeKey] || []) : [];
+  const currentTags = (activeKey && channelTagsById[activeKey]) || NO_TAGS;
   const selectedKeys = useMemo(() => selectedRows.map(resolveChannelKey).filter(Boolean), [selectedRows]);
   const sharedTags = useMemo(() => {
     if (selectedKeys.length <= 1) return currentTags;
@@ -538,42 +96,11 @@ export default function ChannelSummaryPanel({
     thumbIndexRef.current = 0;
     setThumbIndex(0);
     setThumbStatus('loading');
-  }, [activeKey, thumbnailCandidateSignature]);
+  }, [activeKey, thumbnailCandidateSignature, thumbnailCandidates.length]);
 
   useEffect(() => {
-    if (selectedKeys.length <= 1) {
-      setBatchNotesDraft('');
-      setIsBatchCopyMenuOpen(false);
-      setBatchCopyFeedback(null);
-      setBatchNotesFeedback(null);
-    } else {
-      setTab('annotations');
-    }
+    if (selectedKeys.length > 1) setTab('annotations');
   }, [selectedKeys]);
-
-  useEffect(() => {
-    if (!isBatchCopyMenuOpen) return;
-    const handlePointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      const insideMenu = !!batchCopyMenuRef.current && batchCopyMenuRef.current.contains(target);
-      const insideButton = !!batchCopyButtonRef.current && batchCopyButtonRef.current.contains(target);
-      if (!insideMenu && !insideButton) setIsBatchCopyMenuOpen(false);
-    };
-    window.addEventListener('mousedown', handlePointerDown);
-    return () => window.removeEventListener('mousedown', handlePointerDown);
-  }, [isBatchCopyMenuOpen]);
-
-  useEffect(() => {
-    if (!batchCopyFeedback) return;
-    const timeout = window.setTimeout(() => setBatchCopyFeedback(null), 2600);
-    return () => window.clearTimeout(timeout);
-  }, [batchCopyFeedback]);
-
-  useEffect(() => {
-    if (!batchNotesFeedback) return;
-    const timeout = window.setTimeout(() => setBatchNotesFeedback(null), 2600);
-    return () => window.clearTimeout(timeout);
-  }, [batchNotesFeedback]);
 
   const metadataSourceKeys = useMemo(
     () => Object.keys(activeRow || {}).filter((key) => !METADATA_HIDDEN_KEYS.has(key) && !isEmptyValue(activeRow[key])),
@@ -683,36 +210,17 @@ export default function ChannelSummaryPanel({
   const submitTag = () => {
     const trimmed = tagInput.trim();
     if (!trimmed) return;
-    if (selectedKeys.length > 1) {
-      onBatchAddChannelTag?.(trimmed);
-    } else if (activeKey) {
+    if (activeKey) {
       onReplaceChannelTags?.(activeKey, Array.from(new Set([...(channelTagsById[activeKey] || []), trimmed])));
     }
     setTagInput('');
   };
 
   const removeTag = (tag: string) => {
-    if (selectedKeys.length > 1) {
-      onBatchRemoveChannelTag?.(tag);
-    } else if (activeKey) {
+    if (activeKey) {
       onReplaceChannelTags?.(activeKey, (channelTagsById[activeKey] || []).filter((item) => item !== tag));
     }
   };
-
-  async function submitBatchCopy(mode: 'channelIds' | 'channelUrls' | 'videoIds' | 'videoUrls') {
-    if (!onBatchCopySelection || selectedKeys.length === 0) return;
-    setBatchCopyFeedback({ status: 'empty', message: 'Preparing copy...' });
-    setIsBatchCopyMenuOpen(false);
-    const result = await onBatchCopySelection(mode);
-    setBatchCopyFeedback({ status: result.status, message: result.message });
-  }
-
-  async function submitBatchNotes() {
-    if (!onBatchApplyChannelNotes || selectedKeys.length === 0) return;
-    const result = await onBatchApplyChannelNotes(batchNotesDraft);
-    setBatchNotesFeedback(result);
-    if (result.status === 'success') setBatchNotesDraft('');
-  }
 
   const renderMetadataValue = (key: string, value: unknown, options?: { metric?: boolean; compactRows?: boolean }) => {
     const display = formatMetadataDisplay(key, value);
@@ -806,119 +314,16 @@ export default function ChannelSummaryPanel({
 
   if (selectedCount > 1) {
     return (
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg-secondary)]">
-        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
-          <div className="space-y-4 p-4">
-            <section className="space-y-3 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-4">
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Batch actions</div>
-                <div className="mt-1 text-[13px] font-semibold text-[var(--text-main)]">{selectedCount.toLocaleString()} channels selected</div>
-                <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">
-                  Tag selected channels, copy channel or related video IDs/URLs, or {inclusionView === 'excluded' ? 'restore' : 'exclude'} all associated videos in one step.
-                </p>
-              </div>
-              <div className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,1fr)_auto] xl:grid-cols-[minmax(0,1fr)_auto_auto]">
-                <input
-                  value={tagInput}
-                  onChange={(event) => setTagInput(event.target.value)}
-                  onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitTag(); } }}
-                  placeholder="Add tag to selected channels"
-                  className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                />
-                <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90">
-                  <Plus size={14} /> Add
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onBatchExcludeChannels?.()}
-                  disabled={!onBatchExcludeChannels}
-                  className="shrink-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 text-[12px] font-semibold text-[var(--text-main)] transition-colors hover:border-red-500 hover:text-red-600 disabled:opacity-50"
-                  title={inclusionView === 'excluded' ? 'Restore associated videos for selected channels' : 'Exclude associated videos for selected channels'}
-                >
-                  <span className="inline-flex items-center gap-1.5">
-                    <Ban size={13} />
-                    {inclusionView === 'excluded' ? 'Restore' : 'Exclude'}
-                  </span>
-                </button>
-                <div className="relative shrink-0">
-                  <button
-                    ref={batchCopyButtonRef}
-                    type="button"
-                    onClick={() => setIsBatchCopyMenuOpen((current) => !current)}
-                    disabled={!onBatchCopySelection}
-                    className="inline-flex items-center gap-1.5 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 text-[12px] font-semibold text-[var(--text-main)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50"
-                    aria-expanded={isBatchCopyMenuOpen}
-                  >
-                    <Copy size={13} />
-                    Copy
-                    <ChevronDown size={12} className={isBatchCopyMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                  </button>
-                  {isBatchCopyMenuOpen ? (
-                    <div ref={batchCopyMenuRef} className="absolute right-0 top-full z-30 mt-1 w-52 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-1 shadow-xl">
-                      {CHANNEL_BATCH_COPY_OPTIONS.map((option) => (
-                        <button
-                          key={option.mode}
-                          type="button"
-                          onClick={() => { void submitBatchCopy(option.mode); }}
-                          className="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-2 text-left text-[11px] text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
-                        >
-                          <Copy size={12} className="shrink-0 text-[var(--text-muted)]" />
-                          {option.label}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-              <div className="space-y-2 border-t border-[var(--border-color)] pt-3">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Shared tags across selection</div>
-                {sharedTags.length > 0 ? (
-                  <div className="flex min-h-[1.75rem] flex-wrap gap-2">
-                    {sharedTags.map((tag) => (
-                      <span key={tag} className="flex items-center gap-1 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-2.5 py-1 text-[12px] text-[var(--text-main)]">
-                        <span>{tag}</span>
-                        <button type="button" onClick={() => removeTag(tag)} className="text-[var(--text-muted)] transition-colors hover:text-red-500">
-                          <X size={10} />
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="font-mono text-[13px] leading-5 text-[var(--text-muted)]">No shared channel tags across the current selection.</p>
-                )}
-              </div>
-              {batchCopyFeedback ? (
-                <p className={`text-[11px] ${batchCopyFeedback.status === 'success' ? 'text-[var(--accent)]' : batchCopyFeedback.status === 'error' ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
-                  {batchCopyFeedback.message}
-                </p>
-              ) : null}
-            </section>
-
-            <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-4">
-              <div className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                <StickyNote size={14} /> Batch channel notes
-              </div>
-              <p className="font-mono text-[13px] leading-5 text-[var(--text-muted)]">Apply the same note block to all selected channels.</p>
-              <textarea
-                value={batchNotesDraft}
-                onChange={(event) => setBatchNotesDraft(event.target.value)}
-                placeholder="Apply the same note block to all selected channels..."
-                className="custom-scrollbar min-h-[12rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
-              />
-              <div className="mt-3 flex justify-end">
-                <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
-                  Apply to selected channels
-                </button>
-              </div>
-              {batchNotesFeedback ? (
-                <p className={`text-[11px] ${batchNotesFeedback.status === 'success' ? 'text-[var(--accent)]' : batchNotesFeedback.status === 'error' ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
-                  {batchNotesFeedback.message}
-                </p>
-              ) : null}
-            </section>
-          </div>
-        </div>
-      </div>
+      <ChannelBatchPanel
+        selectedCount={selectedCount}
+        isExcludedView={inclusionView === 'excluded'}
+        sharedTags={sharedTags}
+        onBatchAddChannelTag={onBatchAddChannelTag}
+        onBatchRemoveChannelTag={onBatchRemoveChannelTag}
+        onBatchApplyChannelNotes={onBatchApplyChannelNotes}
+        onBatchExcludeChannels={onBatchExcludeChannels}
+        onBatchCopySelection={onBatchCopySelection}
+      />
     );
   }
 
@@ -1101,7 +506,7 @@ export default function ChannelSummaryPanel({
             <div className="space-y-3 min-w-0">
               <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-3">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                  <Tag size={14} /> {selectedCount > 1 ? 'Batch channel tags' : 'Channel tags'}
+                  <Tag size={14} /> Channel tags
                 </div>
                 <div className="mb-3 flex min-w-0 flex-wrap gap-2">
                   {sharedTags.map((tag) => (
@@ -1117,7 +522,7 @@ export default function ChannelSummaryPanel({
                     value={tagInput}
                     onChange={(event) => setTagInput(event.target.value)}
                     onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); submitTag(); } }}
-                    placeholder={selectedCount > 1 ? 'Add tag to selected channels' : 'Add channel tag'}
+                    placeholder="Add channel tag"
                     className="min-w-0 rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
                   />
                   <button type="button" onClick={submitTag} className="inline-flex items-center gap-1 rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90">
@@ -1128,40 +533,19 @@ export default function ChannelSummaryPanel({
 
               <section className="rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] p-3">
                 <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                  <StickyNote size={14} /> {selectedCount > 1 ? 'Batch channel notes' : 'Channel notes'}
+                  <StickyNote size={14} /> Channel notes
                 </div>
-                {selectedCount > 1 ? (
-                  <>
-                    <textarea
-                      value={batchNotesDraft}
-                      onChange={(event) => setBatchNotesDraft(event.target.value)}
-                      placeholder="Apply the same note block to all selected channels..."
-                      className="custom-scrollbar min-h-[12rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                    />
-                    <div className="mt-3 flex justify-end">
-                      <button type="button" onClick={() => { void submitBatchNotes(); }} disabled={!batchNotesDraft.trim() || !onBatchApplyChannelNotes} className="rounded-[6px] border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 text-[12px] font-semibold text-white hover:opacity-90 disabled:opacity-50">
-                        Apply to selected channels
-                      </button>
-                    </div>
-                    {batchNotesFeedback ? (
-                      <p className={`mt-2 text-[11px] ${batchNotesFeedback.status === 'success' ? 'text-[var(--accent)]' : batchNotesFeedback.status === 'error' ? 'text-red-500' : 'text-[var(--text-muted)]'}`}>
-                        {batchNotesFeedback.message}
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <textarea
-                    ref={notesRef}
-                    value={notesDraft}
-                    onChange={(event) => {
-                      const next = event.target.value;
-                      setNotesDraft(next);
-                      if (activeKey) onUpdateChannelNotes?.(activeKey, next);
-                    }}
-                    placeholder="# Notes\n\nAdd channel-level observations, quotes, and coding decisions here..."
-                    className="custom-scrollbar min-h-[14rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                  />
-                )}
+                <textarea
+                  ref={notesRef}
+                  value={notesDraft}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setNotesDraft(next);
+                    if (activeKey) onUpdateChannelNotes?.(activeKey, next);
+                  }}
+                  placeholder="# Notes\n\nAdd channel-level observations, quotes, and coding decisions here..."
+                  className="custom-scrollbar min-h-[14rem] w-full rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                />
               </section>
             </div>
           )}

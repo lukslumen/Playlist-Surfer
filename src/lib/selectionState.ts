@@ -167,3 +167,22 @@ export function pruneScopeSelectionAction(scope: SelectionScope, validKeys: Set<
 export function setScopeDetailAction(scope: SelectionScope, detailKey: string | null): SelectionAction {
   return { type: 'setScopeDetail', scope, detailKey };
 }
+
+export function buildScopeSelectionFromKeys(keys: string[], detailKey?: string | null): ScopeSelectionState {
+  const selectedKeys = Array.from(new Set((keys || []).map((key) => String(key || '').trim()).filter(Boolean)));
+  if (!selectedKeys.length) {
+    return {
+      ...EMPTY_SCOPE_SELECTION,
+      detailKey: detailKey ?? null,
+    };
+  }
+  const resolvedDetail = detailKey && selectedKeys.includes(detailKey)
+    ? detailKey
+    : selectedKeys[selectedKeys.length - 1];
+  return {
+    selectedKeys,
+    anchorKey: selectedKeys[0],
+    focusKey: selectedKeys[selectedKeys.length - 1],
+    detailKey: resolvedDetail,
+  };
+}

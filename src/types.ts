@@ -83,7 +83,10 @@ export interface ImportedChannelMetadataState {
 
 export type DashboardScope = 'full' | 'filtered';
 export type DashboardTabId = 'overview' | 'temporal' | 'inequality' | 'content' | 'locale' | 'reliability';
-export type DashboardTemplateTab = 'overview' | 'attention' | 'content' | 'thumbnails' | 'linking';
+export type DashboardTemplateTab = 'overview' | 'attention' | 'vernacular' | 'time' | 'linking';
+
+/** How the videos explorer shows its rows. */
+export type ExplorerLayout = 'table' | 'thumbnails';
 
 export type SourceKind = 'base' | 'enrichment' | 'generated';
 
@@ -253,64 +256,11 @@ export interface ChannelLinkingState {
   snapshot: ChannelLinkingSnapshotState | null;
 }
 
-export type DashboardThumbnailScopeKey = 'full' | 'filtered-temp' | `savedView:${string}`;
-export type DashboardThumbnailPersistentScopeKey = 'full' | `savedView:${string}`;
-
-export interface DashboardThumbnailSortRule {
+/** One sort column of the video table, in sort priority order. */
+export interface GridSortRule {
   columnId: string;
   direction: 'asc' | 'desc';
   order: number;
-}
-
-export interface DashboardThumbnailCandidate {
-  videoId: string;
-  dedupeKey: string;
-  title: string;
-  sourceUrl: string;
-  candidateUrls: string[];
-  rank: number;
-}
-
-export interface DashboardThumbnailCacheEntry {
-  videoId: string;
-  dedupeKey: string;
-  title: string;
-  rank: number;
-  sourceUrl: string;
-  candidateUrls?: string[];
-  activeUrl?: string;
-  fallbackIndex?: number;
-  activeCandidateIndex?: number;
-  status: 'pending' | 'loaded' | 'failed';
-  mimeType?: string;
-  byteLength?: number;
-  fileName?: string;
-  error?: string;
-  bytes?: Uint8Array;
-  objectUrl?: string;
-}
-
-export interface DashboardThumbnailCacheSnapshot {
-  scopeKey: DashboardThumbnailScopeKey;
-  label: string;
-  sessionId: number;
-  rowCount: number;
-  totalCandidates: number;
-  calculatedAt: string;
-  datasetVersionAtCalculation: number;
-  filteredViewVersionAtCalculation?: number;
-  savedViewsVersionAtCalculation?: number;
-  sortSignature?: string;
-  entries: DashboardThumbnailCacheEntry[];
-}
-
-export interface DashboardThumbnailLoadProgress {
-  scopeKey: DashboardThumbnailScopeKey;
-  label: string;
-  total: number;
-  completed: number;
-  failed: number;
-  loading: boolean;
 }
 
 export interface LongTaskProgress {
@@ -319,36 +269,6 @@ export interface LongTaskProgress {
   completed: number;
   total: number;
   indeterminate?: boolean;
-}
-
-export interface DashboardThumbnailArchiveEntry {
-  videoId: string;
-  dedupeKey: string;
-  title: string;
-  rank: number;
-  sourceUrl: string;
-  status: 'loaded' | 'failed';
-  mimeType?: string;
-  byteLength?: number;
-  fileName?: string;
-  error?: string;
-}
-
-export interface DashboardThumbnailArchiveScopeIndex {
-  scopeKey: DashboardThumbnailPersistentScopeKey;
-  label: string;
-  rowCount: number;
-  totalCandidates: number;
-  calculatedAt: string;
-  datasetVersionAtCalculation: number;
-  savedViewsVersionAtCalculation?: number;
-  sortSignature?: string;
-  entries: DashboardThumbnailArchiveEntry[];
-}
-
-export interface DashboardThumbnailCacheIndex {
-  version: number;
-  scopes: Record<string, DashboardThumbnailArchiveScopeIndex>;
 }
 
 export interface DashboardHotspot {
@@ -453,7 +373,8 @@ export interface DatasetDashboardStats {
 
 export interface DatasetDashboardSnapshot {
   scope: DashboardScope;
-  stats: DatasetDashboardStats;
+  /** Only in snapshots made before the dashboard redesign. */
+  stats?: DatasetDashboardStats;
   template?: DashboardTemplateSnapshot;
   rowCount: number;
   calculatedAt: string;
@@ -464,7 +385,8 @@ export interface DatasetDashboardSnapshot {
 export interface SavedViewDashboardSnapshot {
   savedViewId: string;
   savedViewName: string;
-  stats: DatasetDashboardStats;
+  /** Only in snapshots made before the dashboard redesign. */
+  stats?: DatasetDashboardStats;
   template?: DashboardTemplateSnapshot;
   rowCount: number;
   calculatedAt: string;
@@ -477,7 +399,10 @@ export interface WatchHistoryEntry {
   title: string;
   firstWatchedAt: string;
   lastWatchedAt: string;
+  /** All playback time, replays included. */
   totalWatchSeconds: number;
+  /** The parts of the video that were played, as merged [start, end] seconds; replays count once. */
+  watchedRanges?: Array<[number, number]>;
   qualifyingSessionCount: number;
   playStartCount: number;
   durationSeconds?: number | null;
@@ -505,7 +430,12 @@ export type ResearchHistoryEventType =
   | 'linking_bucket_override_created'
   | 'linking_bucket_override_changed'
   | 'linking_bucket_override_reverted'
-  | 'channel_linking_refreshed';
+  | 'channel_linking_refreshed'
+  | 'source_deleted'
+  /** A researcher's own diary entry, written in the research log. */
+  | 'note'
+  | 'vernacular_terms_changed'
+  | 'dashboard_generated';
 
 export interface ResearchHistoryEvent {
   id: string;
@@ -516,6 +446,10 @@ export interface ResearchHistoryEvent {
   affectedIds?: string[];
   meta?: Record<string, string | number | boolean | null | undefined>;
   reverted?: boolean;
+  /** The researcher's note on this action ("why I excluded these"), or the text of a 'note' entry. */
+  note?: string;
+  /** When a 'note' entry or an attached note was last edited. */
+  editedAt?: string;
 }
 
 export type ResearchLogSectionId =
@@ -662,6 +596,8 @@ export interface ProjectArchiveManifest {
   channelVisibleColumns?: string[];
   videoColumnWidths?: Record<string, number>;
   channelColumnWidths?: Record<string, number>;
+  /** Terms hidden from vernacular analysis. */
+  vernacularExclusions?: string[];
   savedViews: SavedView[];
   activeViewId: string | null;
   annotations: Record<string, Annotation>;
@@ -684,7 +620,6 @@ export interface ProjectArchiveManifest {
   dashboardSnapshots?: Partial<Record<DashboardScope, DatasetDashboardSnapshot>>;
   savedViewDashboardSnapshots?: Record<string, SavedViewDashboardSnapshot>;
   savedViewsVersion?: number;
-  thumbnailCacheIndex?: DashboardThumbnailCacheIndex;
   channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
   importedChannelMetadata?: ImportedChannelMetadataState | null;
   viewScope?: ViewScope;

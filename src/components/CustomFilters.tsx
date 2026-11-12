@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Check, Eraser, Search, X } from 'lucide-react';
 import { CustomFilterProps, useGridFilter } from 'ag-grid-react';
 import {
-  parseListString,
   BooleanMapFilterModel,
   BooleanMapSchema,
   GenericFilterKind,
@@ -12,6 +11,10 @@ import {
   TagFilterModel,
   normalizeGenericModel,
 } from '../lib/filterCoordinator';
+
+// Shared empty values: a fresh [] or {} on every render would defeat the memos that depend on them.
+const NO_KEYS: string[] = [];
+const NO_LABELS: Record<string, string> = {};
 
 export { parseListString } from '../lib/filterCoordinator';
 
@@ -93,9 +96,13 @@ export function GenericValueFilter(props: CustomFilterProps<any, any, GenericFil
         { value: 'gte', label: 'Greater or equal' },
         { value: 'lt', label: 'Less than' },
         { value: 'lte', label: 'Less or equal' },
+        { value: 'between', label: 'Between (from..to)' },
       ];
 
-  const placeholder = filterKind === 'duration'
+  const isRange = draftOperator === 'between';
+  const placeholder = isRange
+    ? (filterKind === 'date' ? '2024-01-01..2024-02-01' : filterKind === 'duration' ? '5:00..15:00' : 'from..to')
+    : filterKind === 'duration'
     ? 'Type 00:00 or 00:00:00'
     : filterKind === 'date'
       ? 'YYYY-MM-DD'
@@ -103,7 +110,7 @@ export function GenericValueFilter(props: CustomFilterProps<any, any, GenericFil
         ? 'Type a number'
         : 'Type to filter';
 
-  const inputType = filterKind === 'date' ? 'date' : 'text';
+  const inputType = filterKind === 'date' && !isRange ? 'date' : 'text';
 
   return (
     <div className="flex min-w-[250px] flex-col gap-3 overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] p-3 shadow-xl">
@@ -183,8 +190,8 @@ export function BooleanMapFilter(props: CustomFilterProps<any, any, BooleanMapFi
   const doesFilterPass = useCallback(() => true, []);
   useGridFilter({ doesFilterPass });
 
-  const keys = schema?.keys || [];
-  const labels = schema?.labels || {};
+  const keys = schema?.keys || NO_KEYS;
+  const labels = schema?.labels || NO_LABELS;
   const quickKeys = useMemo(() => {
     if (schema?.quickKeys?.length) return schema.quickKeys;
     return keys.slice(0, 8);
@@ -326,10 +333,20 @@ export function TagFilter(props: CustomFilterProps<any, any, TagFilterModel>) {
     setDraftMatchMode(props.model?.matchMode ?? 'any');
   }, [props.model]);
 
+  const getValues = (props.colDef.filterParams as any)?.getValues as (() => string[]) | undefined;
+  const [lazyValues, setLazyValues] = useState<string[] | null>(() => (getValues ? getValues() : null));
+
   const doesFilterPass = useCallback(() => true, []);
-  useGridFilter({ doesFilterPass });
+  // Values are computed on demand; refresh them every time the popup opens so they match the grid.
+  const afterGuiAttached = useCallback(() => {
+    if (getValues) setLazyValues(getValues());
+  }, [getValues]);
+  useGridFilter({ doesFilterPass, afterGuiAttached });
 
   const optionItems = useMemo(() => {
+    if (lazyValues) {
+      return lazyValues.map((value) => ({ value: String(value), count: 0 })).filter((item) => item.value);
+    }
     const rawOptionItems = (props.colDef.filterParams as any)?.optionItems;
     if (Array.isArray(rawOptionItems) && rawOptionItems.length) {
       return rawOptionItems
@@ -343,7 +360,7 @@ export function TagFilter(props: CustomFilterProps<any, any, TagFilterModel>) {
     return Array.isArray(options)
       ? options.map((value: any) => ({ value: String(value), count: 0 })).filter((item: { value: string; count: number }) => item.value)
       : [];
-  }, [props.colDef.filterParams]);
+  }, [lazyValues, props.colDef.filterParams]);
 
   const uniqueValues = useMemo(() => optionItems.map((item: { value: string; count: number }) => item.value), [optionItems]);
 

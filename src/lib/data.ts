@@ -5,8 +5,6 @@ import {
   ChannelMetadataSnapshot,
   ChannelMetadataRow,
   ColumnSchema,
-  ConflictStrategy,
-  DashboardThumbnailCacheIndex,
   DuplicateGroup,
   ExcludedVideoMeta,
   GeneratedMetadataState,
@@ -24,7 +22,6 @@ import {
   RowLineageState,
   ResearchLogCommentSectionId,
   SavedViewDashboardSnapshot,
-  RowConflictChoice,
   SourceRegistryState,
   SourceVisibilityState,
   ThemeMode,
@@ -130,7 +127,21 @@ const YOUTUBE_DATA_TOOLS_VIDEOLIST_MAPPING: Record<string, string> = {
   caption: 'Has Captions',
   defaultLanguage: 'Default Language',
   defaultLAudioLanguage: 'Default Audio Language',
+  defaultAudioLanguage: 'Default Audio Language',
   thumbnail_maxres: 'Thumbnail URL',
+  videoUrl: 'Video URL',
+  isShort: 'Is Short',
+  liveBroadcastContent: 'Live Broadcast',
+  regionRestrictionAllowed: 'Allowed Regions',
+  regionRestrictionBlocked: 'Blocked Regions',
+  madeForKids: 'Made For Kids',
+  // Channel metadata that YouTube Data Tools can add to each video row.
+  channel_publishedAt: 'Channel Created',
+  channel_daysActive: 'Channel Days Active',
+  channel_country: 'Channel Country',
+  channel_viewCount: 'Channel Views',
+  channel_subscriberCount: 'Channel Subscribers',
+  channel_videoCount: 'Channel Videos',
   licensedContent: 'Licensed Content',
   hasPaidProductPlacement: 'Paid Product Placement',
   locationDescription: 'Location Description',
@@ -167,7 +178,17 @@ const SHARED_SEMANTIC_HINTS: Record<string, ColumnSchema['semantic_type']> = {
   country: 'country',
   defaultLanguage: 'language',
   defaultLAudioLanguage: 'language',
+  defaultAudioLanguage: 'language',
   caption: 'boolean',
+  isShort: 'boolean',
+  madeForKids: 'boolean',
+  videoUrl: 'url',
+  channel_publishedAt: 'date-time',
+  channel_daysActive: 'count',
+  channel_country: 'country',
+  channel_viewCount: 'count',
+  channel_subscriberCount: 'count',
+  channel_videoCount: 'count',
   licensedContent: 'boolean',
   hasPaidProductPlacement: 'boolean',
   definition: 'short-text',
@@ -194,6 +215,11 @@ const SHARED_WIDTH_HINTS: Record<string, NonNullable<ColumnSchema['width_hint']>
   hasPaidProductPlacement: 'small',
   defaultLanguage: 'small',
   defaultLAudioLanguage: 'small',
+  defaultAudioLanguage: 'small',
+  isShort: 'small',
+  madeForKids: 'small',
+  channel_country: 'small',
+  channel_daysActive: 'small',
   latitude: 'small',
   longitude: 'small',
   publishedAt: 'medium',
@@ -935,12 +961,6 @@ function resolveComments(row: any): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function resolveThumbnailUrl(row: any): string | null {
-  const value = row?.thumbnailUrl ?? row?.thumbnail ?? row?.thumbnail_default ?? row?.thumbnail_medium ?? row?.thumbnail_high ?? row?.thumbnail_maxres;
-  if (value === null || value === undefined || value === '') return null;
-  const text = String(value).trim();
-  return text || null;
-}
 
 function parseTimestampMs(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
@@ -959,6 +979,28 @@ function parseTimestampMs(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Channel fields that YouTube Data Tools can add to every video row (channel_subscriberCount, …),
+ * under the names the channel table uses. Snake- and camel-case spellings are both accepted.
+ */
+const VIDEO_ROW_CHANNEL_FIELDS: Array<{ target: string; sources: string[] }> = [
+  { target: 'channel_created_at', sources: ['channel_publishedAt', 'channel_published_at', 'channelPublishedAt'] },
+  { target: 'channel_days_active', sources: ['channel_daysActive', 'channel_days_active', 'channelDaysActive'] },
+  { target: 'channel_country', sources: ['channel_country', 'channelCountry'] },
+  { target: 'channel_total_views', sources: ['channel_viewCount', 'channel_view_count', 'channelViewCount'] },
+  { target: 'channel_subscriber_count', sources: ['channel_subscriberCount', 'channel_subscriber_count', 'channelSubscriberCount'] },
+  { target: 'channel_video_count', sources: ['channel_videoCount', 'channel_video_count', 'channelVideoCount'] },
+];
+
+export function channelFieldsFromVideoRow(row: any): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  VIDEO_ROW_CHANNEL_FIELDS.forEach(({ target, sources }) => {
+    const source = sources.find((name) => !valueIsEmpty(row?.[name]));
+    if (source) fields[target] = row[source];
+  });
+  return fields;
+}
+
 export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannelMetadataState | null): ChannelMetadataRow[] {
   type ChannelAccumulator = {
     channel_key: string;
@@ -972,6 +1014,7 @@ export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannel
     commentsValuePresent: boolean;
     earliest_publish_ms: number | null;
     latest_publish_ms: number | null;
+    channel_fields: Record<string, unknown>;
   };
 
   const byChannel = new Map<string, ChannelAccumulator>();
@@ -997,8 +1040,13 @@ export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannel
       commentsValuePresent: false,
       earliest_publish_ms: null,
       latest_publish_ms: null,
+      channel_fields: {},
     };
 
+    // Keep the first value seen for each channel field (they are the same on every video of a channel).
+    Object.entries(channelFieldsFromVideoRow(row)).forEach(([field, value]) => {
+      if (existing.channel_fields[field] === undefined) existing.channel_fields[field] = value;
+    });
     existing.video_count_in_dataset += 1;
     existing.total_views_in_dataset += views;
     if (likes !== null) {
@@ -1033,6 +1081,7 @@ export function buildChannelMetadataRows(rows: any[], imported?: ImportedChannel
       total_comments_in_dataset: channel.commentsValuePresent ? channel.total_comments_in_dataset : null,
       earliest_publish_date: channel.earliest_publish_ms ? new Date(channel.earliest_publish_ms).toISOString() : null,
       latest_publish_date: channel.latest_publish_ms ? new Date(channel.latest_publish_ms).toISOString() : null,
+      ...channel.channel_fields,
     }))
     .sort((a, b) => {
       if (b.video_count_in_dataset !== a.video_count_in_dataset) return b.video_count_in_dataset - a.video_count_in_dataset;
@@ -1143,7 +1192,8 @@ export function buildDisplayRows(baseRows: any[], userTagsByVideoId: Record<stri
 }
 
 export function convertRowsToCsv(rows: any[], columns: string[]): string {
-  const header = columns.join(',');
+  // Header names are quoted like values, so names containing commas or quotes stay one column.
+  const header = columns.map((column) => `"${String(column).replace(/"/g, '""')}"`).join(',');
   const body = rows.map((row) =>
     columns
       .map((column) => {
@@ -1425,78 +1475,6 @@ export function cleanupAutoSeededResearchDiary(notes: string) {
 }
 
 
-function sectionBody(value: string | undefined | null) {
-  const trimmed = (value || '').trim();
-  return trimmed || 'No entries recorded';
-}
-
-export function buildResearchLogMarkdown(args: {
-  projectName: string;
-  overview: string;
-  diary: string;
-  corpusProcessing: string;
-  views: string;
-  watchHistory: string;
-  researchActions: string;
-  notesAppendix: string;
-  dashboard: string;
-  includeNotesAppendix: boolean;
-  includeDashboardSection: boolean;
-  dashboardStale: boolean;
-  generatedAt?: string;
-}) {
-  const notesBody = args.includeNotesAppendix ? sectionBody(args.notesAppendix) : 'Not included in this export.';
-  const dashboardBase = args.includeDashboardSection ? sectionBody(args.dashboard) : 'Not included in this export.';
-  const dashboardBody = args.dashboardStale && args.includeDashboardSection
-    ? `${dashboardBase}\n\n> Snapshot status: one or more dashboard snapshots are stale. Recalculate snapshots in-app to refresh this section.`
-    : dashboardBase;
-  const generatedAt = args.generatedAt || new Date().toISOString();
-
-  return [
-    `# Research Log`,
-    '',
-    `Project: ${args.projectName || 'Untitled project'}`,
-    '',
-    `## 1. Project Overview`,
-    '',
-    sectionBody(args.overview),
-    '',
-    `## 2. Research Diary`,
-    '',
-    sectionBody(args.diary),
-    '',
-    `## 3. Corpus & Processing`,
-    '',
-    sectionBody(args.corpusProcessing),
-    '',
-    `## 4. Views`,
-    '',
-    sectionBody(args.views),
-    '',
-    `## 5. Watch History`,
-    '',
-    sectionBody(args.watchHistory),
-    '',
-    `## 6. Research Actions`,
-    '',
-    sectionBody(args.researchActions),
-    '',
-    `## 7. Notes Appendix`,
-    '',
-    notesBody,
-    '',
-    `## 8. Dashboard`,
-    '',
-    dashboardBody,
-    '',
-    `## 9. Export Metadata`,
-    '',
-    `Generated at: ${generatedAt}`,
-    `Source: Playlist Surfer Research Log`,
-    '',
-  ].join('\n');
-}
-
 export function detectSpecialMappings(schema: ColumnSchema[]) {
   return {
     transcriptColumn: schema.find((column) => normalizeColumnName(column.column_name) === 'transcript')?.column_name,
@@ -1733,6 +1711,9 @@ export function applyMerge(args: {
 
   if (args.mergeOptions.mergeMode !== 'add-only') {
     incomingByKey.forEach((incomingRow, key) => {
+      // Rows without a join key never match: they are handled as unmatched below (as in the
+      // preview). Matching them here as well duplicated them in the result.
+      if (valueIsEmpty(key)) return;
       const existingRow = existingByKey.get(key);
       const resultIndex = resultIndexByKey.get(key);
       if (!existingRow || resultIndex === undefined) return;
@@ -1840,6 +1821,7 @@ export function createProjectManifest(args: {
   channelVisibleColumns?: string[];
   videoColumnWidths?: Record<string, number>;
   channelColumnWidths?: Record<string, number>;
+  vernacularExclusions?: string[];
   savedViews: ProjectArchiveManifest['savedViews'];
   activeViewId: string | null;
   annotations: Record<string, Annotation>;
@@ -1861,7 +1843,6 @@ export function createProjectManifest(args: {
   savedViewsVersion?: number;
   channelMetadataSnapshot?: ChannelMetadataSnapshot | null;
   importedChannelMetadata?: ImportedChannelMetadataState | null;
-  thumbnailCacheIndex?: DashboardThumbnailCacheIndex;
   viewScope?: ViewScope;
   sourceRegistry?: SourceRegistryState;
   sourceVisibility?: SourceVisibilityState;
@@ -1882,6 +1863,7 @@ export function createProjectManifest(args: {
     channelVisibleColumns: args.channelVisibleColumns || [],
     videoColumnWidths: args.videoColumnWidths || {},
     channelColumnWidths: args.channelColumnWidths || {},
+    vernacularExclusions: args.vernacularExclusions || [],
     savedViews: args.savedViews,
     activeViewId: args.activeViewId,
     annotations: args.annotations,
@@ -1906,7 +1888,6 @@ export function createProjectManifest(args: {
     dashboardSnapshots: args.dashboardSnapshots,
     savedViewDashboardSnapshots: args.savedViewDashboardSnapshots || {},
     savedViewsVersion: args.savedViewsVersion ?? 0,
-    thumbnailCacheIndex: args.thumbnailCacheIndex,
     channelMetadataSnapshot: args.channelMetadataSnapshot ?? null,
     importedChannelMetadata: args.importedChannelMetadata ?? null,
     viewScope: args.viewScope ?? 'videos',

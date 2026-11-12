@@ -7,6 +7,7 @@ import {
   CellContextMenuEvent,
   FilterChangedEvent,
   GridApi,
+  IRowNode,
   SortChangedEvent,
   ColumnResizedEvent,
   themeQuartz,
@@ -14,7 +15,7 @@ import {
 import { Check, X } from 'lucide-react';
 import {
   ColumnSchema,
-  DashboardThumbnailSortRule,
+  GridSortRule,
   InclusionView,
   SavedView,
   ViewScope,
@@ -22,8 +23,13 @@ import {
 import { BooleanMapFilter, GenericValueFilter, TagFilter, parseListString } from './CustomFilters';
 import { BooleanMapSchema, ExplorerFilterModel, parseBooleanMapValue } from '../lib/filterCoordinator';
 import { formatDateDisplay, formatDurationDisplay, getColumnDisplayName, getColumnHeaderTooltip, getDefaultGridColumnSizing, isDateLikeColumn, isDurationColumn, resolveVideoId, TRANSCRIPT_COLUMN } from '../lib/data';
-import { extractSortRulesFromColumnState } from '../lib/dashboardThumbnails';
+import { extractSortRulesFromColumnState } from '../lib/videoThumbnails';
 import { ScopeSelectionState, ScopeSelectionUpdate } from '../lib/selectionState';
+import { isDeleteKey } from '../lib/keyboard';
+import { useStableValue } from '../hooks/useStableValue';
+import { ExplorerNoRowsState } from './explorer/ExplorerNoRowsState';
+
+const EMPTY_BOOLEAN_MAP_SCHEMAS: Record<string, BooleanMapSchema> = {};
 
 interface MetadataGridProps {
   rows: any[];
@@ -34,17 +40,21 @@ interface MetadataGridProps {
   activeView?: SavedView;
   filterModel: ExplorerFilterModel;
   listLikeColumns: Set<string>;
-  tagValueIndexByColumn: Record<string, string[]>;
+  /** Distinct values for a tag column's filter, computed when the filter opens. */
+  getTagValues: (column: string) => string[];
   booleanMapSchemas?: Record<string, BooleanMapSchema>;
   onGridReady: (api: GridApi) => void;
   onFilterModelChange?: (filterModel: ExplorerFilterModel) => void;
-  onSortModelChange?: (sortRules: DashboardThumbnailSortRule[]) => void;
+  onSortModelChange?: (sortRules: GridSortRule[]) => void;
   visibleColumns: string[];
   onFileDrop?: (file: File) => void;
   inclusionView: InclusionView;
-  onMoveSelection?: () => void;
-  onExcludeSelection?: () => void;
+  /** Receives the grid's own selected keys, which can be newer than the last render's props. */
+  onMoveSelection?: (keys: string[]) => void;
+  onExcludeSelection?: (keys: string[]) => void;
   onMoveVideos?: (videoIds: string[]) => void;
+  /** A video row without a recognisable video ID was clicked; it can't be selected or excluded. */
+  onUnkeyedRowInteraction?: () => void;
   viewScope?: ViewScope;
   onVideoChannelClick?: (args: { channelName: string; row: any }) => void;
   onChannelNavigateToVideos?: (channelRow: any) => void;
@@ -77,9 +87,9 @@ export default function MetadataGrid({
   isLoading,
   activeView,
   filterModel,
-  listLikeColumns,
-  tagValueIndexByColumn,
-  booleanMapSchemas = {},
+  listLikeColumns: listLikeColumnsProp,
+  getTagValues,
+  booleanMapSchemas: booleanMapSchemasProp = EMPTY_BOOLEAN_MAP_SCHEMAS,
   onGridReady,
   onFilterModelChange,
   onSortModelChange,
@@ -89,6 +99,7 @@ export default function MetadataGrid({
   onMoveSelection,
   onExcludeSelection,
   onMoveVideos,
+  onUnkeyedRowInteraction,
   viewScope = 'videos',
   onVideoChannelClick,
   onChannelNavigateToVideos,
@@ -100,7 +111,10 @@ export default function MetadataGrid({
   onColumnWidthsChange,
 }: MetadataGridProps) {
   const isChannelScope = viewScope === 'channels';
-  const selectedRowCount = selection.selectedKeys.length;
+  // These are re-derived from the rows on every include/exclude; keep their identity while the
+  // content is unchanged so the column definitions below are not rebuilt.
+  const listLikeColumns = useStableValue(listLikeColumnsProp);
+  const booleanMapSchemas = useStableValue(booleanMapSchemasProp);
   const gridApiRef = useRef<GridApi | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const selectionRef = useRef<ScopeSelectionState>(selection);
@@ -115,16 +129,22 @@ export default function MetadataGrid({
   const contextActionLabel = inclusionView === 'included' ? 'Move selected videos to Excluded' : 'Restore selected videos to Included';
   const resolveChannelKey = useCallback((row: any) => String(row?.channel_key || row?.channel_id || row?.channel_name || '').trim(), []);
   const showNoRowsRecovery = schema.length > 0 && !isLoading && rows.length === 0;
+  // Samples only feed default column widths, so take them once per schema (and when rows first arrive)
+  // instead of on every row change.
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const hasRows = rows.length > 0;
   const sampleValuesByColumn = useMemo(() => {
     const next: Record<string, any[]> = {};
-    const sampleRows = rows.slice(0, Math.min(rows.length, 60));
+    const currentRows = rowsRef.current;
+    const sampleRows = hasRows ? currentRows.slice(0, Math.min(currentRows.length, 60)) : [];
     schema.forEach((column) => {
       next[column.column_name] = sampleRows.map((row) => row?.[column.column_name]).filter((value) => value !== undefined).slice(0, 24);
     });
     return next;
-  }, [rows, schema]);
+  }, [hasRows, schema]);
 
-  const channelNameOptionItems = useMemo(() => {
+  const channelNameOptionItemsRaw = useMemo(() => {
     if (!isChannelScope) return [];
     const counts = new Map<string, number>();
     rows.forEach((row) => {
@@ -136,6 +156,13 @@ export default function MetadataGrid({
       .map(([value, count]) => ({ value, count }))
       .sort((a, b) => a.value.localeCompare(b.value));
   }, [isChannelScope, rows]);
+  // Stable while unchanged, so the column definitions only rebuild when the filter options do.
+  const channelNameOptionItems = useStableValue(channelNameOptionItemsRaw);
+  // Read at click/creation time: the latest handler, and widths only matter for new columns.
+  const onChannelNavigateToVideosRef = useRef(onChannelNavigateToVideos);
+  onChannelNavigateToVideosRef.current = onChannelNavigateToVideos;
+  const columnWidthsRef = useRef(columnWidths);
+  columnWidthsRef.current = columnWidths;
 
   const applySelection = useCallback((update: ScopeSelectionUpdate) => {
     const selectedKeys = Array.from(new Set((update.selectedKeys || []).filter(Boolean)));
@@ -207,10 +234,10 @@ export default function MetadataGrid({
                   values: channelNameOptionItems.map((item) => item.value),
                   optionItems: channelNameOptionItems,
                 }
-              : { values: tagValueIndexByColumn[col.column_name] ?? [] })
+              : { getValues: () => getTagValues(col.column_name) })
             : { filterKind }),
         resizable: true,
-        initialWidth: columnWidths[col.column_name] || sizing.initialWidth,
+        initialWidth: columnWidthsRef.current[col.column_name] || sizing.initialWidth,
         minWidth: isTranscript ? Math.max(180, sizing.minWidth) : sizing.minWidth,
         maxWidth: sizing.maxWidth,
         tooltipField: col.column_name,
@@ -229,7 +256,7 @@ export default function MetadataGrid({
                     className="channel-link-button"
                     onClick={(event) => {
                       event.stopPropagation();
-                      onChannelNavigateToVideos?.(params.data);
+                      onChannelNavigateToVideosRef.current?.(params.data);
                     }}
                     title="Show videos for this channel"
                   >
@@ -304,16 +331,22 @@ export default function MetadataGrid({
       if (indexB !== -1) return 1;
       return nameA.localeCompare(nameB);
     });
-  }, [booleanMapSchemas, isChannelScope, listLikeColumns, sampleValuesByColumn, schema, tagValueIndexByColumn, visibleColumns]);
+  }, [booleanMapSchemas, channelNameOptionItems, getTagValues, isChannelScope, listLikeColumns, sampleValuesByColumn, schema, visibleColumns]);
 
   const syncSelectedRows = useCallback((rowIds: string[]) => {
     const api = gridApiRef.current;
     if (!api) return;
-    const uniqueIds = Array.from(new Set(rowIds.filter(Boolean)));
-    api.deselectAll();
-    uniqueIds.forEach((rowId) => {
-      api.getRowNode(rowId)?.setSelected(true, false);
+    // Only touch nodes whose state changes, in two batched calls: selecting nodes one by one fires an
+    // event per node, which locked up the tab on select-all with 100k rows.
+    const wanted = new Set(rowIds.filter(Boolean));
+    const toDeselect = api.getSelectedNodes().filter((node) => !node.id || !wanted.has(node.id));
+    const toSelect: IRowNode[] = [];
+    wanted.forEach((rowId) => {
+      const node = api.getRowNode(rowId);
+      if (node && !node.isSelected()) toSelect.push(node);
     });
+    if (toDeselect.length) api.setNodesSelected({ nodes: toDeselect, newValue: false });
+    if (toSelect.length) api.setNodesSelected({ nodes: toSelect, newValue: true });
   }, []);
 
   const clearGridSelection = useCallback(() => {
@@ -321,6 +354,24 @@ export default function MetadataGrid({
     if (!api) return;
     api.deselectAll();
   }, []);
+
+  // Rows without a usable key still need a unique, stable grid id: AG Grid mishandles duplicate ids
+  // (it warned about '' for every row lacking a video ID). Row objects are stable, so key them.
+  const unkeyedRowIdsRef = useRef(new WeakMap<object, string>());
+  const unkeyedRowCounterRef = useRef(0);
+  const getRowId = useCallback((params: { data: any }) => {
+    const key = isChannelScope
+      ? String(params.data?.channel_key || params.data?.channel_id || params.data?.channel_name || '')
+      : resolveVideoId(params.data) || '';
+    if (key || !params.data || typeof params.data !== 'object') return key;
+    let id = unkeyedRowIdsRef.current.get(params.data);
+    if (!id) {
+      unkeyedRowCounterRef.current += 1;
+      id = `__unkeyed:${unkeyedRowCounterRef.current}`;
+      unkeyedRowIdsRef.current.set(params.data, id);
+    }
+    return id;
+  }, [isChannelScope]);
 
   const resolveRowKey = useCallback((row: any) => {
     if (isChannelScope) return resolveChannelKey(row);
@@ -448,7 +499,10 @@ export default function MetadataGrid({
     const api = gridApiRef.current;
     if (!api) return;
     const rowKey = resolveRowKey(event.data);
-    if (!rowKey) return;
+    if (!rowKey) {
+      if (!isChannelScope) onUnkeyedRowInteraction?.();
+      return;
+    }
     const nativeEvent = event.event as MouseEvent | undefined;
     const rowIndex = typeof event.node?.rowIndex === 'number' ? event.node.rowIndex : null;
     const isShift = Boolean(nativeEvent?.shiftKey);
@@ -496,7 +550,7 @@ export default function MetadataGrid({
       focusKey: rowKey,
       detailKey: rowKey,
     });
-  }, [applySelection, clearGridSelection, filterModel, getRangeSelectionKeys, onFilterModelChange, onVideoChannelClick, resolveRowKey, syncGridFilterModel, syncSelectedRows]);
+  }, [applySelection, clearGridSelection, filterModel, getRangeSelectionKeys, isChannelScope, onFilterModelChange, onUnkeyedRowInteraction, onVideoChannelClick, resolveRowKey, syncGridFilterModel, syncSelectedRows]);
 
   const handleGridKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || shouldIgnoreGridShortcut(event.target) || !gridApiRef.current) return;
@@ -504,9 +558,11 @@ export default function MetadataGrid({
     const api = gridApiRef.current;
     const current = selectionRef.current;
 
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Delete' && selectedRowCount > 0) {
+    const currentKeys = current.selectedKeys;
+
+    if ((event.ctrlKey || event.metaKey) && isDeleteKey(event.key) && currentKeys.length > 0) {
       event.preventDefault();
-      onExcludeSelection?.();
+      onExcludeSelection?.(currentKeys);
       return;
     }
 
@@ -545,10 +601,10 @@ export default function MetadataGrid({
       return;
     }
 
-    if (event.key === 'Delete' && selectedRowCount > 0) {
+    if (isDeleteKey(event.key) && currentKeys.length > 0) {
       event.preventDefault();
-      if (isChannelScope) onExcludeSelection?.();
-      else onMoveSelection?.();
+      if (isChannelScope) onExcludeSelection?.(currentKeys);
+      else onMoveSelection?.(currentKeys);
       return;
     }
 
@@ -610,13 +666,16 @@ export default function MetadataGrid({
       detailKey: nextKey,
     });
     api.ensureIndexVisible(nextIndex, 'middle');
-  }, [applySelection, clearGridSelection, getDisplayedKeys, getRangeSelectionKeys, isChannelScope, onExcludeSelection, onMoveSelection, resolveRowKey, selectedRowCount, syncSelectedRows]);
+  }, [applySelection, clearGridSelection, getDisplayedKeys, getRangeSelectionKeys, isChannelScope, onExcludeSelection, onMoveSelection, resolveRowKey, syncSelectedRows]);
 
   const handleCellContextMenu = useCallback((event: CellContextMenuEvent) => {
     if (isChannelScope) return;
     rootRef.current?.focus();
     const videoId = resolveVideoId(event.data);
-    if (!videoId) return;
+    if (!videoId) {
+      onUnkeyedRowInteraction?.();
+      return;
+    }
 
     event.event?.preventDefault?.();
 
@@ -640,7 +699,7 @@ export default function MetadataGrid({
       y: nativeEvent?.clientY ?? 0,
       videoIds: nextVideoIds,
     });
-  }, [applySelection, isChannelScope, syncSelectedRows]);
+  }, [applySelection, isChannelScope, onUnkeyedRowInteraction, syncSelectedRows]);
 
   const handleDrop = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
@@ -726,12 +785,7 @@ export default function MetadataGrid({
             theme={themeQuartz}
             rowData={rows}
             columnDefs={columnDefs}
-            getRowId={(params) => {
-              if (isChannelScope) {
-                return String(params.data?.channel_key || params.data?.channel_id || params.data?.channel_name || '');
-              }
-              return resolveVideoId(params.data) || String(params.data?.id || params.data?.video_id || params.data?.Video_ID || '');
-            }}
+            getRowId={getRowId}
             onGridReady={onGridReadyHandler}
             onFilterChanged={onFilterChangedHandler}
             onSortChanged={onSortChangedHandler}
@@ -753,48 +807,18 @@ export default function MetadataGrid({
             tooltipShowDelay={1000}
             rowBuffer={100}
             valueCache={true}
-            alwaysShowVerticalScrollbar={true}
-            alwaysShowHorizontalScrollbar={true}
+            alwaysShowVerticalScroll={true}
+            alwaysShowHorizontalScroll={true}
             suppressColumnVirtualisation={false}
           />
           {showNoRowsRecovery ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-[color-mix(in_oklab,var(--bg-primary)_82%,transparent)] p-6">
-              <div className="pointer-events-auto w-full max-w-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-6 text-center shadow-sm">
-                <p className="text-lg font-semibold text-[var(--text-main)]">No rows to show</p>
-                <p className="mt-2 text-sm leading-6 text-[var(--text-muted)]">
-                  Data is loaded, but current view filters/scope settings hide all rows.
-                </p>
-                <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-                  {onClearFilters ? (
-                    <button
-                      type="button"
-                      onClick={onClearFilters}
-                      className="border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[color-mix(in_oklab,var(--accent)_14%,transparent)]"
-                    >
-                      {isChannelScope ? 'Reset channel filters' : 'Clear filters'}
-                    </button>
-                  ) : null}
-                  {!isChannelScope && hasHiddenSources && onShowAllSources ? (
-                    <button
-                      type="button"
-                      onClick={onShowAllSources}
-                      className="border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
-                    >
-                      Show all sources
-                    </button>
-                  ) : null}
-                  {!isChannelScope && onToggleInclusionView ? (
-                    <button
-                      type="button"
-                      onClick={onToggleInclusionView}
-                      className="border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-1.5 text-xs font-medium text-[var(--text-main)] transition-colors hover:bg-[var(--grid-hover)]"
-                    >
-                      Switch to {inclusionView === 'included' ? 'Excluded' : 'Included'}
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            </div>
+            <ExplorerNoRowsState
+              isChannelScope={isChannelScope}
+              onClearFilters={onClearFilters}
+              onShowAllSources={!isChannelScope && hasHiddenSources ? onShowAllSources : undefined}
+              onToggleInclusionView={!isChannelScope ? onToggleInclusionView : undefined}
+              inclusionView={inclusionView}
+            />
           ) : null}
         </>
       )}
