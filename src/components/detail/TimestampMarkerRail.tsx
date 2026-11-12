@@ -4,10 +4,13 @@ export function TimestampMarkerRail({
   markers,
   durationSeconds,
   onDeleteMarker,
+  onSeekMarker,
 }: {
   markers: Array<{ id: string; time_seconds: number; time_label: string; preview: string }>;
   durationSeconds: number;
   onDeleteMarker: (markerId: string) => void;
+  /** Jumps the player to the marker's time. */
+  onSeekMarker?: (seconds: number) => void;
 }) {
   const safeDuration = Math.max(1, Math.floor(durationSeconds || 0));
   return (
@@ -25,10 +28,13 @@ export function TimestampMarkerRail({
               >
                 <button
                   type="button"
-                  onClick={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onSeekMarker?.(marker.time_seconds);
+                  }}
                   className="h-3 w-3 rounded-full border border-[var(--accent)] bg-[var(--accent)] shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                   aria-label={`Timestamp ${marker.time_label}`}
-                  title={`Timestamp ${marker.time_label}`}
+                  title={`Play from ${marker.time_label}`}
                 />
                 <div className="absolute bottom-[calc(100%+8px)] left-1/2 z-20 hidden w-56 -translate-x-1/2 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] p-2 shadow-xl group-hover:block group-focus-within:block">
                   <div className="text-[11px] font-semibold text-[var(--text-main)]">{marker.time_label}</div>

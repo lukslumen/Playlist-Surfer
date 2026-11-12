@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { TimestampText } from './TimestampText';
 
 type TranscriptSelection = {
   text: string;
@@ -9,9 +10,12 @@ type TranscriptSelection = {
   left: number;
 };
 
-function renderQueryHighlights(text: string, query: string) {
+type SeekOptions = { onSeek?: (seconds: number) => void; maxSeconds?: number | null };
+
+function renderQueryHighlights(text: string, query: string, seek: SeekOptions = {}) {
+  const plain = (part: string) => <TimestampText text={part} onSeek={seek.onSeek} maxSeconds={seek.maxSeconds} />;
   const normalizedQuery = query.trim();
-  if (!normalizedQuery) return text;
+  if (!normalizedQuery) return plain(text);
 
   const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(`(${escapedQuery})`, 'ig');
@@ -20,7 +24,7 @@ function renderQueryHighlights(text: string, query: string) {
   return parts.map((part, index) => (
     index % 2 === 1
       ? <mark key={`${part}-${index}`} className="bg-amber-300/70 px-0.5 text-stone-900">{part}</mark>
-      : <React.Fragment key={`${part}-${index}`}>{part}</React.Fragment>
+      : <React.Fragment key={`${part}-${index}`}>{plain(part)}</React.Fragment>
   ));
 }
 
@@ -47,11 +51,16 @@ export function TranscriptViewer({
   query,
   activeRange,
   onAddQuote,
+  onSeek,
+  maxSeconds,
 }: {
   transcript: string;
   query: string;
   activeRange: { startIndex: number; endIndex: number } | null;
   onAddQuote: (selection: { text: string; startIndex: number; endIndex: number }) => void;
+  /** Timestamps in the transcript ("12:34") jump the player there. */
+  onSeek?: (seconds: number) => void;
+  maxSeconds?: number | null;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<HTMLSpanElement | null>(null);
@@ -102,8 +111,9 @@ export function TranscriptViewer({
   };
 
   const content = useMemo(() => {
+    const seek = { onSeek, maxSeconds };
     if (!activeRange || activeRange.endIndex <= activeRange.startIndex) {
-      return renderQueryHighlights(transcript, query);
+      return transcript ? renderQueryHighlights(transcript, query, seek) : null;
     }
 
     const before = transcript.slice(0, activeRange.startIndex);
@@ -112,14 +122,14 @@ export function TranscriptViewer({
 
     return (
       <>
-        {renderQueryHighlights(before, query)}
+        {renderQueryHighlights(before, query, seek)}
         <mark ref={activeRef} className="bg-[var(--accent)]/25 px-0.5 text-[var(--text-main)] ring-1 ring-[var(--accent)]">
           {selected}
         </mark>
-        {renderQueryHighlights(after, query)}
+        {renderQueryHighlights(after, query, seek)}
       </>
     );
-  }, [activeRange, query, transcript]);
+  }, [activeRange, maxSeconds, onSeek, query, transcript]);
 
   return (
     <div className="relative">

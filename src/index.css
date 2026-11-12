@@ -1762,3 +1762,27 @@ button:focus-visible {
   opacity: 0.4;
   cursor: default;
 }
+
+/* Clickable timestamps in descriptions, transcripts and notes */
+.timestamp-link {
+  display: inline;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border: 0;
+  border-radius: 3px;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--accent) 40%, transparent);
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.timestamp-link:hover,
+.timestamp-link:focus-visible {
+  background: color-mix(in oklab, var(--accent) 12%, transparent);
+  text-decoration-color: var(--accent);
+  outline: none;
+}

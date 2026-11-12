@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Youtube, Tag, X, Search, Plus, Pencil, Save, Ban, Clock3, Trash2 } from 'lucide-react';
 import { Annotation, InclusionView, QuoteRef, TimestampRef } from '../types';
-import { BatchCopyExportMode, resolvePublishedAt, resolveTranscript, resolveVideoDescription, resolveVideoId, resolveVideoTags, resolveVideoTitle, resolveViews, sortQuoteRefs, TRANSCRIPT_COLUMN } from '../lib/data';
+import { BatchCopyExportMode, parseDurationToSeconds, resolvePublishedAt, resolveTranscript, resolveVideoDescription, resolveVideoId, resolveVideoTags, resolveVideoTitle, resolveViews, sortQuoteRefs, TRANSCRIPT_COLUMN } from '../lib/data';
 import { buildMarkerPreview, insertAtPlayhead, parseTimestampDocument, removeById } from '../lib/timestampNotes';
 import { appendQuotedText, timestampRefsEqual } from '../lib/detailNotes';
 import { shouldIgnorePlayerShortcut } from '../lib/youtubeApi';
 import { useYouTubePlayer } from './detail/useYouTubePlayer';
 import { InputRow } from './detail/InputRow';
 import { TimestampMarkerRail } from './detail/TimestampMarkerRail';
+import { TimestampText } from './detail/TimestampText';
 import { TranscriptViewer } from './detail/TranscriptViewer';
 import { NotesPreview } from './detail/NotesPreview';
 import { BatchSelectionPanel } from './detail/BatchSelectionPanel';
@@ -146,6 +147,16 @@ export default function DetailPanel({
     playerLoadError,
   } = useYouTubePlayer({ enabled: !hasMultiSelection, videoId, videoTitle, onWatchSession });
   const currentNotes = savedNotes || '';
+  // The player's duration once loaded; until then the row's, so clock times in descriptions aren't linked.
+  const videoLengthSeconds = playerDuration || parseDurationToSeconds(effectiveRow?.durationSec ?? effectiveRow?.duration) || null;
+  /** Jumps the embedded player to `seconds` and plays, e.g. from a timestamp in the description. */
+  const seekToSeconds = useCallback((seconds: number) => {
+    const player = playerRef.current;
+    if (!player?.seekTo) return;
+    player.seekTo(seconds, true);
+    player.playVideo?.();
+    playerShellRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [playerRef, playerShellRef]);
   const parsedTimestampDocument = useMemo(
     () => parseTimestampDocument(notesDraft, annotation?.timestampRefs || [], playerDuration),
     [annotation?.timestampRefs, notesDraft, playerDuration],
@@ -552,6 +563,7 @@ export default function DetailPanel({
             markers={timestampEntries}
             durationSeconds={markerDurationSeconds}
             onDeleteMarker={handleDeleteTimestamp}
+            onSeekMarker={seekToSeconds}
           />
         )}
       </div>
@@ -627,7 +639,9 @@ export default function DetailPanel({
                     ) : null}
                   </div>
                   <div ref={descriptionRef} className="min-h-[14rem] whitespace-pre-wrap rounded-[6px] border border-[var(--border-color)]/70 bg-[var(--bg-primary)] px-3 py-2 font-mono text-[13px] leading-5 text-[var(--text-muted)]">
-                    {description || <span className="text-[var(--text-muted)]">No video description was imported for this video.</span>}
+                    {description
+                      ? <TimestampText text={description} onSeek={seekToSeconds} maxSeconds={videoLengthSeconds} />
+                      : <span className="text-[var(--text-muted)]">No video description was imported for this video.</span>}
                   </div>
                 </div>
               </>
@@ -688,6 +702,8 @@ export default function DetailPanel({
                     query={transcriptSearch}
                     activeRange={activeRange}
                     onAddQuote={addQuoteFromSelection}
+                    onSeek={seekToSeconds}
+                    maxSeconds={videoLengthSeconds}
                   />
                 )}
               </div>
@@ -803,6 +819,8 @@ export default function DetailPanel({
                   <NotesPreview
                     quoteRefs={quoteRefs}
                     onQuoteClick={handleQuoteClick}
+                    timestamps={timestampEntries}
+                    onTimestampClick={seekToSeconds}
                   />
                 </div>
               </div>
