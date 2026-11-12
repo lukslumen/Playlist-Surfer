@@ -52,6 +52,7 @@ import { ExportDialog } from './components/dialogs/ExportDialog';
 import { ColumnVisibilitySelector } from './components/dialogs/ColumnVisibilitySelector';
 import { ImportDialog } from './components/dialogs/ImportDialog';
 import { ThumbnailGrid } from './components/explorer/ThumbnailGrid';
+import { ExplorerViewPill } from './components/explorer/ExplorerViewPill';
 import { ExplorerNoRowsState } from './components/explorer/ExplorerNoRowsState';
 import { KeyboardShortcutsDialog } from './components/dialogs/KeyboardShortcutsDialog';
 import { CommandPaletteDialog } from './components/dialogs/CommandPaletteDialog';
@@ -3722,8 +3723,6 @@ ${heading}
         excludedCount={excludedBaseRows.length}
         viewScope={viewScope}
         onViewScopeChange={handleViewScopeChange}
-        explorerLayout={explorerLayout}
-        onExplorerLayoutChange={setExplorerLayout}
         hasChannelMetadata={Boolean(channelRows.length > 0)}
         theme={state.theme}
         onToggleTheme={() => setState((previous) => ({ ...previous, theme: previous.theme === 'warm-light' ? 'dark' : 'warm-light' }))}
@@ -3743,7 +3742,15 @@ ${heading}
               {hasLoadedData && viewScope === 'channels' && !channelRows.length ? (
                 <ChannelMetadataEmptyState isGenerating={isGeneratingChannelMetadata} onGenerate={handleGenerateChannelMetadata} />
               ) : (
-                <div key={viewScope} className="h-full w-full">
+                <div key={viewScope} className="relative h-full w-full">
+                  {hasLoadedData && viewScope === 'videos' ? (
+                    <ExplorerViewPill
+                      layout={explorerLayout}
+                      onLayoutChange={setExplorerLayout}
+                      tileWidth={thumbnailTileWidth}
+                      onTileWidthChange={setThumbnailTileWidth}
+                    />
+                  ) : null}
                   {showThumbnailView ? (
                     <ThumbnailGrid
                       rows={thumbnailViewRows}

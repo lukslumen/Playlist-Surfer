@@ -139,7 +139,7 @@ Totals: 68 unit tests and 17 e2e tests.
     - Delete in the channel grid uses the grid's own selection (new e2e test).
 
 26. **Thumbnails moved from the dashboard into the explorer.**
-    - A Table/Thumbnails toggle next to the Videos/Channels switch (also Alt/Option + Shift + T) shows the table's own rows, filtered and sorted the same way, as a virtualized image grid.
+    - A Table/Thumbnails switch in the bottom-right corner of the explorer (also Alt/Option + Shift + T), which also holds the thumbnail zoom shows the table's own rows, filtered and sorted the same way, as a virtualized image grid.
     - The grid shares the table's selection: click, Shift/Cmd-click, arrows, Ctrl/Cmd + A, Delete/Backspace and undo all work. Titles and stats appear on hover.
     - The zoom buttons, Ctrl/Cmd +/− and pinch change the tile size. The size and the layout are remembered.
     - The table stays mounted behind the thumbnails, so its sort and column state survive switching.

@@ -1,12 +1,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
-import { Check, ImageOff, Minus, Plus } from 'lucide-react';
+import { Check, ImageOff } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { formatDateDisplay, formatDurationDisplay, resolveChannelName, resolvePublishedAt, resolveVideoId, resolveVideoTitle, resolveViews } from '../../lib/data';
 import { isDeleteKey } from '../../lib/keyboard';
 import type { ScopeSelectionState, ScopeSelectionUpdate } from '../../lib/selectionState';
 import {
   THUMBNAIL_TILE_GAP,
-  THUMBNAIL_TILE_WIDTHS,
   computeThumbnailGridLayout,
   moveThumbnailFocusIndex,
   resolveThumbnailUrlsForRow,
@@ -314,9 +313,6 @@ export function ThumbnailGrid({
     }
   }
 
-  const minWidth = THUMBNAIL_TILE_WIDTHS[0];
-  const maxWidth = THUMBNAIL_TILE_WIDTHS[THUMBNAIL_TILE_WIDTHS.length - 1];
-
   return (
     <div className="thumbnail-grid-shell relative h-full w-full">
       <div
@@ -337,26 +333,6 @@ export function ThumbnailGrid({
 
       {rows.length === 0 && !isLoading ? emptyState : null}
 
-      <div className="thumbnail-zoom-pill" role="group" aria-label="Thumbnail size">
-        <button
-          type="button"
-          onClick={() => zoom(-1)}
-          disabled={tileWidth <= minWidth}
-          title="Smaller thumbnails (Ctrl/Cmd -)"
-          aria-label="Smaller thumbnails"
-        >
-          <Minus size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={() => zoom(1)}
-          disabled={tileWidth >= maxWidth}
-          title="Larger thumbnails (Ctrl/Cmd +)"
-          aria-label="Larger thumbnails"
-        >
-          <Plus size={14} />
-        </button>
-      </div>
     </div>
   );
 }
