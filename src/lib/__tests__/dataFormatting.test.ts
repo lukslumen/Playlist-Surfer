@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { ColumnSchema } from '../../types';
 import {
-  buildResearchLogMarkdown,
   cleanupAutoSeededResearchDiary,
   createProjectManifest,
   deleteColumnFromProject,
@@ -196,33 +195,6 @@ describe('research diary helpers', () => {
     expect(cleanupAutoSeededResearchDiary('## October 24, 2026\n')).toBe('');
     expect(cleanupAutoSeededResearchDiary('## October 24, 2026\nwrote something')).toBe('## October 24, 2026\nwrote something');
     expect(cleanupAutoSeededResearchDiary('   ')).toBe('');
-  });
-});
-
-describe('buildResearchLogMarkdown', () => {
-  test('fills empty sections with placeholders and respects include flags', () => {
-    const markdown = buildResearchLogMarkdown({
-      projectName: '',
-      overview: 'Overview text',
-      diary: '',
-      corpusProcessing: '',
-      views: '',
-      watchHistory: '',
-      researchActions: '',
-      notesAppendix: 'secret',
-      dashboard: 'charts',
-      includeNotesAppendix: false,
-      includeDashboardSection: true,
-      dashboardStale: true,
-      generatedAt: '2026-10-24T00:00:00.000Z',
-    });
-    expect(markdown).toContain('Project: Untitled project');
-    expect(markdown).toContain('## 1. Project Overview\n\nOverview text');
-    expect(markdown).toContain('## 2. Research Diary\n\nNo entries recorded');
-    expect(markdown).toContain('## 7. Notes Appendix\n\nNot included in this export.');
-    expect(markdown).not.toContain('secret');
-    expect(markdown).toContain('charts\n\n> Snapshot status:');
-    expect(markdown).toContain('Generated at: 2026-10-24T00:00:00.000Z');
   });
 });
 

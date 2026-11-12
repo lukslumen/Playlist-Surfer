@@ -57,8 +57,8 @@ describe('planReplaceImport', () => {
       isFirstDataset: false,
       progress: noProgress,
     });
-    expect(plan.history[1]).toMatchObject({ type: 'special_mapping_updated' });
-    expect(plan.history[1].details).toContain('Transcript: transcript');
+    expect(plan.history).toHaveLength(1);
+    expect(plan.history[0].details).toContain('Fields used: Transcript: transcript');
   });
 });
 

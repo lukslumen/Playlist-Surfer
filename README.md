@@ -82,7 +82,7 @@ Enter Playlist Surfer, a lightweight browser application for inspecting CSV-base
 - Every dashboard panel has a method note (how it is computed, how to read it, what to watch out for) and exports to CSV, PNG and SVG
 - A thumbnail view of the explorer: the table's filtered and sorted rows as a zoomable image grid, sharing its selection, Delete/undo and keyboard navigation
 - Channel metadata aggregation, channel age timelines, and channel-level batch actions
-- Research log and project history tracking so analytic steps, comments, and exports remain auditable
+- A research log: a timeline of what was done to the data (undone steps left out) next to your own notes, a watch summary, and a Markdown export for the methods section
 - Project export/import as a zip archive for reproducibility, sharing, and later restoration
 
 ## Getting Started

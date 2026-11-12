@@ -2,13 +2,13 @@ import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo, useR
 import { flushSync } from 'react-dom';
 import { GridApi } from 'ag-grid-community';
 import { useDuckDB } from './hooks/useDuckDB';
-import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, ExplorerLayout, GridSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogCommentSectionId, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
+import { AppState, ChannelLinkingState, ColumnLineageState, SavedView, Annotation, IncludeExcludeAction, InclusionView, ExportOptions, ImportSubmission, SpecialMappings, DashboardScope, DashboardTemplateTab, ExplorerLayout, GridSortRule, DatasetDashboardSnapshot, ChannelMetadataSnapshot, ImportedChannelMetadataState, ResearchLogMarkdownOptions, SavedViewDashboardSnapshot, ViewScope, WatchHistoryEntry, SourceRegistryState, SourceVisibilityState, RowLineageState, GeneratedMetadataState, LinkingState, LinkingGeneratedRowMetadata, LongTaskProgress, SourceKind } from './types';
 import { EMPTY_EXPLORER_SELECTION, buildScopeSelectionFromKeys, clearScopeSelectionAction, getScopeSelection, pruneScopeSelectionAction, selectionReducer, setScopeSelectionAction, type ScopeSelectionUpdate } from './lib/selectionState';
 import TopBar from './components/TopBar';
 import MetadataGrid from './components/MetadataGrid';
 import DetailPanel from './components/DetailPanel';
 import ChannelSummaryPanel from './components/ChannelSummaryPanel';
-import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, buildResearchLogMarkdown, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, formatDateDisplay, resolveTagFilterColumn, resolveChannelId, resolveChannelName, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
+import { applyFriendlyColumnMappings, buildBatchCopyClipboardPayload, buildChannelMetadataRows, buildImportedChannelMetadataState, buildDisplayRows, buildDisplaySchema, collectVideoIds, convertRowsToCsv, createProjectManifest, deleteColumnFromProject, deriveSchemaFromRows, partitionRowsByInclusion, detectSpecialMappings, downloadBlob, cleanupAutoSeededResearchDiary, NOTES_COLUMN, resolveTagFilterColumn, resolveChannelId, resolveChannelName, resolveTranscript, resolveVideoTitle, resolveVideoId, sanitizeFileName, stripDeletedColumnsFromRows, stripDeletedColumnsFromSchema, buildGeneratedMetadataSchema, overlayGeneratedMetadataRows, TRANSCRIPT_COLUMN, USER_TAGS_COLUMN, VIDEO_DESCRIPTION_COLUMN, type BatchCopyExportMode } from './lib/data';
 import { createStoredZip, readStoredZip } from './lib/archive';
 import { buildTagValuesForColumn, buildUnifiedFilterState, detectBooleanMapColumns, detectListLikeColumns, ExplorerFilterModel } from './lib/filterCoordinator';
 import { extractUserTagsFromAnnotations, mergeAnnotationsWithUserTags, stripTagsFromAnnotations, userTagsReducer } from './lib/userTags';
@@ -16,6 +16,9 @@ import { buildDashboardTemplateSnapshot, inferIntentFromText, normalizeTemplateR
 import { aggregateChannelLinkingFromVideoRows } from './lib/linkingDashboard';
 import { loadLastProjectAutosaveSnapshot, shouldAttemptLastProjectRestore } from './lib/projectAutosave';
 import { normalizeThumbnailTileWidth, sortRowsLikeGrid } from './lib/videoThumbnails';
+import { coveredSeconds, mergeRanges } from './lib/watchCoverage';
+import { diaryToNotes, netTimeline } from './lib/researchLogTimeline';
+import { buildResearchLogExport } from './lib/researchLogExport';
 import { buildOverviewDrilldownFilter, overviewDrilldownColumns } from './lib/overviewDrilldown';
 import type { OverviewDrilldown } from './lib/dashboardTemplateTypes';
 import { cn } from './lib/utils';
@@ -24,9 +27,9 @@ import { normalizeVideoIds, pruneInclusionState } from './lib/inclusion';
 import { applySupportMappings, buildDefaultProjectSourceState, createEmptyChannelLinkingState, createEmptyColumnLineage, createEmptyGeneratedMetadata, createEmptyLinkingState, createEmptyRowLineage, createEmptySourceRegistry, createEmptySourceVisibility, ensureGeneratedColumnLineage, flattenGeneratedMetadataForOverlay, joinUnique, LINKING_FILTER_COLUMNS, reconcileSourceVisibility, resolveChannelRowKey, resolveRecoverableInclusionView, resolveRowLineageKey, withSourceRegistryCounts } from './lib/projectSourceState';
 import { CHANNEL_USER_TAGS_COLUMN, findDashboardCategoryColumn, findDashboardDurationColumn, findDashboardIntentColumn, findDashboardTopicColumn, findVideoChannelColumn, getDefaultChannelVisibleColumns, getDefaultVideoVisibleColumns } from './lib/columnDefaults';
 import { buildChannelMetadataCacheKey, buildDatasetFingerprint, buildExcludedMembershipFingerprint, buildSourceVisibilityFingerprint, buildVideoCorpusFingerprint } from './lib/fingerprints';
-import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, buildTagUsageSummary, extractAnnotationsFromRows, stripNotesFromAnnotations } from './lib/projectNotes';
+import { appendNotesBlock, buildLegacyNotesFromAnnotations, buildNoteArchiveFiles, extractAnnotationsFromRows, stripNotesFromAnnotations } from './lib/projectNotes';
 import { copyTextToClipboard, readFileBufferWithProgress, waitForNextPaint } from './lib/browser';
-import { describeFilterModelEntry, formatDurationLabel, parseDateLabel, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
+import { createHistoryId, describeFilterModelEntry, resolveEditViewFilterKind, summarizeDashboardSnapshot, summarizeFilterModel } from './lib/researchHistory';
 import type { AppNavigationEntry } from './lib/navigation';
 import type { HydrateProjectArgs } from './lib/projectHydration';
 import { LongTaskOverlay } from './components/LongTaskOverlay';
@@ -1767,6 +1770,7 @@ export default function App() {
     watchedSeconds: number;
     durationSeconds: number | null;
     qualifies: boolean;
+    ranges?: Array<[number, number]>;
   }) => {
     if (!session.videoId || session.watchedSeconds <= 0) return;
     setWatchHistoryByVideoId((current) => {
@@ -1780,6 +1784,7 @@ export default function App() {
         qualifyingSessionCount: (previous?.qualifyingSessionCount || 0) + (session.qualifies ? 1 : 0),
         playStartCount: (previous?.playStartCount || 0) + 1,
         durationSeconds: session.durationSeconds ?? previous?.durationSeconds ?? null,
+        watchedRanges: mergeRanges([...(previous?.watchedRanges ?? []), ...(session.ranges ?? [])]),
       };
       return { ...current, [session.videoId]: next };
     });
@@ -2142,7 +2147,7 @@ export default function App() {
         total: 4,
       });
       appendResearchHistory({
-        type: 'source_deleted' as any,
+        type: 'source_deleted',
         summary: `Deleted source "${source.label}" from the current project.`,
         meta: { sourceId, removedColumns: removedColumns.join(', '), removedRowCount: source.rowCount },
       });
@@ -2246,20 +2251,7 @@ export default function App() {
   const handleExport = (options: ExportOptions) => {
     const activeRows = options.includeFilteredRows ? rows : displayRows;
     const markdownOptions = options.markdownOptions || researchLogMarkdownOptions;
-    const markdown = buildResearchLogMarkdown({
-      projectName: state.fileName || 'Untitled project',
-      overview: state.projectOverview,
-      diary: state.projectNotes,
-      corpusProcessing: researchLogGeneratedSectionsWithComments.corpusProcessing,
-      views: researchLogGeneratedSectionsWithComments.views,
-      watchHistory: researchLogGeneratedSectionsWithComments.watchHistory,
-      researchActions: researchLogGeneratedSectionsWithComments.researchActions,
-      notesAppendix: researchLogGeneratedSectionsWithComments.notesAppendix,
-      dashboard: researchLogGeneratedSectionsWithComments.dashboard,
-      includeNotesAppendix: markdownOptions.includeNotesAppendix,
-      includeDashboardSection: markdownOptions.includeDashboardSection,
-      dashboardStale: isAnyDashboardSnapshotStale,
-    });
+    const markdown = buildResearchLogMarkdownNow(markdownOptions);
 
     if (options.format === 'markdown') {
       downloadBlob(new Blob([markdown], { type: 'text/markdown;charset=utf-8;' }), `${sanitizeFileName(state.fileName, 'research_log')}_research_log.md`);
@@ -2308,7 +2300,7 @@ export default function App() {
       projectOverview: state.projectOverview,
       projectNotes: state.projectNotes,
       researchLogSectionComments: state.researchLogSectionComments,
-      researchHistory: cleanedResearchHistory,
+      researchHistory,
       watchHistoryByVideoId,
       theme: state.theme,
       isRightPanelCollapsed: state.isRightPanelCollapsed,
@@ -2620,25 +2612,6 @@ export default function App() {
     }
     applyDashboardDrilldown({ filters, visibleColumns: Object.keys(filters) });
   }, [applyDashboardDrilldown, displaySchema, showToast]);
-
-  const handleInsertResearchDiaryDate = useCallback(() => {
-    const formatter = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-    const heading = `## ${formatter.format(new Date())}`;
-    setState((previous) => {
-      const current = previous.projectNotes || '';
-      const trimmed = current.trimEnd();
-      const nextNotes = trimmed.length === 0
-        ? `${heading}
-
-`
-        : `${trimmed}
-
-${heading}
-
-`;
-      return { ...previous, projectNotes: nextNotes };
-    });
-  }, []);
 
   const commandPaletteCommands = useMemo(() => {
     const commands = [
@@ -2994,9 +2967,9 @@ ${heading}
     appendResearchHistory({
       type: 'saved_view_created',
       summary: `Saved view "${trimmedName}" created.`,
-      meta: { viewId: newView.id, viewName: trimmedName },
+      meta: { viewId: newView.id, viewName: trimmedName, filterSummary: summarizeFilterModel(filterModel), videoCount: rows.length },
     });
-  }, [appendResearchHistory, filterModel, state.theme, viewScope, visibleColumns]);
+  }, [appendResearchHistory, filterModel, rows.length, state.theme, viewScope, visibleColumns]);
 
   const deleteView = useCallback((id: string) => {
     const deletedView = state.savedViews.find((view) => view.id === id);
@@ -3230,10 +3203,30 @@ ${heading}
         total: 2,
       });
       setDashboardSnapshots((previous) => ({ ...previous, [dashboardScope]: snapshot }));
+      appendResearchHistory({
+        type: 'dashboard_generated',
+        summary: `Generated the dashboard for the ${dashboardScope === 'full' ? 'whole corpus' : 'filtered videos'}.`,
+        meta: { scope: dashboardScope, scopeLabel: dashboardScope === 'full' ? `whole corpus (${scopedRows.length.toLocaleString()} videos)` : `filtered videos (${scopedRows.length.toLocaleString()})`, videoCount: scopedRows.length },
+      });
     } finally {
       updateLongTaskProgress(null);
     }
-  }, [createScopeDashboardSnapshot, dashboardScope, includedDisplayRows, rows, updateLongTaskProgress]);
+  }, [appendResearchHistory, createScopeDashboardSnapshot, dashboardScope, includedDisplayRows, rows, updateLongTaskProgress]);
+
+  const handleVernacularExclusionsChange = useCallback((next: string[]) => {
+    const previous = vernacularExclusions;
+    if (next.length === previous.length && next.every((term) => previous.includes(term))) return;
+    setVernacularExclusions(next);
+    const added = next.filter((term) => !previous.includes(term));
+    const removed = previous.filter((term) => !next.includes(term));
+    const parts = [added.length ? `Hid ${added.join(', ')}` : '', removed.length ? `showed ${removed.join(', ')} again` : ''].filter(Boolean).join('; ');
+    appendResearchHistory({
+      type: 'vernacular_terms_changed',
+      summary: `${parts.charAt(0).toUpperCase()}${parts.slice(1)} in the vernacular analysis`,
+      details: next.length ? `Hidden terms now: ${next.join(', ')}` : 'No terms hidden.',
+      meta: { hiddenTerms: next.join('\n'), previousTerms: previous.join('\n') },
+    });
+  }, [appendResearchHistory, vernacularExclusions]);
 
   const savedViewRows = useCallback((view: SavedView) => buildUnifiedFilterState({
     rows: includedDisplayRows,
@@ -3349,34 +3342,6 @@ ${heading}
     }
   }, [appendResearchHistory, createSavedViewDashboardSnapshot, createScopeDashboardSnapshot, includedDisplayRows, rows, state.savedViews, updateLongTaskProgress]);
 
-  const cleanedResearchHistory = useMemo(() => {
-    const events = researchHistory.filter((event) => !event.reverted);
-    const pairedDeletes = new Set<string>();
-    const pairedCreates = new Set<string>();
-    const createdByViewId = new Map<string, string>();
-
-    events.forEach((event) => {
-      const viewId = typeof event.meta?.viewId === 'string' ? event.meta.viewId : null;
-      if (!viewId) return;
-      if (event.type === 'saved_view_created') createdByViewId.set(viewId, event.id);
-      if (event.type === 'saved_view_deleted' && createdByViewId.has(viewId)) {
-        pairedDeletes.add(event.id);
-        pairedCreates.add(createdByViewId.get(viewId)!);
-      }
-    });
-
-    return events.filter((event) => !pairedDeletes.has(event.id) && !pairedCreates.has(event.id));
-  }, [researchHistory]);
-
-  const exclusionReasonCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    excludedVideoIds.forEach((videoId) => {
-      const reason = excludedVideoMetaById[videoId]?.reason?.trim() || 'unspecified';
-      counts.set(reason, (counts.get(reason) ?? 0) + 1);
-    });
-    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  }, [excludedVideoIds, excludedVideoMetaById]);
-
   const savedViewLiveRows = useMemo(() => {
     return Object.fromEntries(state.savedViews.map((view) => {
       const filtered = buildUnifiedFilterState({
@@ -3425,276 +3390,103 @@ ${heading}
     return items;
   }, [dashboardSnapshots.filtered, dashboardSnapshots.full, datasetVersion, filteredViewVersion, includedBaseRows.length, rows.length, savedViewDashboardSnapshots, savedViewLiveRows, savedViewSnapshotStaleById, state.savedViews]);
 
-  const corpusProcessingSectionText = useMemo(() => {
-    const importEvents = cleanedResearchHistory
-      .filter((event) => event.type === 'import_replace_completed' || event.type === 'import_merge_completed')
-      .slice(-8);
-    const mappingSummary = [
-      `Merge key: ${specialMappings.mergeKeyColumn || 'not configured'}`,
-      `Transcript mapping: ${specialMappings.transcriptColumn || 'unmapped'}`,
-      `Description mapping: ${specialMappings.descriptionColumn || 'unmapped'}`,
-      `Tag mapping: ${specialMappings.tagColumn || 'unmapped'}`,
-    ];
-    const durableColumnSummary = deletedColumns.length
-      ? `Durable deleted columns: ${deletedColumns.join(', ')}`
-      : 'Durable deleted columns: none';
-    const exclusionSummary = exclusionReasonCounts.length
-      ? exclusionReasonCounts.map(([reason, count]) => `- ${reason}: ${count}`).join('\n')
-      : 'No entries recorded';
-    return [
-      `Source file(s): ${state.fileName || 'No file loaded'}`,
-      `Imported at: ${sourceRows.length ? parseDateLabel(new Date().toISOString()) : 'No entries recorded'}`,
-      '',
-      `Import / merge milestones:`,
-      importEvents.length
-        ? importEvents.map((event) => `- ${formatDateDisplay(event.createdAt)} - ${event.summary}${event.details ? ` (${event.details})` : ''}`).join('\n')
-        : 'No entries recorded',
-      '',
-      `Special mappings in effect:`,
-      ...mappingSummary.map((line) => `- ${line}`),
-      `- ${durableColumnSummary}`,
-      '',
-      `Source visibility state:`,
-      `- Registered sources: ${sourceRegistry.orderedIds.length.toLocaleString()}`,
-      `- Hidden row sources: ${(sourceVisibility.hiddenSourceIds || []).length.toLocaleString()}`,
-      `- Visible row sources: ${(sourceRegistry.orderedIds.length - (sourceVisibility.hiddenSourceIds || []).length).toLocaleString()}`,
-      `- Hidden video-column sources: ${(sourceVisibility.hiddenColumnSourceIdsByScope?.videos || []).length.toLocaleString()}`,
-      `- Hidden channel-column sources: ${(sourceVisibility.hiddenColumnSourceIdsByScope?.channels || []).length.toLocaleString()}`,
-      '',
-      `Final corpus size:`,
-      `- Included rows: ${includedBaseRows.length.toLocaleString()}`,
-      `- Excluded rows: ${excludedBaseRows.length.toLocaleString()}`,
-      `- Column count: ${workingSchema.length.toLocaleString()}`,
-      `- Deeper reproducibility details are preserved in project zip export.`,
-      '',
-      `Inclusion / Exclusion`,
-      `- Included videos: ${includedBaseRows.length.toLocaleString()}`,
-      `- Explicitly excluded videos: ${excludedVideoIds.length.toLocaleString()}`,
-      `- Exclusion reason categories:`,
-      exclusionSummary,
-      `- Exclusions are reversible through include/restore actions in the app.`,
-      `- Filtered or hidden videos inside views are not equal to corpus exclusion.`,
-    ].join('\n');
-  }, [
-    cleanedResearchHistory,
-    deletedColumns,
-    excludedBaseRows.length,
-    excludedVideoIds.length,
-    exclusionReasonCounts,
-    includedBaseRows.length,
-    sourceRegistry.orderedIds.length,
-    sourceRows.length,
-    sourceVisibility.hiddenColumnSourceIdsByScope,
-    sourceVisibility.hiddenSourceIds,
-    specialMappings.descriptionColumn,
-    specialMappings.mergeKeyColumn,
-    specialMappings.tagColumn,
-    specialMappings.transcriptColumn,
-    state.fileName,
-    workingSchema.length,
-  ]);
-
-  const viewsSectionText = useMemo(() => {
-    if (!state.savedViews.length) return 'No entries recorded';
-    const lines: string[] = [
-      'Saved views document analytical lenses; they do not change corpus inclusion/exclusion.',
-      '',
-    ];
-    state.savedViews.forEach((view, index) => {
-      const snapshot = savedViewDashboardSnapshots[view.id];
-      const columnOrder = Array.isArray(view.columnState)
-        ? view.columnState.map((column: any) => column?.colId).filter(Boolean).join(', ')
-        : '';
-      const liveRows = savedViewLiveRows[view.id] || [];
-      lines.push(
-        `${index + 1}. ${view.name}`,
-        `   Created: ${formatDateDisplay(new Date(view.createdAt).toISOString())}`,
-        `   Filter summary: ${summarizeFilterModel(view.filterModel as ExplorerFilterModel)}`,
-        `   Visible columns/order: ${columnOrder || 'No column state recorded'}`,
-        `   Row count snapshot: ${(snapshot?.rowCount ?? liveRows.length).toLocaleString()}`,
-        `   Dashboard summary snapshot: ${snapshot ? (snapshot.template?.summaryText || summarizeDashboardSnapshot(snapshot)).replace(/\n/g, ' | ') : 'No snapshot calculated yet'}`,
-        '',
-      );
-    });
-    return lines.join('\n').trim();
-  }, [savedViewDashboardSnapshots, savedViewLiveRows, state.savedViews]);
-
-  const watchHistoryEntries = useMemo<WatchHistoryEntry[]>(() => (
-    (Object.values(watchHistoryByVideoId) as WatchHistoryEntry[]).sort((a, b) => Date.parse(b.lastWatchedAt) - Date.parse(a.lastWatchedAt))
-  ), [watchHistoryByVideoId]);
-
-  const watchHistorySectionText = useMemo(() => {
-    if (!watchHistoryEntries.length) return 'No entries recorded';
-    const totalWatchSeconds = watchHistoryEntries.reduce((sum, entry) => sum + entry.totalWatchSeconds, 0);
-    const averagePct = watchHistoryEntries.reduce((sum, entry) => {
-      if (!entry.durationSeconds || entry.durationSeconds <= 0) return sum;
-      return sum + Math.min(1, entry.totalWatchSeconds / entry.durationSeconds);
-    }, 0) / Math.max(1, watchHistoryEntries.length);
-    const lines: string[] = [
-      `Total watch time across corpus: ${formatDurationLabel(totalWatchSeconds)}`,
-      `Unique videos watched: ${watchHistoryEntries.length.toLocaleString()}`,
-      `Average percentage watched: ${(averagePct * 100).toFixed(1)}%`,
-      '',
-    ];
-    watchHistoryEntries.forEach((entry, index) => {
-      const pct = entry.durationSeconds && entry.durationSeconds > 0
-        ? Math.min(1, entry.totalWatchSeconds / entry.durationSeconds) * 100
-        : null;
-      const rewatchCount = Math.max(0, entry.qualifyingSessionCount - 1);
-      lines.push(
-        `${index + 1}. ${entry.title}`,
-        `   video id: ${entry.videoId}`,
-        `   first watched: ${formatDateDisplay(entry.firstWatchedAt)}`,
-        `   last watched: ${formatDateDisplay(entry.lastWatchedAt)}`,
-        `   total time watched: ${formatDurationLabel(entry.totalWatchSeconds)}`,
-        `   watch session count: ${entry.qualifyingSessionCount.toLocaleString()}`,
-        `   rewatch count: ${rewatchCount.toLocaleString()}`,
-        `   percentage watched: ${pct === null ? 'unknown' : `${pct.toFixed(1)}%`}`,
-        '',
-      );
-    });
-    return lines.join('\n').trim();
-  }, [watchHistoryEntries]);
-
-  const researchActionsSectionText = useMemo(() => {
-    const meaningful = cleanedResearchHistory.filter((event) => (
-      event.type !== 'videos_restored' || (event.affectedIds?.length ?? 0) > 0
-    ));
-    const tagUsage = buildTagUsageSummary(userTagsByVideoId);
-    if (!meaningful.length && !tagUsage.length) return 'No entries recorded';
-    const lines: string[] = [];
-    if (meaningful.length) {
-      lines.push('Timeline of meaningful research actions:');
-      meaningful.slice(-60).forEach((event) => {
-        lines.push(`- ${formatDateDisplay(event.createdAt)} - ${event.summary}${event.details ? ` (${event.details})` : ''}`);
-      });
-      lines.push('');
-    }
-    lines.push('Current tag usage summary:');
-    if (!tagUsage.length) {
-      lines.push('No entries recorded');
-    } else {
-      tagUsage.forEach(([tag, count]) => lines.push(`- ${tag}: applied to ${count.toLocaleString()} video(s)`));
-    }
-    return lines.join('\n');
-  }, [cleanedResearchHistory, userTagsByVideoId]);
-
-  const notesAppendixSectionText = useMemo(() => {
-    const rowByVideoId = new Map<string, any>();
+  // Research log: the timeline is built from researchHistory in the dialog; these feed its labels,
+  // the watch summary and the Markdown export.
+  const videoLabelById = useMemo(() => {
+    const map = new Map<string, { title: string; channel: string; url: string }>();
     sourceRows.forEach((row) => {
       const videoId = resolveVideoId(row);
-      if (videoId && !rowByVideoId.has(videoId)) rowByVideoId.set(videoId, row);
+      if (!videoId || map.has(videoId)) return;
+      map.set(videoId, { title: resolveVideoTitle(row) || 'Untitled video', channel: resolveChannelName(row) || 'Unknown channel', url: `https://www.youtube.com/watch?v=${videoId}` });
     });
-    const noteVideoIds = Array.from(new Set([
-      ...Object.keys(notesByVideoId),
-      ...Object.keys(state.annotations),
-      ...Object.keys(userTagsByVideoId),
-    ])).filter((videoId) => {
+    return map;
+  }, [sourceRows]);
+  const describeVideo = useCallback((videoId: string) => videoLabelById.get(videoId) ?? null, [videoLabelById]);
+
+  const researchLogWatch = useMemo(() => (Object.values(watchHistoryByVideoId) as WatchHistoryEntry[])
+    .sort((a, b) => Date.parse(b.lastWatchedAt) - Date.parse(a.lastWatchedAt))
+    .map((entry) => ({
+      videoId: entry.videoId,
+      title: videoLabelById.get(entry.videoId)?.title ?? entry.title,
+      channel: videoLabelById.get(entry.videoId)?.channel ?? '',
+      // Before ranges were recorded only the total is known; use it, capped at the video's length.
+      coveredSeconds: entry.watchedRanges ? coveredSeconds(entry.watchedRanges) : Math.min(entry.totalWatchSeconds, entry.durationSeconds || Infinity),
+      totalSeconds: entry.totalWatchSeconds,
+      durationSeconds: entry.durationSeconds ?? null,
+      lastWatchedAt: entry.lastWatchedAt,
+    })), [videoLabelById, watchHistoryByVideoId]);
+
+  const buildResearchLogMarkdownNow = useCallback((options: ResearchLogMarkdownOptions = researchLogMarkdownOptions) => {
+    const settings: string[] = [];
+    if (vernacularExclusions.length) settings.push(`Terms hidden from vernacular analysis: ${vernacularExclusions.join(', ')}.`);
+    const overrideCount = Object.keys(linkingState.overridesByDomain || {}).length;
+    if (overrideCount) settings.push(`Link buckets changed by hand for ${overrideCount.toLocaleString()} domain(s).`);
+    if (deletedColumns.length) settings.push(`Deleted columns: ${deletedColumns.join(', ')}.`);
+    const mappings = [
+      specialMappings.descriptionColumn && `description = ${specialMappings.descriptionColumn}`,
+      specialMappings.tagColumn && `tags = ${specialMappings.tagColumn}`,
+      specialMappings.transcriptColumn && `transcript = ${specialMappings.transcriptColumn}`,
+      specialMappings.mergeKeyColumn && `merge key = ${specialMappings.mergeKeyColumn}`,
+    ].filter(Boolean);
+    if (mappings.length) settings.push(`Field mappings: ${mappings.join(', ')}.`);
+    const noteVideoIds = Array.from(new Set([...Object.keys(notesByVideoId), ...Object.keys(state.annotations), ...Object.keys(userTagsByVideoId)]));
+    const videoNotes = noteVideoIds.flatMap((videoId) => {
+      const annotation = state.annotations[videoId];
       const notes = notesByVideoId[videoId] || '';
-      const annotation = state.annotations[videoId];
       const tags = userTagsByVideoId[videoId] || [];
-      return Boolean(notes.trim()) || Boolean(annotation?.quoteRefs?.length) || Boolean(annotation?.timestampRefs?.length) || tags.length > 0;
+      const quotes = (annotation?.quoteRefs || []).map((quote) => quote.text);
+      const timestamps = (annotation?.timestampRefs || []).map((item) => item.label);
+      if (!notes.trim() && !quotes.length && !timestamps.length && !tags.length) return [];
+      const label = videoLabelById.get(videoId) ?? { title: videoId, channel: '', url: `https://www.youtube.com/watch?v=${videoId}` };
+      return [{ ...label, tags, notes, quotes, timestamps }];
     });
-    if (!noteVideoIds.length) return 'No entries recorded';
-    const lines: string[] = [];
-    noteVideoIds.forEach((videoId, index) => {
-      const row = rowByVideoId.get(videoId);
-      const annotation = state.annotations[videoId];
-      const tags = userTagsByVideoId[videoId] || [];
-      const noteText = (notesByVideoId[videoId] || '').trim() || 'No notes';
-      const quotes = annotation?.quoteRefs || [];
-      const timestamps = annotation?.timestampRefs || [];
-      lines.push(
-        `${index + 1}. ${row ? resolveVideoTitle(row) : 'Untitled Video'}`,
-        `   video id: ${videoId}`,
-        `   user tags: ${tags.length ? tags.join(', ') : 'none'}`,
-        `   notes:`,
-        noteText.split('\n').map((line) => `     ${line}`).join('\n'),
-        `   quotes: ${quotes.length ? quotes.map((quote) => quote.text).join(' | ') : 'none'}`,
-        `   timestamps: ${timestamps.length ? timestamps.map((item) => item.label).join(', ') : 'none'}`,
-        '',
-      );
+    return buildResearchLogExport({
+      projectName: currentProjectName,
+      overview: state.projectOverview,
+      entries: netTimeline(researchHistory),
+      describeVideo,
+      corpus: {
+        included: includedBaseRows.length,
+        excluded: excludedBaseRows.length,
+        sources: sourceRegistry.orderedIds.filter((id) => sourceRegistry.byId[id]?.kind !== 'generated').map((id) => sourceRegistry.byId[id]?.label || id),
+        savedViews: state.savedViews.map((view) => ({ name: view.name, filterSummary: summarizeFilterModel(view.filterModel as ExplorerFilterModel), videoCount: savedViewLiveRows[view.id]?.length ?? 0 })),
+        settings,
+      },
+      dashboards: dashboardSnapshotIndex.filter((item) => item.calculatedAt).map((item) => ({ label: item.label, text: item.summary, stale: item.stale })),
+      videoNotes,
+      includeDashboards: options.includeDashboardSection,
+      includeVideoNotes: options.includeNotesAppendix,
     });
-    return lines.join('\n').trim();
-  }, [notesByVideoId, sourceRows, state.annotations, userTagsByVideoId]);
+  }, [currentProjectName, dashboardSnapshotIndex, deletedColumns, describeVideo, excludedBaseRows.length, includedBaseRows.length, linkingState.overridesByDomain, notesByVideoId, researchHistory, researchLogMarkdownOptions, savedViewLiveRows, sourceRegistry.byId, sourceRegistry.orderedIds, specialMappings.descriptionColumn, specialMappings.mergeKeyColumn, specialMappings.tagColumn, specialMappings.transcriptColumn, state.annotations, state.projectOverview, state.savedViews, userTagsByVideoId, vernacularExclusions, videoLabelById]);
 
-  const dashboardSectionText = useMemo(() => {
-    if (!dashboardSnapshotIndex.length && !linkingState.snapshot) return 'No entries recorded';
-    const snapshotText = dashboardSnapshotIndex.map((item) => [
-      `${item.label}`,
-      `- rows: ${item.rowCount.toLocaleString()}`,
-      `- calculated: ${item.calculatedAt ? formatDateDisplay(item.calculatedAt) : 'not calculated'}`,
-      `- status: ${item.stale ? 'stale' : 'fresh'}`,
-      `- calculations write-up:`,
-      item.summary.split('\n').map((line) => `  ${line}`).join('\n'),
-    ].join('\n')).join('\n\n');
-    const linkingBlock = linkingState.snapshot ? [
-      `Linking summary`,
-      `- source column: ${linkingState.snapshot.sourceColumn}`,
-      `- generated: ${formatDateDisplay(linkingState.snapshot.generatedAt)}`,
-      `- status: ${linkingState.stale ? 'stale' : 'fresh'}`,
-      `- linked rows: ${Number((linkingState.snapshot.model as any)?.summary?.linkedRows || 0).toLocaleString()}`,
-      `- total urls: ${Number((linkingState.snapshot.model as any)?.summary?.totalUrls || 0).toLocaleString()}`,
-      `- unique domains: ${Number((linkingState.snapshot.model as any)?.summary?.uniqueDomains || 0).toLocaleString()}`,
-      `- override count: ${Object.keys(linkingState.overridesByDomain || {}).length.toLocaleString()}`,
-      `- visible source fingerprint: ${linkingState.sourceVisibilityFingerprint || 'n/a'}`,
-    ].join('\n') : 'Linking summary\n- not generated yet';
-    const channelLinkingBlock = [
-      `Channel link aggregates`,
-      `- status: ${channelLinkingState.stale ? 'stale' : 'fresh'}`,
-      `- generated: ${channelLinkingState.snapshot?.generatedAt ? formatDateDisplay(channelLinkingState.snapshot.generatedAt) : 'not generated'}`,
-      `- channels covered: ${Object.keys(channelLinkingState.snapshot?.byChannelKey || {}).length.toLocaleString()}`,
-    ].join('\n');
-    return [snapshotText, linkingBlock, channelLinkingBlock].filter(Boolean).join('\n\n');
-  }, [channelLinkingState.snapshot, channelLinkingState.stale, dashboardSnapshotIndex, linkingState.overridesByDomain, linkingState.snapshot, linkingState.sourceVisibilityFingerprint, linkingState.stale]);
+  const handleAddResearchNote = useCallback((text: string) => {
+    if (!text.trim()) return;
+    appendResearchHistory({ type: 'note', summary: text.trim(), note: text.trim() });
+  }, [appendResearchHistory]);
+  const handleSetResearchNote = useCallback((eventId: string, text: string) => {
+    setResearchHistory((current) => current.map((event) => {
+      if (event.id !== eventId) return event;
+      if (event.type === 'note') return text.trim() ? { ...event, note: text.trim(), summary: text.trim(), editedAt: new Date().toISOString() } : event;
+      return { ...event, note: text.trim() || undefined, editedAt: new Date().toISOString() };
+    }));
+  }, [setResearchHistory]);
+  const handleDeleteResearchNote = useCallback((eventId: string) => {
+    setResearchHistory((current) => current.filter((event) => !(event.id === eventId && event.type === 'note')));
+  }, [setResearchHistory]);
 
-  const researchLogGeneratedSections = useMemo(() => ({
-    corpusProcessing: corpusProcessingSectionText,
-    views: viewsSectionText,
-    watchHistory: watchHistorySectionText,
-    researchActions: researchActionsSectionText,
-    notesAppendix: notesAppendixSectionText,
-    dashboard: dashboardSectionText,
-  }), [corpusProcessingSectionText, dashboardSectionText, notesAppendixSectionText, researchActionsSectionText, viewsSectionText, watchHistorySectionText]);
-
-  const researchLogGeneratedSectionsWithComments = useMemo(() => {
-    const applyComment = (key: ResearchLogCommentSectionId, baseText: string) => {
-      const comment = (state.researchLogSectionComments[key] || '').trim();
-      if (!comment) return baseText;
-      return `${baseText}\n\nResearcher comment:\n${comment}`;
-    };
-    return {
-      corpusProcessing: applyComment('corpusProcessing', researchLogGeneratedSections.corpusProcessing),
-      views: applyComment('views', researchLogGeneratedSections.views),
-      watchHistory: applyComment('watchHistory', researchLogGeneratedSections.watchHistory),
-      researchActions: applyComment('researchActions', researchLogGeneratedSections.researchActions),
-      notesAppendix: applyComment('notesAppendix', researchLogGeneratedSections.notesAppendix),
-      dashboard: applyComment('dashboard', researchLogGeneratedSections.dashboard),
-    };
-  }, [researchLogGeneratedSections, state.researchLogSectionComments]);
-
-  const researchLogMarkdown = useMemo(() => buildResearchLogMarkdown({
-    projectName: state.fileName || 'Untitled project',
-    overview: state.projectOverview,
-    diary: state.projectNotes,
-    corpusProcessing: researchLogGeneratedSectionsWithComments.corpusProcessing,
-    views: researchLogGeneratedSectionsWithComments.views,
-    watchHistory: researchLogGeneratedSectionsWithComments.watchHistory,
-    researchActions: researchLogGeneratedSectionsWithComments.researchActions,
-    notesAppendix: researchLogGeneratedSectionsWithComments.notesAppendix,
-    dashboard: researchLogGeneratedSectionsWithComments.dashboard,
-    includeNotesAppendix: researchLogMarkdownOptions.includeNotesAppendix,
-    includeDashboardSection: researchLogMarkdownOptions.includeDashboardSection,
-    dashboardStale: isAnyDashboardSnapshotStale,
-  }), [
-    isAnyDashboardSnapshotStale,
-    researchLogMarkdownOptions.includeDashboardSection,
-    researchLogMarkdownOptions.includeNotesAppendix,
-    researchLogGeneratedSectionsWithComments,
-    state.fileName,
-    state.projectNotes,
-    state.projectOverview,
-  ]);
+  // The old free-text diary and per-section comments become timeline notes, once.
+  useEffect(() => {
+    const diary = cleanupAutoSeededResearchDiary(state.projectNotes || '').trim();
+    const comments = Object.entries(state.researchLogSectionComments || {}).filter(([, value]) => String(value || '').trim());
+    if (!diary && !comments.length) return;
+    const now = new Date().toISOString();
+    const notes = [
+      ...diaryToNotes(diary, now),
+      ...comments.map(([section, value]) => ({ createdAt: now, note: `Comment on “${section}”: ${String(value).trim()}` })),
+    ];
+    setResearchHistory((current) => [...current, ...notes.map((entry) => ({ id: createHistoryId('history'), type: 'note' as const, createdAt: entry.createdAt, summary: entry.note, note: entry.note }))]);
+    setState((previous) => ({ ...previous, projectNotes: '', researchLogSectionComments: {} }));
+  }, [setResearchHistory, state.projectNotes, state.researchLogSectionComments]);
 
   const isBatchMode = selectedVideoCount > 1;
   return (
@@ -3885,7 +3677,6 @@ ${heading}
         onExport={handleExport}
         rowCount={viewScope === 'videos' ? displayedRowCount : rows.length}
         totalRowCount={displayRows.length}
-        hasProjectNotes={state.projectNotes.trim().length > 0}
         hasUserTags={hasUserTags}
         currentProjectName={currentProjectName}
         markdownOptions={researchLogMarkdownOptions}
@@ -3937,30 +3728,24 @@ ${heading}
           <ResearchLogDialog
             isOpen={isResearchLogOpen}
             onClose={() => setIsResearchLogOpen(false)}
-            overview={state.projectOverview}
-            onUpdateOverview={(value) => setState((previous) => ({ ...previous, projectOverview: value }))}
-            diary={state.projectNotes}
-            onUpdateDiary={(value) => setState((previous) => ({ ...previous, projectNotes: value }))}
-            generatedSections={researchLogGeneratedSectionsWithComments}
-            sectionComments={state.researchLogSectionComments}
-            onUpdateSectionComment={(sectionId, value) => setState((previous) => ({
-              ...previous,
-              researchLogSectionComments: { ...previous.researchLogSectionComments, [sectionId]: value },
-            }))}
-            markdownPreview={researchLogMarkdown}
-            markdownOptions={researchLogMarkdownOptions}
-            onMarkdownOptionsChange={setResearchLogMarkdownOptions}
-            dashboardSnapshotsStale={isAnyDashboardSnapshotStale}
-            onRecalculateSnapshots={recalculateAllDashboardSnapshots}
-            onOpenDatasetDashboard={() => {
-              setIsResearchLogOpen(false);
-              setIsDashboardOpen(true);
-            }}
-            onOpenKeyboardHelp={() => setIsKeyboardHelpOpen(true)}
-            onInsertDiaryDate={handleInsertResearchDiaryDate}
-            dashboardSnapshotIndex={dashboardSnapshotIndex}
             currentProjectName={currentProjectName}
             onRenameProject={handleRenameProject}
+            overview={state.projectOverview}
+            onUpdateOverview={(value) => setState((previous) => ({ ...previous, projectOverview: value }))}
+            events={researchHistory}
+            onAddNote={handleAddResearchNote}
+            onSetNote={handleSetResearchNote}
+            onDeleteNote={handleDeleteResearchNote}
+            describeVideo={describeVideo}
+            onOpenVideo={(videoId) => {
+              setIsResearchLogOpen(false);
+              handleDashboardNavigateToVideo(videoId);
+            }}
+            watch={researchLogWatch}
+            markdownOptions={researchLogMarkdownOptions}
+            onMarkdownOptionsChange={setResearchLogMarkdownOptions}
+            buildMarkdown={() => buildResearchLogMarkdownNow()}
+            dashboardsStale={isAnyDashboardSnapshotStale}
           />
         </Suspense>
       )}
@@ -3998,7 +3783,7 @@ ${heading}
             scopeLabel={dashboardScope === 'full' ? 'whole dataset' : 'filtered view'}
             getScopeRecords={getDashboardScopeRecords}
             vernacularExclusions={vernacularExclusions}
-            onVernacularExclusionsChange={setVernacularExclusions}
+            onVernacularExclusionsChange={handleVernacularExclusionsChange}
             linkingProps={{
               rows: currentLinkingRows,
               state: linkingState,

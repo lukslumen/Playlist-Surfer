@@ -1,335 +1,363 @@
-import { useState, useEffect, useRef } from 'react';
-import { X, Book, Keyboard, CalendarPlus } from 'lucide-react';
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { BarChart3, Book, ChevronDown, ChevronRight, Copy, Database, Download, Eye, MessageSquarePlus, Pencil, StickyNote, Trash2, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { ResearchLogCommentSectionId, ResearchLogMarkdownOptions, ResearchLogSectionId } from '../../types';
-import { formatDateDisplay } from '../../lib/data';
+import type { ResearchHistoryEvent, ResearchLogMarkdownOptions } from '../../types';
+import { groupByDay, netTimeline, rawTimeline, type TimelineCategory, type TimelineEntry } from '../../lib/researchLogTimeline';
+import type { VideoLabel } from '../../lib/researchLogExport';
+import { useToast } from '../toast/ToastProvider';
 
-export type ResearchLogGeneratedSectionId = Exclude<ResearchLogSectionId, 'overview' | 'diary' | 'exportPreview'>;
-
-export type ResearchLogSnapshotIndexItem = {
-  id: string;
-  label: string;
-  summary: string;
-  stale: boolean;
-  calculatedAt?: string;
-  rowCount: number;
-};
+export interface WatchSummaryItem {
+  videoId: string;
+  title: string;
+  channel: string;
+  /** Unique seconds played: each part of the video once. */
+  coveredSeconds: number;
+  /** All playback time, replays included. */
+  totalSeconds: number;
+  durationSeconds: number | null;
+  lastWatchedAt: string;
+}
 
 export interface ResearchLogDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  overview: string;
-  onUpdateOverview: (value: string) => void;
-  diary: string;
-  onUpdateDiary: (value: string) => void;
-  generatedSections: Record<ResearchLogGeneratedSectionId, string>;
-  sectionComments: Partial<Record<ResearchLogCommentSectionId, string>>;
-  onUpdateSectionComment: (sectionId: ResearchLogCommentSectionId, value: string) => void;
-  markdownPreview: string;
-  markdownOptions: ResearchLogMarkdownOptions;
-  onMarkdownOptionsChange: (next: ResearchLogMarkdownOptions) => void;
-  dashboardSnapshotsStale: boolean;
-  onRecalculateSnapshots: () => void;
-  onOpenDatasetDashboard: () => void;
-  onOpenKeyboardHelp: () => void;
-  onInsertDiaryDate: () => void;
-  dashboardSnapshotIndex: ResearchLogSnapshotIndexItem[];
   currentProjectName: string;
   onRenameProject: (value: string) => void;
+  overview: string;
+  onUpdateOverview: (value: string) => void;
+  events: ResearchHistoryEvent[];
+  onAddNote: (text: string) => void;
+  /** Edits a note entry's text, or the note attached to an action. Empty text removes an attached note. */
+  onSetNote: (eventId: string, text: string) => void;
+  onDeleteNote: (eventId: string) => void;
+  describeVideo: (videoId: string) => VideoLabel | null;
+  onOpenVideo: (videoId: string) => void;
+  watch: WatchSummaryItem[];
+  markdownOptions: ResearchLogMarkdownOptions;
+  onMarkdownOptionsChange: (next: ResearchLogMarkdownOptions) => void;
+  buildMarkdown: () => string;
+  dashboardsStale: boolean;
 }
 
-export const RESEARCH_LOG_SECTIONS: Array<{ id: ResearchLogSectionId; label: string; generated: boolean }> = [
-  { id: 'overview', label: 'Overview', generated: false },
-  { id: 'diary', label: 'Diary', generated: false },
-  { id: 'corpusProcessing', label: 'Corpus & Processing', generated: true },
-  { id: 'views', label: 'Saved Views', generated: true },
-  { id: 'watchHistory', label: 'Watch History', generated: true },
-  { id: 'researchActions', label: 'Research Actions', generated: true },
-  { id: 'notesAppendix', label: 'Notes Appendix', generated: true },
-  { id: 'dashboard', label: 'Dashboard', generated: true },
-  { id: 'exportPreview', label: 'Export Preview', generated: true },
+type Tab = 'project' | 'timeline' | 'export';
+type Filter = 'all' | TimelineCategory;
+
+const FILTERS: Array<{ value: Filter; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'note', label: 'My notes' },
+  { value: 'data', label: 'Data changes' },
+  { value: 'views', label: 'Views' },
+  { value: 'analysis', label: 'Analysis' },
 ];
 
-export function renderGeneratedSectionBody(value: string) {
-  const text = value.trim() || 'No entries recorded';
-  return (
-    <pre className="custom-scrollbar whitespace-pre-wrap break-words border border-[var(--border-color)] bg-[var(--bg-primary)] p-3 font-mono text-[12px] leading-6 text-[var(--text-main)]">
-      {text}
-    </pre>
-  );
+const CATEGORY_ICON: Record<TimelineCategory, typeof StickyNote> = { note: StickyNote, data: Database, views: Eye, analysis: BarChart3 };
+
+function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  if (hours) return `${hours} h ${minutes} min`;
+  if (minutes) return `${minutes} min${rest ? ` ${rest} s` : ''}`;
+  return `${rest} s`;
 }
 
-export function GeneratedSectionComment({
-  sectionId,
-  value,
-  onChange,
-}: {
-  sectionId: ResearchLogCommentSectionId;
-  value: string;
-  onChange: (value: string) => void;
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+
+function NoteEditor({ initial, placeholder, onSave, onCancel, submitLabel }: {
+  initial: string;
+  placeholder: string;
+  onSave: (text: string) => void;
+  onCancel?: () => void;
+  submitLabel: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(initial);
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = `${Math.min(240, node.scrollHeight)}px`;
+  }, [draft]);
+  const submit = () => {
+    if (!draft.trim() && !onCancel) return;
+    onSave(draft.trim());
+    if (!onCancel) setDraft('');
+  };
+  const handleKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      submit();
+    }
+    if (event.key === 'Escape' && onCancel) {
+      event.stopPropagation();
+      onCancel();
+    }
+  };
   return (
-    <div className="border border-[var(--border-color)] bg-[var(--bg-primary)]">
-      <button
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-        className="w-full border-b border-[var(--border-color)] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-[var(--text-main)] hover:bg-[var(--grid-hover)]"
-      >
-        {open ? 'Hide' : 'Add'} researcher comment
-      </button>
-      {open && (
-        <div className="p-3">
-          <textarea
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            placeholder={`Optional researcher comment for ${sectionId}`}
-            className="custom-scrollbar h-28 w-full resize-none border border-[var(--border-color)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-none"
-          />
-        </div>
-      )}
+    <div className="flex items-end gap-2">
+      <textarea
+        ref={ref}
+        rows={1}
+        autoFocus={Boolean(onCancel)}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={handleKey}
+        placeholder={placeholder}
+        className="min-h-[38px] flex-1 resize-none rounded-md border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-[13px] leading-5 text-[var(--text-main)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
+        aria-label={placeholder}
+      />
+      {onCancel ? <button type="button" onClick={onCancel} className="rlog-button is-quiet">Cancel</button> : null}
+      <button type="button" onClick={submit} disabled={!draft.trim() && !onCancel} className="rlog-button">{submitLabel}</button>
     </div>
   );
 }
 
-export function ResearchLogDialog({
-  isOpen,
-  onClose,
-  overview,
-  onUpdateOverview,
-  diary,
-  onUpdateDiary,
-  generatedSections,
-  sectionComments,
-  onUpdateSectionComment,
-  markdownPreview,
-  markdownOptions,
-  onMarkdownOptionsChange,
-  dashboardSnapshotsStale,
-  onRecalculateSnapshots,
-  onOpenDatasetDashboard,
-  onOpenKeyboardHelp,
-  onInsertDiaryDate,
-  dashboardSnapshotIndex,
-  currentProjectName,
-  onRenameProject,
-}: ResearchLogDialogProps) {
-  const [activeSection, setActiveSection] = useState<ResearchLogSectionId>('diary');
-  const [projectNameDraft, setProjectNameDraft] = useState(currentProjectName || 'ytde_project');
-  const diaryTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+interface TimelineItemProps {
+  entry: TimelineEntry;
+  describeVideo: (videoId: string) => VideoLabel | null;
+  onOpenVideo: (videoId: string) => void;
+  onSetNote: (eventId: string, text: string) => void;
+  onDeleteNote: (eventId: string) => void;
+  showSteps: boolean;
+}
 
+function TimelineItem({ entry, describeVideo, onOpenVideo, onSetNote, onDeleteNote, showSteps }: TimelineItemProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const Icon = CATEGORY_ICON[entry.category];
+  const isOwnNote = entry.category === 'note' && entry.title === entry.note;
+  const canExpand = entry.details.length > 0 || entry.videoIds.length > 0;
+
+  if (isOwnNote) {
+    return (
+      <li className="rlog-item is-note">
+        <span className="rlog-time">{timeOf(entry.createdAt)}</span>
+        <Icon size={14} className="rlog-icon" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <NoteEditor initial={entry.note ?? ''} placeholder="Edit note" submitLabel="Save" onCancel={() => setEditing(false)} onSave={(text) => { onSetNote(entry.id, text); setEditing(false); }} />
+          ) : (
+            <p className="whitespace-pre-wrap text-[13px] leading-5 text-[var(--text-main)]">{entry.note}</p>
+          )}
+        </div>
+        {!editing ? (
+          <div className="rlog-actions">
+            <button type="button" onClick={() => setEditing(true)} aria-label="Edit note" title="Edit"><Pencil size={13} /></button>
+            <button type="button" onClick={() => onDeleteNote(entry.id)} aria-label="Delete note" title="Delete"><Trash2 size={13} /></button>
+          </div>
+        ) : null}
+      </li>
+    );
+  }
+
+  return (
+    <li className="rlog-item">
+      <span className="rlog-time">{timeOf(entry.createdAt)}</span>
+      <Icon size={14} className="rlog-icon" aria-hidden="true" />
+      <div className="min-w-0 flex-1">
+        <button type="button" className="rlog-title" onClick={() => canExpand && setExpanded((value) => !value)} aria-expanded={canExpand ? expanded : undefined} disabled={!canExpand}>
+          {canExpand ? (expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : null}
+          <span>{entry.title}</span>
+          {!showSteps && entry.mergedSteps > 1 ? <span className="rlog-merged" title="Earlier steps on the same thing were folded into this entry">{entry.mergedSteps} steps</span> : null}
+        </button>
+        {expanded ? (
+          <div className="rlog-detail">
+            {entry.details.map((line) => <p key={line}>{line}</p>)}
+            {entry.videoIds.length ? (
+              <ul>
+                {entry.videoIds.slice(0, 50).map((videoId) => {
+                  const video = describeVideo(videoId);
+                  return (
+                    <li key={videoId}>
+                      <button type="button" onClick={() => onOpenVideo(videoId)} className="rlog-video">
+                        {video ? <>{video.title} <span className="text-[var(--text-muted)]">· {video.channel}</span></> : videoId}
+                      </button>
+                    </li>
+                  );
+                })}
+                {entry.videoIds.length > 50 ? <li className="text-[var(--text-muted)]">and {(entry.videoIds.length - 50).toLocaleString()} more</li> : null}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {editing ? (
+          <div className="mt-2">
+            <NoteEditor initial={entry.note ?? ''} placeholder="Why? Add a note to this step" submitLabel="Save" onCancel={() => setEditing(false)} onSave={(text) => { onSetNote(entry.id, text); setEditing(false); }} />
+          </div>
+        ) : entry.note ? (
+          <p className="rlog-attached" onDoubleClick={() => setEditing(true)}>↳ {entry.note}</p>
+        ) : null}
+      </div>
+      {!editing ? (
+        <div className="rlog-actions">
+          <button type="button" onClick={() => setEditing(true)} aria-label={entry.note ? 'Edit note on this step' : 'Add a note to this step'} title={entry.note ? 'Edit note' : 'Add a note'}>
+            {entry.note ? <Pencil size={13} /> : <MessageSquarePlus size={13} />}
+          </button>
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+export function ResearchLogDialog(props: ResearchLogDialogProps) {
+  const { isOpen, onClose, events, watch } = props;
+  const [tab, setTab] = useState<Tab>('timeline');
+  const [filter, setFilter] = useState<Filter>('all');
+  const [showSteps, setShowSteps] = useState(false);
+  const [projectNameDraft, setProjectNameDraft] = useState(props.currentProjectName);
+  const { showToast } = useToast();
 
   useEffect(() => {
-    if (isOpen) setActiveSection('diary');
-  }, [isOpen]);
+    setProjectNameDraft(props.currentProjectName);
+  }, [props.currentProjectName, isOpen]);
 
-  useEffect(() => {
-    setProjectNameDraft(currentProjectName || 'ytde_project');
-  }, [currentProjectName, isOpen]);
+  const entries = useMemo(() => (showSteps ? rawTimeline(events) : netTimeline(events)), [events, showSteps]);
+  const filtered = useMemo(() => (filter === 'all' ? entries : entries.filter((entry) => entry.category === filter)), [entries, filter]);
+  const groups = useMemo(() => groupByDay(filtered), [filtered]);
+  const hiddenSteps = useMemo(() => rawTimeline(events).length - netTimeline(events).length, [events]);
+  const markdown = useMemo(() => (tab === 'export' ? props.buildMarkdown() : ''), [props, tab]);
 
   if (!isOpen) return null;
 
-  const showGeneratedComment = (sectionId: ResearchLogSectionId): sectionId is ResearchLogCommentSectionId =>
-    sectionId !== 'overview' && sectionId !== 'diary';
+  const watchCovered = watch.reduce((total, item) => total + item.coveredSeconds, 0);
+  const watchTotal = watch.reduce((total, item) => total + item.totalSeconds, 0);
+
+  const download = () => {
+    const blob = new Blob([props.buildMarkdown()], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${(props.currentProjectName || 'research-log').replace(/[^\w.-]+/g, '_')}_research_log.md`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(props.buildMarkdown());
+      showToast({ kind: 'success', message: 'Research log copied' });
+    } catch {
+      showToast({ kind: 'error', message: "Couldn't copy to the clipboard" });
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm" onMouseDown={onClose}>
-      <div className="dialog-shell relative flex h-[88vh] w-full max-w-7xl flex-col overflow-hidden border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-[var(--border-color)] px-4 py-3">
-          <h3 className="flex items-center gap-2 font-bold text-[var(--text-main)]"><Book size={18} className="text-[var(--accent)]" /> Research Log</h3>
-          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-main)]"><X size={20} /></button>
+      <div className="rlog dialog-shell relative flex h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label="Research log">
+        <div className="flex items-center gap-4 border-b border-[var(--border-color)] px-5 py-3">
+          <h3 className="flex items-center gap-2 text-[15px] font-semibold text-[var(--text-main)]"><Book size={17} className="text-[var(--accent)]" /> Research log</h3>
+          <div className="rlog-tabs" role="tablist" aria-label="Research log sections">
+            {([['project', 'Project'], ['timeline', 'Timeline'], ['export', 'Export']] as const).map(([value, label]) => (
+              <button key={value} type="button" role="tab" aria-selected={tab === value} className={cn(tab === value && 'is-active')} onClick={() => setTab(value)}>{label}</button>
+            ))}
+          </div>
+          <button type="button" onClick={onClose} className="ml-auto text-[var(--text-muted)] hover:text-[var(--text-main)]" aria-label="Close research log"><X size={19} /></button>
         </div>
 
-        <div className="flex min-h-0 flex-1">
-          <aside className="custom-scrollbar w-64 flex-shrink-0 overflow-y-auto border-r border-[var(--border-color)] bg-[var(--bg-primary)] p-3">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Sections</div>
-            <div className="space-y-1">
-              {RESEARCH_LOG_SECTIONS.map((section) => (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => setActiveSection(section.id)}
-                  className={cn(
-                    'w-full border px-3 py-2 text-left text-xs transition-colors',
-                    activeSection === section.id
-                      ? 'border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] text-[var(--text-main)]'
-                      : 'border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-muted)] hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]',
-                  )}
-                >
-                  {section.label}
-                </button>
-              ))}
+        <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {tab === 'project' ? (
+            <div className="space-y-6">
+              <label className="block">
+                <span className="rlog-label">Project name</span>
+                <input
+                  value={projectNameDraft}
+                  onChange={(event) => setProjectNameDraft(event.target.value)}
+                  onBlur={() => projectNameDraft.trim() && projectNameDraft !== props.currentProjectName && props.onRenameProject(projectNameDraft.trim())}
+                  className="rlog-input"
+                />
+              </label>
+              <label className="block">
+                <span className="rlog-label">Research question and notes</span>
+                <textarea
+                  value={props.overview}
+                  onChange={(event) => props.onUpdateOverview(event.target.value)}
+                  placeholder={'What is the research question?\nWhy this corpus, and how was it collected?\nKey decisions and limitations.'}
+                  className="rlog-input min-h-[11rem] leading-6"
+                />
+              </label>
+              <section>
+                <div className="flex items-baseline justify-between">
+                  <span className="rlog-label">What you've watched</span>
+                  {watch.length ? (
+                    <span className="text-[12px] text-[var(--text-muted)]">{watch.length.toLocaleString()} {watch.length === 1 ? 'video' : 'videos'} · <span title="Each part of a video counts once, however often it was replayed">{formatDuration(watchCovered)} watched</span> · <span title="All playback, replays included">{formatDuration(watchTotal)} total playback</span></span>
+                  ) : null}
+                </div>
+                {watch.length ? (
+                  <ul className="rlog-watch">
+                    {watch.map((item) => {
+                      const share = item.durationSeconds ? Math.min(1, item.coveredSeconds / item.durationSeconds) : null;
+                      return (
+                        <li key={item.videoId}>
+                          <button type="button" onClick={() => props.onOpenVideo(item.videoId)} className="min-w-0 flex-1 text-left">
+                            <span className="block truncate text-[13px] text-[var(--text-main)]">{item.title}</span>
+                            <span className="block truncate text-[11.5px] text-[var(--text-muted)]">{item.channel}</span>
+                          </button>
+                          <span className="rlog-meter" title={share === null ? undefined : `${Math.round(share * 100)}% of the video`}>
+                            <span style={{ width: `${(share ?? 0) * 100}%` }} />
+                          </span>
+                          <span className="w-36 shrink-0 text-right text-[12px] text-[var(--text-muted)]">
+                            {formatDuration(item.coveredSeconds)}{item.durationSeconds ? ` of ${formatDuration(item.durationSeconds)}` : ''}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : (
+                  <p className="mt-2 text-[13px] text-[var(--text-muted)]">Nothing watched yet. Time you play videos in the detail panel shows up here; replayed parts count once.</p>
+                )}
+              </section>
             </div>
-          </aside>
+          ) : null}
 
-          <section className="custom-scrollbar min-h-0 flex-1 overflow-y-auto bg-[var(--bg-secondary)] p-4">
-            {activeSection === 'overview' && (
-              <div className="space-y-3">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_280px] md:items-end">
-                  <div>
-                    <div className="text-sm font-semibold text-[var(--text-main)]">Project Overview</div>
-                    <div className="mt-1 text-[11px] text-[var(--text-muted)]">The project name is used across the app except where the UI is explicitly referring to the original source CSV.</div>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Project name</label>
-                    <input
-                      type="text"
-                      value={projectNameDraft}
-                      onChange={(event) => setProjectNameDraft(event.target.value)}
-                      onBlur={() => onRenameProject(projectNameDraft.trim() || currentProjectName || 'ytde_project')}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          onRenameProject(projectNameDraft.trim() || currentProjectName || 'ytde_project');
-                        }
-                        if (event.key === 'Escape') {
-                          event.preventDefault();
-                          setProjectNameDraft(currentProjectName || 'ytde_project');
-                        }
-                      }}
-                      className="w-full border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-2 text-sm text-[var(--text-main)] focus:outline-none"
-                    />
-                  </div>
+          {tab === 'timeline' ? (
+            <div className="space-y-4">
+              <NoteEditor initial="" placeholder="Write a note… (Enter to add, Shift+Enter for a new line)" submitLabel="Add" onSave={props.onAddNote} />
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="rlog-filters" role="group" aria-label="Show">
+                  {FILTERS.map((option) => (
+                    <button key={option.value} type="button" aria-pressed={filter === option.value} className={cn(filter === option.value && 'is-active')} onClick={() => setFilter(option.value)}>{option.label}</button>
+                  ))}
                 </div>
-                <textarea
-                  value={overview}
-                  onChange={(event) => onUpdateOverview(event.target.value)}
-                  placeholder={'What is this project about?\nWhat corpus does it contain?\nWhat is the main research question?\nWhy was this material collected?\nWhat are key methodological choices or limitations?\nWhat does this log help document?'}
-                  className="custom-scrollbar h-[66vh] w-full resize-none border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] focus:outline-none"
-                />
+                <label className="ml-auto flex items-center gap-1.5 text-[12px] text-[var(--text-muted)]" title="Show every recorded step, including undone and superseded ones">
+                  <input type="checkbox" checked={showSteps} onChange={(event) => setShowSteps(event.target.checked)} />
+                  Show all steps{!showSteps && hiddenSteps > 0 ? ` (${hiddenSteps.toLocaleString()} folded away)` : ''}
+                </label>
               </div>
-            )}
+              {groups.length ? groups.map((group) => (
+                <section key={group.key}>
+                  <h4 className="rlog-day">{group.label}</h4>
+                  <ul className="rlog-list">
+                    {group.entries.map((entry) => (
+                      <Fragment key={entry.id}><TimelineItem entry={entry} describeVideo={props.describeVideo} onOpenVideo={props.onOpenVideo} onSetNote={props.onSetNote} onDeleteNote={props.onDeleteNote} showSteps={showSteps} /></Fragment>
+                    ))}
+                  </ul>
+                </section>
+              )) : (
+                <p className="py-10 text-center text-[13px] text-[var(--text-muted)]">{filter === 'all' ? 'Nothing recorded yet. Imports, exclusions, saved views and analyses appear here, next to your notes.' : 'Nothing of this kind yet.'}</p>
+              )}
+            </div>
+          ) : null}
 
-            {activeSection === 'diary' && (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-[var(--text-main)]">Research Diary</div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onInsertDiaryDate();
-                      window.requestAnimationFrame(() => {
-                        const textarea = diaryTextareaRef.current;
-                        if (!textarea) return;
-                        textarea.focus();
-                        const nextPosition = textarea.value.length;
-                        textarea.setSelectionRange(nextPosition, nextPosition);
-                      });
-                    }}
-                    className="inline-flex items-center gap-1 border border-[var(--border-color)] bg-[var(--bg-primary)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-main)]"
-                    title="Insert today's date heading"
-                  >
-                    <CalendarPlus size={14} /> Add date
-                  </button>
+          {tab === 'export' ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-1.5 text-[13px] text-[var(--text-main)]">
+                  <input type="checkbox" checked={props.markdownOptions.includeDashboardSection} onChange={(event) => props.onMarkdownOptionsChange({ ...props.markdownOptions, includeDashboardSection: event.target.checked })} />
+                  Dashboard write-ups{props.dashboardsStale ? <span className="text-[var(--text-muted)]"> (some out of date)</span> : null}
+                </label>
+                <label className="flex items-center gap-1.5 text-[13px] text-[var(--text-main)]">
+                  <input type="checkbox" checked={props.markdownOptions.includeNotesAppendix} onChange={(event) => props.onMarkdownOptionsChange({ ...props.markdownOptions, includeNotesAppendix: event.target.checked })} />
+                  Notes by video
+                </label>
+                <div className="ml-auto flex gap-2">
+                  <button type="button" className="rlog-button is-quiet" onClick={() => void copy()}><Copy size={13} /> Copy</button>
+                  <button type="button" className="rlog-button" onClick={download}><Download size={13} /> Download .md</button>
                 </div>
-                <textarea
-                  ref={diaryTextareaRef}
-                  value={diary}
-                  onChange={(event) => onUpdateDiary(event.target.value)}
-                  placeholder="Freeform observations, interpretations, anomalies, and decisions..."
-                  className="custom-scrollbar h-[66vh] w-full resize-none border border-[var(--border-color)] bg-[var(--bg-primary)] px-3 py-3 font-mono text-[13px] leading-6 text-[var(--text-main)] focus:outline-none"
-                />
               </div>
-            )}
-
-            {activeSection === 'dashboard' && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <button type="button" onClick={onRecalculateSnapshots} className={cn('border px-3 py-1.5 text-xs font-medium', dashboardSnapshotsStale ? 'border-[var(--accent)] text-[var(--text-main)]' : 'border-[var(--border-color)] text-[var(--text-muted)] hover:text-[var(--text-main)]')}>
-                    Recalculate snapshots
-                  </button>
-                  <button type="button" onClick={onOpenDatasetDashboard} className="border border-[var(--border-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text-main)]">
-                    Open Dataset Dashboard
-                  </button>
-                  {dashboardSnapshotsStale && <span className="text-xs font-medium text-[var(--accent)]">One or more snapshots are stale</span>}
-                </div>
-
-                <div className="space-y-2">
-                  {dashboardSnapshotIndex.length === 0 ? (
-                    <div className="border border-[var(--border-color)] bg-[var(--bg-primary)] p-3 text-sm text-[var(--text-muted)]">No entries recorded</div>
-                  ) : (
-                    dashboardSnapshotIndex.map((item) => (
-                      <div key={item.id} className="border border-[var(--border-color)] bg-[var(--bg-primary)] p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <div className="font-semibold text-[var(--text-main)]">{item.label}</div>
-                          <div className={cn('font-semibold', item.stale ? 'text-[var(--accent)]' : 'text-emerald-400')}>{item.stale ? 'Stale' : 'Fresh'}</div>
-                        </div>
-                        <div className="mt-1 text-[11px] text-[var(--text-muted)]">Rows: {item.rowCount.toLocaleString()} • Calculated: {item.calculatedAt ? formatDateDisplay(item.calculatedAt) : 'n/a'}</div>
-                        <div className="mt-2 whitespace-pre-wrap text-[11px] leading-5 text-[var(--text-main)]">{item.summary || 'No entries recorded'}</div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {renderGeneratedSectionBody(generatedSections.dashboard)}
-                <GeneratedSectionComment sectionId="dashboard" value={sectionComments.dashboard || ''} onChange={(value) => onUpdateSectionComment('dashboard', value)} />
-              </div>
-            )}
-
-            {activeSection === 'exportPreview' && (
-              <div className="space-y-4">
-                <div className="border border-[var(--border-color)] bg-[var(--bg-primary)] p-3">
-                  <div className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">Export preview options</div>
-                  <div className="flex flex-wrap gap-4">
-                    <label className="flex items-center gap-2 text-xs text-[var(--text-main)]">
-                      <input
-                        type="checkbox"
-                        checked={markdownOptions.includeNotesAppendix}
-                        onChange={(event) => onMarkdownOptionsChange({ ...markdownOptions, includeNotesAppendix: event.target.checked })}
-                      />
-                      Include Notes Appendix
-                    </label>
-                    <label className="flex items-center gap-2 text-xs text-[var(--text-main)]">
-                      <input
-                        type="checkbox"
-                        checked={markdownOptions.includeDashboardSection}
-                        onChange={(event) => onMarkdownOptionsChange({ ...markdownOptions, includeDashboardSection: event.target.checked })}
-                      />
-                      Include Dashboard section
-                    </label>
-                  </div>
-                </div>
-                {dashboardSnapshotsStale && (
-                  <div className="border border-[var(--accent)] bg-[color-mix(in_oklab,var(--accent)_8%,transparent)] p-3 text-xs text-[var(--text-main)]">
-                    Dashboard snapshots are stale for export. Recalculate snapshots before exporting if you need current dashboard values.
-                    <div className="mt-2">
-                      <button type="button" onClick={onRecalculateSnapshots} className="border border-[var(--accent)] px-3 py-1 text-xs font-medium hover:bg-[var(--grid-hover)]">
-                        Recalculate snapshots
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <pre className="custom-scrollbar max-h-[58vh] overflow-auto whitespace-pre-wrap border border-[var(--border-color)] bg-[var(--bg-primary)] p-3 font-mono text-[12px] leading-6 text-[var(--text-main)]">
-                  {markdownPreview}
-                </pre>
-                <GeneratedSectionComment sectionId="exportPreview" value={sectionComments.exportPreview || ''} onChange={(value) => onUpdateSectionComment('exportPreview', value)} />
-              </div>
-            )}
-
-            {activeSection !== 'overview' && activeSection !== 'diary' && activeSection !== 'dashboard' && activeSection !== 'exportPreview' && (
-              <div className="space-y-4">
-                {renderGeneratedSectionBody(generatedSections[activeSection])}
-                {showGeneratedComment(activeSection) && (
-                  <GeneratedSectionComment
-                    sectionId={activeSection}
-                    value={sectionComments[activeSection] || ''}
-                    onChange={(value) => onUpdateSectionComment(activeSection, value)}
-                  />
-                )}
-              </div>
-            )}
-          </section>
+              <pre className="rlog-preview" aria-label="Export preview">{markdown}</pre>
+            </div>
+          ) : null}
         </div>
-
-        <button
-          type="button"
-          onClick={onOpenKeyboardHelp}
-          className="absolute bottom-3 left-3 inline-flex h-8 w-8 items-center justify-center border border-[var(--border-color)] bg-[var(--bg-primary)] text-[var(--text-muted)] transition-colors hover:bg-[var(--grid-hover)] hover:text-[var(--text-main)]"
-          title="Keyboard shortcuts"
-          aria-label="Open keyboard shortcuts help"
-        >
-          <Keyboard size={14} />
-        </button>
       </div>
     </div>
   );

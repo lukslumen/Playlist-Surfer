@@ -1786,3 +1786,259 @@ button:focus-visible {
   text-decoration-color: var(--accent);
   outline: none;
 }
+
+/* Research log */
+.rlog-tabs,
+.rlog-filters {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.rlog-tabs button,
+.rlog-filters button {
+  padding: 4px 12px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.rlog-tabs button.is-active,
+.rlog-filters button.is-active {
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-secondary));
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.rlog-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rlog-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-main);
+  font-size: 13px;
+}
+
+.rlog-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.rlog-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-secondary));
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.rlog-button.is-quiet {
+  border-color: var(--border-color);
+  background: transparent;
+}
+
+.rlog-button:disabled {
+  opacity: 0.45;
+}
+
+.rlog-day {
+  position: sticky;
+  top: -16px;
+  z-index: 1;
+  margin: 0 0 4px;
+  padding: 6px 0;
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.rlog-list {
+  display: flex;
+  flex-direction: column;
+  border-left: 2px solid var(--border-color);
+  margin-left: 52px;
+}
+
+.rlog-item {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 7px 8px 7px 14px;
+  border-radius: 0 6px 6px 0;
+}
+
+.rlog-item:hover {
+  background: var(--grid-hover);
+}
+
+.rlog-item.is-note {
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+}
+
+.rlog-time {
+  position: absolute;
+  left: -54px;
+  width: 44px;
+  padding-top: 1px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.rlog-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--text-muted);
+}
+
+.rlog-item.is-note .rlog-icon {
+  color: var(--accent);
+}
+
+.rlog-title {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: flex-start;
+  gap: 4px;
+  color: var(--text-main);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+}
+
+.rlog-title:disabled {
+  cursor: default;
+}
+
+.rlog-title svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.rlog-merged {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bg-primary);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.rlog-detail {
+  margin: 4px 0 2px 17px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.rlog-detail ul {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rlog-video {
+  color: var(--text-main);
+  text-align: left;
+}
+
+.rlog-video:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.rlog-attached {
+  margin: 4px 0 0 17px;
+  color: var(--text-main);
+  font-size: 12.5px;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.rlog-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.rlog-item:hover .rlog-actions,
+.rlog-item:focus-within .rlog-actions {
+  opacity: 1;
+}
+
+.rlog-actions button {
+  padding: 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.rlog-actions button:hover {
+  background: var(--bg-primary);
+  color: var(--text-main);
+}
+
+.rlog-watch {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rlog-watch li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid color-mix(in oklab, var(--border-color) 60%, transparent);
+}
+
+.rlog-meter {
+  width: 90px;
+  height: 5px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--text-muted) 18%, transparent);
+}
+
+.rlog-meter span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.rlog-preview {
+  max-height: 60vh;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}

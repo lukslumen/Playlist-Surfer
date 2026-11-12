@@ -12,7 +12,6 @@ export interface ExportDialogProps {
   onExport: (options: ExportOptions) => void;
   rowCount: number;
   totalRowCount: number;
-  hasProjectNotes: boolean;
   hasUserTags: boolean;
   currentProjectName: string;
   markdownOptions: ResearchLogMarkdownOptions;
@@ -28,7 +27,6 @@ export function ExportDialog({
   onExport,
   rowCount,
   totalRowCount,
-  hasProjectNotes,
   hasUserTags,
   currentProjectName,
   markdownOptions,
@@ -105,9 +103,9 @@ export function ExportDialog({
           {format === 'markdown' && (
             <div className="space-y-4 border border-[var(--border-color)] bg-[var(--bg-primary)] p-5">
               <div>
-                <div className="text-sm font-semibold text-[var(--text-main)]">Research Log markdown</div>
+                <div className="text-sm font-semibold text-[var(--text-main)]">Research log (Markdown)</div>
                 <p className="mt-2 text-[12px] leading-relaxed text-[var(--text-muted)]">
-                  This download contains a human-readable Research Log document. {hasProjectNotes ? 'Your current diary text will be included.' : 'The file will still be created even if the diary is currently empty.'}
+                  Your research question and notes, the timeline (undone steps left out), and a summary of the final corpus. The Research log's Export tab shows a preview.
                 </p>
               </div>
               <div className="space-y-2 border-t border-[var(--border-color)] pt-4">
@@ -119,7 +117,7 @@ export function ExportDialog({
                     onChange={(event) => onMarkdownOptionsChange({ ...markdownOptions, includeNotesAppendix: event.target.checked })}
                     className="mt-0.5"
                   />
-                  <span>Include Notes Appendix</span>
+                  <span>Notes by video</span>
                 </label>
                 <label className="flex items-start gap-3 text-sm text-[var(--text-main)]">
                   <input
@@ -128,7 +126,7 @@ export function ExportDialog({
                     onChange={(event) => onMarkdownOptionsChange({ ...markdownOptions, includeDashboardSection: event.target.checked })}
                     className="mt-0.5"
                   />
-                  <span>Include Dashboard section</span>
+                  <span>Dashboard write-ups</span>
                 </label>
               </div>
               {dashboardSnapshotsStale && (

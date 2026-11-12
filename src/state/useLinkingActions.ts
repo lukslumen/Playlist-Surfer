@@ -267,7 +267,7 @@ export function useLinkingActions(args: {
     appendResearchHistory({
       type: (overrideArgs.revert
         ? 'linking_bucket_override_reverted'
-        : mutation.previous ? 'linking_bucket_override_changed' : 'linking_bucket_override_created') as any,
+        : mutation.previous ? 'linking_bucket_override_changed' : 'linking_bucket_override_created'),
       summary: overrideArgs.revert
         ? `Reverted linking override for ${domain}.`
         : mutation.previous ? `Changed linking bucket override for ${domain}.` : `Assigned linking buckets for ${domain}.`,
@@ -302,7 +302,7 @@ export function useLinkingActions(args: {
         return result;
       });
       appendResearchHistory({
-        type: 'linking_bucket_override_changed' as any,
+        type: 'linking_bucket_override_changed',
         summary: `Updated ecology buckets for ${cleaned.length} domains.`,
         ...(stageB && sourceColumn
           ? { details: `Selected source: ${sourceColumn}.`, meta: { domainCount: cleaned.length, sourceColumn } }

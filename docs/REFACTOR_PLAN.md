@@ -183,7 +183,19 @@ Totals: 68 unit tests and 17 e2e tests.
     - Fixed: channel creation dates parsed as timestamps showed as epoch milliseconds in the channel panel.
     - The tests use a synthetic fixture with the real export's header. The same e2e spec also passes on a real 446-video export (`YTDT_EXPORT=<file> YTDT_EXPORT_ROWS=<n>`).
 
-Tests: 373 unit and 40 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
+30. **The research log was rebuilt** as Project, Timeline and Export tabs (decisions in [RESEARCH_LOG_PLAN.md](RESEARCH_LOG_PLAN.md)).
+    - The timeline puts recorded steps and quick notes in one feed. Each step is one plain sentence that expands to its filter and the affected videos. A note can be attached to any step.
+    - The timeline shows the net effect:
+      - undone steps disappear;
+      - exclusions and restores cancel out per video;
+      - repeated settings collapse to their final state;
+      - hidden terms that end where they started leave nothing.
+      "Show all steps" shows the raw steps.
+    - Watch time counts each part of a video once, from the played ranges. It is shown next to the total playback. Fixed: a jump during playback dropped the part played before it.
+    - The Markdown export has the research question, the net timeline with notes, the final corpus, the dashboard write-ups and notes by video. The old diary and section comments become timeline notes once.
+    - New records: hidden-term changes, dashboard generation and a saved view's filter and size. The field mappings chosen at import are now part of the import entry. The research-event `as any` casts are gone.
+
+Tests: 395 unit and 41 e2e. Lint: 0 problems, with hook dependencies and unused code enforced as errors.
 
 Still open:
 - **Review findings not yet fixed:**
@@ -193,8 +205,7 @@ Still open:
   - **Backspace now also moves the selection outside text fields,** and with Shift or Alt held. Confirm this is wanted.
   - **Code quality:**
     - `hydrateProject` has an unstable identity;
-    - refs are written during render;
-    - research-event types still use `as any`.
+    - refs are written during render.
 - **Suspected bugs found while testing the dashboards:**
   - concentration shares can sum above 100% with fewer than 100 items;
   - bare-domain links are counted twice in the linking dashboard;

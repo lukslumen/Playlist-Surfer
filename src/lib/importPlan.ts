@@ -97,17 +97,12 @@ export async function planReplaceImport(args: {
   const schema = deriveSchemaFromRows(rows, args.incomingSchema);
   await args.progress('Rebuilding project state', 4);
 
+  // The field mappings chosen at import are part of the import, not a step of their own.
   const history: ImportHistoryEntry[] = [{
     type: 'import_replace_completed',
     summary: `Imported ${rows.length.toLocaleString()} rows by replacing the current project with ${args.fileName}.`,
+    ...(hasSpecialMappings(args.specialMappings) ? { details: `Fields used: ${describeSpecialMappings(args.specialMappings)}` } : {}),
   }];
-  if (hasSpecialMappings(args.specialMappings)) {
-    history.push({
-      type: 'special_mapping_updated',
-      summary: 'Special field mappings updated during import.',
-      details: describeSpecialMappings(args.specialMappings),
-    });
-  }
 
   return {
     project: {
@@ -313,15 +308,11 @@ export async function planMergeImport(args: {
   const history: ImportHistoryEntry[] = [{
     type: 'import_merge_completed',
     summary: `Merged ${args.incomingRows.length.toLocaleString()} incoming rows into ${current.rows.length.toLocaleString()} existing rows.`,
-    details: `Project key: ${options.joinColumn || 'n/a'}; incoming key: ${options.incomingJoinColumn || options.joinColumn || 'n/a'}; mode: ${options.mergeOptions?.mergeMode || 'add-update'}.`,
+    details: [
+      `Project key: ${options.joinColumn || 'n/a'}; incoming key: ${options.incomingJoinColumn || options.joinColumn || 'n/a'}; mode: ${options.mergeOptions?.mergeMode || 'add-update'}.`,
+      ...(hasSpecialMappings(mergeMappings) ? [`Fields used: ${describeSpecialMappings(mergeMappings)}`] : []),
+    ].join('\n'),
   }];
-  if (hasSpecialMappings(mergeMappings)) {
-    history.push({
-      type: 'special_mapping_updated',
-      summary: 'Special field mappings updated during merge.',
-      details: describeSpecialMappings(mergeMappings),
-    });
-  }
 
   const { rows: _rows, schema: _schema, fileName, annotations, ...kept } = current;
   return {

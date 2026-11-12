@@ -399,7 +399,10 @@ export interface WatchHistoryEntry {
   title: string;
   firstWatchedAt: string;
   lastWatchedAt: string;
+  /** All playback time, replays included. */
   totalWatchSeconds: number;
+  /** The parts of the video that were played, as merged [start, end] seconds; replays count once. */
+  watchedRanges?: Array<[number, number]>;
   qualifyingSessionCount: number;
   playStartCount: number;
   durationSeconds?: number | null;
@@ -427,7 +430,12 @@ export type ResearchHistoryEventType =
   | 'linking_bucket_override_created'
   | 'linking_bucket_override_changed'
   | 'linking_bucket_override_reverted'
-  | 'channel_linking_refreshed';
+  | 'channel_linking_refreshed'
+  | 'source_deleted'
+  /** A researcher's own diary entry, written in the research log. */
+  | 'note'
+  | 'vernacular_terms_changed'
+  | 'dashboard_generated';
 
 export interface ResearchHistoryEvent {
   id: string;
@@ -438,6 +446,10 @@ export interface ResearchHistoryEvent {
   affectedIds?: string[];
   meta?: Record<string, string | number | boolean | null | undefined>;
   reverted?: boolean;
+  /** The researcher's note on this action ("why I excluded these"), or the text of a 'note' entry. */
+  note?: string;
+  /** When a 'note' entry or an attached note was last edited. */
+  editedAt?: string;
 }
 
 export type ResearchLogSectionId =

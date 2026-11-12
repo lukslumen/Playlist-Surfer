@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { loadYouTubeApi } from '../../lib/youtubeApi';
+import { mergeRanges, playbackRange, type WatchRange } from '../../lib/watchCoverage';
+
+/** A playhead move this far from where steady playback would put it counts as a jump. */
+const SEEK_TOLERANCE_SECONDS = 1.5;
 
 export interface WatchSession {
   videoId: string;
@@ -9,6 +13,8 @@ export interface WatchSession {
   watchedSeconds: number;
   durationSeconds: number | null;
   qualifies: boolean;
+  /** The parts of the video played in this session, as [start, end] seconds. */
+  ranges: WatchRange[];
 }
 
 /**
@@ -49,6 +55,7 @@ export function useYouTubePlayer(args: {
     segmentStartedAtMs: number | null;
     segmentStartedPlayerSeconds: number | null;
     durationSeconds: number | null;
+    ranges: WatchRange[];
   }>({
     videoId: null,
     title: '',
@@ -57,21 +64,57 @@ export function useYouTubePlayer(args: {
     segmentStartedAtMs: null,
     segmentStartedPlayerSeconds: null,
     durationSeconds: null,
+    ranges: [],
   });
+
+  // Where the playhead was at the last check while playing, to notice jumps (seeks).
+  const lastSeenRef = useRef<{ playerSeconds: number; atMs: number } | null>(null);
 
   const closeActiveWatchSegment = useCallback((player?: any) => {
     const session = watchSessionRef.current;
     if (session.segmentStartedAtMs === null) return;
     const nowMs = Date.now();
-    const currentPlayerSeconds = Number(player?.getCurrentTime?.() ?? Number.NaN);
+    let currentPlayerSeconds = Number(player?.getCurrentTime?.() ?? Number.NaN);
+    // After a jump the playhead is already somewhere else: end the segment where playback was.
+    const seen = lastSeenRef.current;
+    if (seen && Number.isFinite(currentPlayerSeconds)) {
+      const expected = seen.playerSeconds + (nowMs - seen.atMs) / 1000;
+      if (Math.abs(currentPlayerSeconds - expected) > SEEK_TOLERANCE_SECONDS) currentPlayerSeconds = expected;
+    }
+    lastSeenRef.current = null;
     const hasPlayerDelta = Number.isFinite(currentPlayerSeconds) && session.segmentStartedPlayerSeconds !== null;
     const delta = hasPlayerDelta
       ? Math.max(0, currentPlayerSeconds - Number(session.segmentStartedPlayerSeconds))
       : Math.max(0, (nowMs - session.segmentStartedAtMs) / 1000);
     session.accumulatedSeconds += delta;
+    if (hasPlayerDelta) {
+      const range = playbackRange(Number(session.segmentStartedPlayerSeconds), currentPlayerSeconds, (nowMs - session.segmentStartedAtMs) / 1000);
+      if (range) session.ranges.push(range);
+    }
     session.segmentStartedAtMs = null;
     session.segmentStartedPlayerSeconds = null;
   }, []);
+
+  // A jump while playing doesn't always change the player state, so check the playhead as it plays
+  // and split the segment at a jump: each stretch actually played is then counted on its own.
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const session = watchSessionRef.current;
+      const player = playerRef.current;
+      if (session.segmentStartedAtMs === null || !player?.getCurrentTime) return;
+      const nowMs = Date.now();
+      const current = Number(player.getCurrentTime());
+      if (!Number.isFinite(current)) return;
+      const seen = lastSeenRef.current;
+      if (seen && Math.abs(current - (seen.playerSeconds + (nowMs - seen.atMs) / 1000)) > SEEK_TOLERANCE_SECONDS) {
+        closeActiveWatchSegment(player);
+        session.segmentStartedAtMs = nowMs;
+        session.segmentStartedPlayerSeconds = current;
+      }
+      lastSeenRef.current = { playerSeconds: current, atMs: nowMs };
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, [closeActiveWatchSegment]);
 
   const flushWatchSession = useCallback((player?: any) => {
     const session = watchSessionRef.current;
@@ -85,6 +128,7 @@ export function useYouTubePlayer(args: {
         segmentStartedAtMs: null,
         segmentStartedPlayerSeconds: null,
         durationSeconds: null,
+        ranges: [],
       };
       return;
     }
@@ -103,6 +147,7 @@ export function useYouTubePlayer(args: {
       watchedSeconds,
       durationSeconds,
       qualifies,
+      ranges: mergeRanges(session.ranges),
     });
 
     watchSessionRef.current = {
@@ -113,6 +158,7 @@ export function useYouTubePlayer(args: {
       segmentStartedAtMs: null,
       segmentStartedPlayerSeconds: null,
       durationSeconds: null,
+      ranges: [],
     };
   }, [closeActiveWatchSegment, onWatchSession]);
 
@@ -184,11 +230,13 @@ export function useYouTubePlayer(args: {
                 session.title = videoTitle;
                 session.startedAtMs = Date.now();
                 session.accumulatedSeconds = 0;
+                session.ranges = [];
               }
               if (session.segmentStartedAtMs === null) {
                 session.segmentStartedAtMs = Date.now();
                 const playerSeconds = Number(event.target?.getCurrentTime?.() ?? Number.NaN);
                 session.segmentStartedPlayerSeconds = Number.isFinite(playerSeconds) ? playerSeconds : null;
+                lastSeenRef.current = Number.isFinite(playerSeconds) ? { playerSeconds, atMs: Date.now() } : null;
               }
               window.setTimeout(() => playerFrameRef.current?.focus({ preventScroll: true }), 0);
             } else {
